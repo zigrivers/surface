@@ -17,23 +17,30 @@
 ## Entities & value objects
 
 ```typescript
-// Value object — resolved configuration (.surface/config.yml), merged by precedence:
+// Resolved configuration (.surface/config.yml), merged by precedence:
 // CLI flags > env > project config > user config > defaults (cli-architecture KB).
+//
+// SurfaceConfig is a COMPOSITION of per-context config slices, each OWNED by the context that
+// defines its types. Project State stores the serialized whole and exposes each slice as a
+// typed read model through an anticorruption boundary — it does not own these types, so
+// contexts never couple to each other through a shared config struct (review: Codex P1).
+interface CaptureConfig { readonly redactionRules: RedactionRule[]; readonly viewports: Viewport[]; readonly allowlist: string[]; } // owned by Capture
+interface EvaluationConfig { readonly preset: Preset; readonly depth: Depth; readonly stack: ("react"|"next"|"vue"|"svelte"|"agnostic")[]; readonly appType?: AppType; } // owned by Evaluation
+interface FindingsPolicy { readonly confidenceCutoffs: { assert: number; question: number }; readonly severityCutoffs: Record<SeverityBand, number>; } // owned by Findings (FR-RULE-1,4)
+interface ReportingConfig { readonly integrations: ExportTarget[]; readonly gatePolicy: GatePolicy; } // owned by Reporting
+
 interface SurfaceConfig {
-  readonly preset: Preset;
-  readonly depth: Depth;
-  readonly stack: ("react" | "next" | "vue" | "svelte" | "agnostic")[];
-  readonly appType?: AppType;           // hint; discovery may override (US-010)
-  readonly integrations: ExportTarget[];
-  readonly redactionRules: RedactionRule[];
-  readonly gatePolicy: GatePolicy;
-  readonly confidenceCutoffs: { assert: number; question: number }; // FR-RULE-1 (tunable)
+  readonly capture: CaptureConfig;
+  readonly evaluation: EvaluationConfig;
+  readonly findings: FindingsPolicy;
+  readonly reporting: ReportingConfig;
 }
 
 // Value object — the registry mapping identity keys to their tracked findings (FR-LOOP-2).
 interface IdentityRegistry { readonly entries: Record<string /*identityKey*/, AuditRunId /*lastSeen*/>; }
 
-// Entity — an appended, immutable decision record (FR-IF-5 `decisions` log).
+// Value object — an appended, immutable decision record (FR-IF-5 `decisions` log). Has no
+// identity or lifecycle of its own (consistent with RunRecord; review: my P2 classification fix).
 interface DecisionLogEntry {
   readonly at: Timestamp;
   readonly kind: "config-change" | "gate-policy" | "overlay-selected" | "waiver" | "verdict";
@@ -65,6 +72,13 @@ identity registry are one logical transaction at the end of a run; splitting the
 aggregates would risk a half-written state (the exact failure US-041 forbids). `SurfaceConfig`
 is a value object resolved at load time (its file `config.yml` is user-authored, not a mutable
 aggregate). `DecisionLogEntry`/`RunRecord` are internal — appended, never mutated in place.
+
+> **Bounded write size (review: my P2):** because the whole aggregate is rewritten atomically
+> under one lock on every run, an unbounded `runHistory` would make each write grow without
+> limit — the exact `state.json` bloat that degraded the tooling building surface. `runHistory`
+> is therefore **capped/rotated** (keep the last N `RunRecord`s; older entries roll to an
+> append-only `.surface/history.log` outside the locked aggregate). This keeps per-run write
+> size bounded while preserving full history for stickiness metrics (SC-2).
 
 ## Invariants (runtime-checkable)
 

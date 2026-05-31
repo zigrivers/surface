@@ -23,6 +23,28 @@ type EvaluationMethod = "measured" | "judged";
 // Value object — what kind of issue this is (stable input to FindingIdentity, FR-RULE-5).
 type IssueType = string; // e.g. "contrast-insufficient", "focus-order-broken", "empty-state-missing"
 
+// Value object — canonical severity band (FR-RULE-4). Derived from Dimensions.severity via
+// SurfaceConfig thresholds; the SAME term appears in findings.json, reports, and the CI gate.
+// This is what GatePolicy evaluates — the 0..1 `severity` scalar is never gated directly.
+type SeverityBand = "P0" | "P1" | "P2" | "P3";
+
+// Value object — a lens's pre-scored output, BEFORE the Findings context assigns identity,
+// derives the band, and scores it. Transient; carries everything needed to build a Finding
+// (it is the published-language payload of FindingDetected — Findings never reaches back into
+// Evaluation internals). Reconciliation (FR-SCORE-5) operates over FindingDrafts.
+interface FindingDraft {
+  readonly draftId: string;             // run-scoped, transient
+  readonly lens: LensId;
+  readonly issueType: IssueType;
+  readonly method: EvaluationMethod;
+  readonly title: string;
+  readonly rationale: string;
+  readonly citedHeuristics: KnowledgeEntryId[];
+  readonly evidence: Evidence[];
+  readonly rawDimensions: Partial<Dimensions>; // model/tool-provided; finalized at scoring
+  readonly location: Location;
+}
+
 // Value object — proof. A finding is only as trustworthy as its evidence.
 // Discriminated so a "measured" finding can be required to carry a tool-result variant.
 type Evidence =
@@ -60,17 +82,23 @@ interface SuggestedPatch {
   readonly change: string;              // the concrete edit
 }
 
-// AGGREGATE ROOT — one evaluated issue.
+// IMMUTABLE OCCURRENCE — one evaluated issue produced by one run. A Finding is created once
+// (at scoring) and never mutated; its `id` is run-scoped, used only for reference within that
+// run's Backlog and Report. It is NOT a lifecycle aggregate — the cross-run lifecycle
+// (status transitions, baselines, waivers) belongs to TrackedFinding (see closed-loop.md).
+// Treating Finding as immutable keeps the two contexts from owning the same lifecycle twice
+// (review: Codex P1 — Entity-vs-VO / aggregate redundancy).
 interface Finding {
-  readonly id: FindingId;               // identity within a run
+  readonly id: FindingId;               // run-scoped reference id; never reused
   readonly lens: LensId;
   readonly issueType: IssueType;
-  readonly method: EvaluationMethod;    // MUST be set explicitly (FR-LENS-5)
+  readonly method: EvaluationMethod;    // MUST be set explicitly (FR-LENS-5); SOLE source of the measured/judged label
   readonly title: string;
   readonly rationale: string;           // plain-language (FR-OUT-3, FR-MODE-1)
   readonly citedHeuristics: KnowledgeEntryId[];
   readonly evidence: Evidence[];        // ≥1; constrained by method (see invariants)
   readonly dimensions: Dimensions;
+  readonly severityBand: SeverityBand;  // derived from dimensions.severity (FR-RULE-4)
   readonly location: Location;
   readonly confidenceBand: ConfidenceBand;
   readonly gatedForHuman: boolean;      // FR-RULE-2; never auto-executed when true
@@ -95,22 +123,35 @@ interface Backlog {
 
 ## Aggregate boundaries
 
-- **`Finding`** is its own aggregate (its invariants involve only itself), referenced
-  elsewhere by `FindingId`. It is small on purpose: scoring and gating are pure functions of
-  the finding's own fields, so locking is trivial and many findings score in parallel.
-- **`Backlog`** is a separate aggregate whose root enforces ordering/diversity invariants over
+- **`Finding`** is an **immutable occurrence**, not a lifecycle aggregate. It is validated and
+  created once at scoring (its invariants are pure functions of its own fields) and never
+  mutated thereafter; many findings score in parallel with no locking. Cross-run lifecycle is
+  owned by `TrackedFinding` (closed-loop.md) — Findings does not also own a status lifecycle,
+  which avoids two contexts owning the same lifecycle (review: Codex P1).
+- **`Backlog`** is the aggregate whose root enforces ordering/diversity invariants over
   `BacklogEntry`s (internal entities). It references `Finding`s by ID — it does not own them.
-  A `Backlog` and its findings have independent lifecycles: findings exist the moment a lens
+  A `Backlog` and its findings have independent lifecycles: findings exist the moment scoring
   emits them; the backlog is a derived synthesis (FR-PIPE-13) recomputable from the finding set.
+
+## Domain services
+
+- **`ReconciliationService` (FR-SCORE-5, depth 4–5):** stateless. Takes the set of
+  `FindingDraft`s that multiple models produced for the *same* underlying issue (matched by a
+  candidate `FindingIdentity`) and produces one reconciled `Finding` — confidence adjusted by
+  inter-model agreement, evidence merged, and divergence surfaced as a question (FR-RULE-1)
+  rather than silently picked. Makes multi-model logic a first-class domain concept
+  (review: Gemini P2), not an implementation detail buried in a lens.
+- **`scoreFinding(draft, config): Finding`:** pure — derives `dimensions`, `severityBand`,
+  `confidenceBand`, and `gatedForHuman` from a `FindingDraft` and the active `SurfaceConfig`.
 
 ## Invariants (runtime-checkable) — the project-critical ones
 
 | # | Invariant | Expressed as | On violation |
 |---|---|---|---|
-| **FND-I1** | a `measured` finding carries ≥1 `tool-result` evidence | `m==="measured" ⟹ evidence.some(e=>e.kind==="tool-result")` | reject — lint/review fails the build (coding-standards, vision #2) |
-| **FND-I2** | a `judged` finding is never emitted as measured | `m==="judged" ⟹ !evidence.some(e=>e.kind==="tool-result" && presentedAsMeasured)` | reject (zero-tolerance, NFR-TRUST-1) |
+| **FND-I1** | a `measured` finding carries ≥1 `tool-result` evidence | `method==="measured" ⟹ evidence.some(e=>e.kind==="tool-result")` | reject — lint/review fails the build (coding-standards, vision #2) |
+| **FND-I2** | `method` is the **sole** source of the measured/judged label; the rendered label is derived from `method`, never from a separate flag | `report.methodLabel === finding.method` (asserted in Reporting, RPT-I9) | reject — a judged finding can never be labeled measured (zero-tolerance, NFR-TRUST-1) |
 | **FND-I3** | a `suggestedPatch` exists only on measured findings | `suggestedPatch!==undefined ⟹ method==="measured"` | reject — judged findings stay proposed/gated (FR-SCORE-7) |
-| **FND-I4** | `confidenceBand` is derived from `dimensions.confidence` per the band cutoffs | `band === bandFor(confidence)` | recompute; band cannot be set independently (FR-RULE-1) |
+| **FND-I4** | `confidenceBand` is derived from `dimensions.confidence`, and `severityBand` from `dimensions.severity`, per the configured cutoffs | `confidenceBand === bandFor(confidence) && severityBand === severityBandFor(severity)` | recompute; bands cannot be set independently (FR-RULE-1, FR-RULE-4) |
 | **FND-I5** | `gatedForHuman === true` when the change alters meaning/brand/copy/critical-flow OR is a judged finding above the severity threshold | `gatedForHuman === gateRule(finding)` | recompute; a gated finding is **never auto-executed** (FR-RULE-2, FR-LOOP-3) |
 | **FND-I6** | every finding has ≥1 `Evidence` | `evidence.length >= 1` | reject — no evidence-free findings (FR-OUT-3) |
 | **FND-I7** | a low-confidence (`suppress-unless-deep`) finding is surfaced only at `depth>=4` | rendering rule | hide below depth 4 (FR-RULE-1) |

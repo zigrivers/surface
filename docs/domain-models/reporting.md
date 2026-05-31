@@ -16,7 +16,10 @@
 ## Entities & value objects
 
 ```typescript
-type ReportFormat = "findings-md" | "findings-json" | "backlog" | "agent-plan" | "validation-report" | "sarif";
+type ReportFormat =
+  | "findings-md" | "findings-json" | "backlog" | "agent-plan" | "validation-report" | "sarif"
+  | "alternatives";  // FR-IF-4 / US-015 — bounded improvement proposals for an existing view,
+                      // rendered as an artifact (never a blank-canvas design)
 
 // Value object — a rendered artifact written under .surface/ (FR-OUT-1).
 interface Report {
@@ -32,8 +35,8 @@ type ExportTarget = "github" | "linear" | "jira";
 
 // Value object — the tunable CI gate policy (FR-RULE-4, config-as-code).
 interface GatePolicy {
-  readonly failOn: "new-measured-p0-p1";  // default (FR-RULE-4)
-  readonly thresholds: Record<string, number>; // tunable per team (P3)
+  readonly failOnNewMeasuredAtOrAbove: SeverityBand; // default "P1" → fails on new measured P0/P1
+  readonly thresholds: Record<string, number>;       // tunable per team (P3)
   readonly neverFailOn: ("judged" | "gatedForHuman")[]; // always includes both
 }
 
@@ -70,6 +73,8 @@ is strictly downstream/read-only over the Findings and Closed Loop aggregates.
 | RPT-I6 | on export failure, `unsynced` is written locally and exit code is non-zero | on export | silent loss = bug (US-060) |
 | RPT-I7 | default CLI output shows top finding + count; full backlog behind `--all`/`--verbose` | on render | progressive disclosure (US-021/US-030, R-3) |
 | RPT-I8 | SARIF output validates against SARIF v2.1.0 schema | on `--export sarif` | reject invalid SARIF (US-032) |
+| RPT-I9 | a rendered finding's method label is derived **only** from `finding.method` | on render | `report.methodLabel === finding.method` — a judged finding is never labeled measured (FND-I2, NFR-TRUST-1) |
+| RPT-I10 | the gate evaluates `finding.severityBand`, never the raw `dimensions.severity` scalar | on gate eval | use the canonical band (FR-RULE-4) |
 
 ## Domain events
 

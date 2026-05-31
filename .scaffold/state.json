@@ -241,14 +241,19 @@
       "artifacts_verified": true
     },
     "review-domain-modeling": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-domain-modeling.md",
         "docs/reviews/domain-modeling/review-summary.md",
         "docs/reviews/domain-modeling/codex-review.json",
         "docs/reviews/domain-modeling/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:22:08.846Z",
+      "completed_at": "2026-05-31T14:22:08.846Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "platform-parity-review": {
       "status": "pending",
@@ -587,9 +592,9 @@
   "next_eligible": [
     "design-system",
     "git-workflow",
-    "review-domain-modeling"
+    "adrs"
   ],
   "extra-steps": [],
-  "save_counter": 36,
+  "save_counter": 38,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }

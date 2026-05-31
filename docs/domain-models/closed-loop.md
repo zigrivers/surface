@@ -25,14 +25,19 @@ interface FindingIdentity {
 }
 // identityKey = hash(lens + ":" + issueType + ":" + locationAnchor) — immutable, never reused.
 
-// Value object — lifecycle status of a tracked finding (FR-RULE-3, FR-RULE-6).
+// Value object — DETECTION status of a tracked finding (FR-RULE-3). This reflects only what
+// re-audit observed; it is independent of gating/waivers.
 type FindingStatus =
   | "new"             // first seen this run
   | "still-failing"   // detected again, validation check still fails
   | "resolved"        // no longer detected AND its validation check passes
   | "regressed"       // was resolved, now detected again
-  | "identity-broken" // prior anchor can't be matched (DOM drift) — NEVER silently resolved
-  | "ignored";        // accepted debt via an active Waiver (FR-RULE-6)
+  | "identity-broken"; // prior anchor can't be matched (DOM drift) — NEVER silently resolved
+
+// Value object — GATE disposition (FR-RULE-6). Orthogonal to detection status, so an expired
+// waiver deterministically restores the underlying detection status without hidden state
+// (review: Codex P1 — `ignored` must not overwrite the detection status).
+type GateDisposition = "active" | "ignored-by-waiver";
 
 // Value object — the runnable check that confirms a fix landed (FR-LOOP-1).
 interface ValidationCheck {
@@ -44,8 +49,9 @@ interface ValidationCheck {
 interface TrackedFinding {
   readonly identityKey: string;         // identity; stable across runs (FR-LOOP-2)
   readonly identity: FindingIdentity;
-  readonly currentFindingId?: FindingId; // the Finding instance in the latest run (if detected)
-  readonly status: FindingStatus;
+  readonly currentFindingId?: FindingId; // the Finding occurrence in the latest run (if detected)
+  readonly status: FindingStatus;       // DETECTION status only
+  readonly gateDisposition: GateDisposition; // orthogonal; "ignored-by-waiver" never alters `status`
   readonly validation: ValidationCheck;
   readonly firstSeenRunId: AuditRunId;
   readonly lastSeenRunId: AuditRunId;
@@ -99,7 +105,10 @@ interface SelfGroundingReport {
                   ▼
           [identity-broken]   ← reported explicitly; NEVER auto-set to resolved
 
-   any status + active Waiver ─► presented as [ignored] (gate skips it until expiry)
+   GATE DISPOSITION (orthogonal axis — does NOT change `status`):
+     active ──(Waiver created)──► ignored-by-waiver ──(Waiver expires)──► active
+   The underlying detection `status` is preserved throughout, so expiry restores exactly
+   the status re-audit last observed (no hidden state — review: Codex P1).
 ```
 
 The forbidden transition is **`* → resolved` without a matched anchor AND a passing
@@ -125,8 +134,8 @@ important rule in this context, because a silent false "resolved" would let a re
 | **LOOP-I2** | unmatchable anchor ⟹ `status === "identity-broken"` | re-audit matching | reject any auto-`resolved` for an unmatched anchor (FR-RULE-3) |
 | **LOOP-I3** | `resolved` ⟹ not detected this run **and** `validation` passed | on transition | otherwise `still-failing` (FR-LOOP-1) |
 | **LOOP-I4** | `regressed` ⟹ previous status was `resolved` and now detected | on transition | reject illegal transition |
-| **LOOP-I5** | a finding with an active (non-expired) `Waiver` is `ignored` for the gate | gate evaluation | gate fails on it = bug (FR-RULE-6) |
-| **LOOP-I6** | an expired `Waiver` re-activates the finding | when `now > expiry` | finding returns to its detected status (FR-RULE-6) |
+| **LOOP-I5** | a finding with an active (non-expired) `Waiver` has `gateDisposition==="ignored-by-waiver"`; the gate skips it while `status` is unchanged | gate evaluation | gate fails on a waived finding = bug (FR-RULE-6) |
+| **LOOP-I6** | when `now > waiver.expiry`, `gateDisposition` returns to `"active"` and the **preserved** `status` is re-exposed to the gate | on expiry | recomputing from preserved `status` is deterministic; any hidden/lost prior status = bug (FR-RULE-6) |
 | **LOOP-I7** | `surface gate` fails only on net-new/expired vs `Baseline`, never on judged/gated | gate evaluation | failing on judged/gated = bug (FR-RULE-4, lives in Reporting but asserted here) |
 | **LOOP-I8** | concurrent re-audits never corrupt identity registry | always | guarded write via Project State lock (US-041) |
 
@@ -134,6 +143,8 @@ important rule in this context, because a silent false "resolved" would let a re
 
 | Event | Trigger | Payload | Consumers |
 |---|---|---|---|
+| `ValidationRequested` | a finding's `ValidationCheck` is dispatched on re-audit | `{ identityKey, check }` | Evaluation (re-runs the check) |
+| `ValidationCompleted` | a `ValidationCheck` returns | `{ identityKey, passed }` | Closed Loop (drives resolved vs still-failing) |
 | `ReAuditRan` | a new `AuditRun` completes against an existing identity registry | `{ runId, matched, unmatched }` | Project State, Reporting |
 | `FindingResolved` | tracked finding transitions to `resolved` | `{ identityKey, runId }` | Reporting (diff, US-015) |
 | `FindingRegressed` | transitions to `regressed` | `{ identityKey, runId }` | Reporting, Interfaces (gate signal) |
@@ -144,9 +155,12 @@ important rule in this context, because a silent false "resolved" would let a re
 
 ## Bounded-context interface
 
-- **Consumes:** `Finding` + `Backlog` (shared kernel on `Finding`/`FindingIdentity` with the
-  Findings context); the identity registry + lock from Project State; human input from
-  Interfaces (`surface verdict`, `surface baseline`).
+- **Consumes:** the **narrow shared kernel** with Findings — `FindingIdentity`, `FindingId`,
+  `method`, `severityBand`, `gatedForHuman`, and the `ValidationCheck` reference — **not** the
+  full `Finding` (which stays published language owned by Findings; review: Codex P2). Closed
+  Loop tracks identity + status; it does not depend on Findings' scoring internals. Also
+  consumes the identity registry + lock from Project State and human input from Interfaces
+  (`surface verdict`, `surface baseline`).
 - **Exposes:** `TrackedFinding` read models + status transitions to Reporting; `SelfGroundingReport`
   (FR-SCORE-6); `diff <before> <after>` (US-015) as a query over two runs' tracked findings.
 - **The human gate (FR-LOOP-3):** a `gatedForHuman` finding (set in Findings) cannot transition

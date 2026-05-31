@@ -19,6 +19,26 @@
 // Value object — thoroughness scale (FR-METH-1).
 type Depth = 1 | 2 | 3 | 4 | 5;
 
+// Value object — who the UI is evaluated as (FR-CAP-4, FR-PIPE-2). Ingested from context
+// inputs or established minimally. Drives the cognitive-walkthrough lens (FR-PIPE-10, US-014).
+interface Persona { readonly id: string; readonly goals: string[]; readonly priorKnowledge: "first-time" | "returning" | "expert"; }
+
+// Value object — a task the persona is trying to complete (FR-CAP-4, FR-PIPE-2). A TaskDefinition
+// with declared steps becomes a task-flow recipe for multi-state capture (FR-CAP-9).
+interface TaskDefinition { readonly id: string; readonly persona: Persona; readonly steps: string[]; readonly conversionCritical: boolean; }
+
+// Value object — what the run will evaluate and what it had to skip (FR-PIPE-3, NFR-SCALE-1).
+// Capping is explicit and reported — never a silent truncation (§7).
+interface RouteInventory {
+  readonly evaluated: string[];        // routes/views actually evaluated
+  readonly skipped: string[];          // routes beyond the depth/preset cap
+  readonly cap: number;                // max routes/views for this run (NFR-SCALE-1)
+}
+
+// Value object — how a measured/judged disagreement was resolved (EVAL-I7, §7). Measured wins
+// for measured facts; the record makes that decision auditable rather than implicit.
+interface SynthesisDecision { readonly factKey: string; readonly sourceOfTruth: "measured" | "judged"; readonly reason: string; }
+
 // Value object — named lens-set + threshold bundle (FR-METH-2,3).
 type Preset =
   | "quick" | "mvp" | "standard" | "deep" | "accessibility-first" | "agent-ready"
@@ -59,8 +79,12 @@ interface AuditRun {
   readonly overlay: Overlay;
   readonly preset: Preset;
   readonly depth: Depth;
+  readonly personas: Persona[];                 // FR-PIPE-2 (ingested or minimal)
+  readonly tasks: TaskDefinition[];             // FR-PIPE-2; drives walkthrough/conversion lenses
+  readonly inventory: RouteInventory;           // FR-PIPE-3, NFR-SCALE-1
   readonly stage: PipelineStage;                // current stage in the sequence
   readonly lensResults: LensResult[];
+  readonly synthesisDecisions: SynthesisDecision[]; // measured-wins record (EVAL-I7)
   readonly status: AuditRunStatus;
   readonly startedAt: Timestamp;
 }
@@ -107,18 +131,23 @@ published `Finding` schema — Evaluation emits `FindingDraft`s; it does not own
 | EVAL-I3 | a `judged` lens with `requiresModel` runs **only** if a model is configured | before lens runs | skip lens, set `LensResult.skipped`, report "judged coverage unavailable" (US-012) |
 | EVAL-I4 | `appType` is always assigned; absence of a match ⟹ `"generic"` | end of discovery | default to `generic` and record it (US-010) |
 | EVAL-I5 | the active `Lens` set equals what `overlay` + `preset` prescribe | start of lens-evaluation | reject mismatched lens set (US-013) |
-| EVAL-I6 | a `requiresLiveDom` measured lens runs only on a `Capture` that has a live DOM | per lens | skip + record in degradation; never measure from absent DOM |
-| EVAL-I7 | a measurement disagreeing with a model judgment resolves **measured-wins** for the measured fact | at synthesis | the model interprets, never overrides, a measurement (§7) |
+| EVAL-I6 | a `requiresLiveDom` measured lens runs only on a `Capture` that has a live DOM; Evaluation derives the affected lens set from the capture's `skippedArtifacts` | per lens | skip + record; Capture never names lenses (boundary, Gemini P1); never measure from absent DOM |
+| EVAL-I7 | a measurement disagreeing with a model judgment resolves **measured-wins**, recorded as a `SynthesisDecision` with `sourceOfTruth==="measured"` | at synthesis | reject a judged override of a measured fact; the decision must be auditable (§7) |
+| EVAL-I8 | `inventory.skipped` non-empty ⟹ the run reports it (no silent truncation) | end of inventory | emit `RoutesSkipped`; failing to report skipped routes is a bug (NFR-SCALE-1, §7) |
 
 ## Domain events
 
 | Event | Trigger | Payload | Consumers |
 |---|---|---|---|
 | `AppTypeClassified` | discovery assigns an `AppType` | `{ runId, appType, overlayId }` | Project State (recorded in state.json, US-010) |
+| `RoutesSkipped` | inventory cap exceeded | `{ runId, skipped, cap }` | Reporting (explicit "not evaluated" report, EVAL-I8) |
+| `StageAdvanced` | the pipeline enters a new `PipelineStage` | `{ runId, from, to }` | Project State (resumability, US-041) |
 | `AuditRan` | a lens completes over a capture | `{ runId, lensId, method, findingCount }` | Findings, Reporting |
-| `FindingDetected` | a lens emits a `FindingDraft` | `{ runId, draftId, lensId, method }` | Findings (scoring) |
+| `LensSkipped` | a lens cannot run (no model / no live DOM) | `{ runId, lensId, reason }` | Reporting (states reduced coverage, US-012) |
+| `FindingDetected` | a lens emits a `FindingDraft` | `{ runId, draft: FindingDraft }` (the **full** draft — Findings builds a Finding without reaching back into Evaluation; review: Codex P1) | Findings (scoring) |
 | `AuditRunCompleted` | all stages done | `{ runId, status, lensResults }` | Findings (synthesis), Closed Loop (validation) |
-| `AuditRunDegraded` | a lens/capture forced a reduced run | `{ runId, reason, affectedLenses }` | Reporting (states reduced coverage) |
+| `AuditRunDegraded` | a lens/capture forced a reduced run | `{ runId, reason, skippedLensIds }` | Reporting (states reduced coverage) |
+| `AuditRunFailed` | a stage failed unrecoverably | `{ runId, stage, error }` | Interfaces (exit code), Project State |
 
 ## Bounded-context interface
 

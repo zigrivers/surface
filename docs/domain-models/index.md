@@ -25,7 +25,13 @@
 
 Interfaces (CLI / MCP / runner skill, FR-IF-1..3) are **delivery adapters**, not domains:
 they translate user/agent intent into the commands listed per context and render the
-resulting read models. Their contracts live in `api-contracts`/architecture, not here.
+resulting read models. The domain model covers domain *concepts*; the FR-IF *contracts*
+themselves — CLI verbs + exit codes (NFR-CLI-1), the versioned MCP tool schema (NFR-MCP-1),
+and the runner-skill intent mapping — are **owned by `api-contracts`/architecture**, not the
+domain model. The coverage matrix below therefore maps FR-IF traceability to "adapter +
+api-contracts," which is why FR-IF features have no bounded-context home here (this resolves
+the apparent contradiction with the "every feature maps to a domain" claim — review: Codex P1:
+the claim is about domain concepts; interface contracts are an explicit, deliberate exception).
 
 ## Context map
 
@@ -60,9 +66,13 @@ resulting read models. Their contracts live in `api-contracts`/architecture, not
 - **Capture → Evaluation**: customer–supplier. Evaluation consumes `Capture` read models; Capture has no knowledge of lenses.
 - **Evaluation → Findings**: customer–supplier via a **published language** — the `Finding` schema. Evaluation produces `Finding`s; Findings & Backlog owns the canonical `Finding` definition and scoring.
 - **Knowledge Base → Evaluation/Findings**: open-host / published language. Lenses request entries by relevance; a `Finding` cites entries by `KnowledgeEntryId`. Anticorruption: findings store the citation id, not the entry body.
-- **Findings → Closed Loop**: shared kernel on `Finding` + `FindingIdentity`. Closed Loop wraps a `Finding` as a `TrackedFinding` across runs.
+- **Findings → Closed Loop**: **narrow** shared kernel — `FindingIdentity`, `FindingId`, `method`, `severityBand`, `gatedForHuman`, and the `ValidationCheck` reference (NOT the full `Finding`, which stays published language owned by Findings — review: Codex P2). Closed Loop wraps each immutable `Finding` occurrence as a `TrackedFinding` across runs.
 - **Closed Loop / Findings → Reporting**: customer–supplier; reporters are downstream and read-only over findings.
-- **Project State**: shared kernel for identity + config consumed by all contexts; the only context that owns writes to `.surface/`.
+- **Project State**: the only context that writes `.surface/`. It stores the serialized
+  `SurfaceConfig` as **per-context slices** (`CaptureConfig`, `EvaluationConfig`,
+  `FindingsPolicy`, `ReportingConfig`) each owned by its defining context and exposed via an
+  anticorruption read model — so contexts never couple through a shared config struct
+  (review: Codex P1). It also owns the `FindingIdentity` registry + state lock.
 
 Solid arrows = direct read-model/data dependency. The Knowledge Base and Project State are
 shared services every evaluation touches; they are deliberately kept generic/supporting so
@@ -86,12 +96,17 @@ downstream code** (no synonyms, no homonyms — `coding-standards.md` §Naming).
 | **Lens** | value object | one evaluation perspective (accessibility, usability, …); declares its `method` |
 | **EvaluationMethod** | value object | `"measured"` (tool-confirmed) \| `"judged"` (model-interpreted) |
 | **AppType** | value object | classified archetype (saas-dashboard, e-commerce, marketing, generic, …) |
+| **Persona** | value object | who the UI is evaluated as (goals, prior knowledge) — input to the walkthrough lens |
+| **TaskDefinition** | value object | a task a persona completes; declared steps form a task-flow recipe |
+| **RouteInventory** | value object | what a run evaluated and what it skipped under the route cap (NFR-SCALE-1) |
+| **FindingDraft** | value object (transient) | a lens's pre-scored output, before Findings assigns identity, bands, and score; the payload of `FindingDetected` |
 | **Overlay** | value object | the acceptance-criteria set an `AppType` activates |
 | **Preset** | value object | named bundle of lens-set + thresholds (`quick`…`agent-ready`) |
 | **Depth** | value object | thoroughness scale 1–5 |
-| **Finding** | aggregate root | one evaluated issue: method, evidence, dimensions, location, gating |
+| **Finding** | immutable occurrence | one evaluated issue from one run: method, evidence, dimensions, severityBand, location, gating. Created once, never mutated; cross-run lifecycle is `TrackedFinding`'s |
 | **Evidence** | value object | proof for a finding: tool result, DOM selector/element-ref, screenshot region, or cited heuristic |
 | **Dimensions** | value object | the scoring axes (severity, confidence, effort, userImpact, businessImpact, a11yLegalRisk, evidenceQuality, agentImplementability) |
+| **SeverityBand** | value object | canonical `P0`\|`P1`\|`P2`\|`P3` derived from `dimensions.severity`; what the CI gate evaluates (FR-RULE-4) |
 | **Location** | value object | where the issue lives: `{ file?, component?, selector? , elementRef? }` |
 | **ConfidenceBand** | value object | `assert` \| `surface-as-question` \| `suppress-unless-deep` |
 | **SuggestedPatch** | value object | a computed, deterministic fix for a **measured** finding only |
@@ -100,7 +115,8 @@ downstream code** (no synonyms, no homonyms — `coding-standards.md` §Naming).
 | **BacklogEntry** | entity (internal) | a `Finding` reference plus its computed priority rank within a `Backlog` |
 | **FindingIdentity** | value object | stable key = `lens` + `issueType` + `locationAnchor` (preferring a deterministic element ref) |
 | **TrackedFinding** | aggregate root | a `Finding` followed across runs, carrying a `FindingStatus` |
-| **FindingStatus** | value object | `new` \| `still-failing` \| `resolved` \| `regressed` \| `identity-broken` \| `ignored` |
+| **FindingStatus** | value object | DETECTION status: `new` \| `still-failing` \| `resolved` \| `regressed` \| `identity-broken` |
+| **GateDisposition** | value object | gate axis orthogonal to status: `active` \| `ignored-by-waiver` (expiry restores the preserved status) |
 | **Baseline** | aggregate root | a snapshot of accepted findings; the gate fails only on net-new/expired relative to it |
 | **Waiver** | entity | accepted-debt record: `{ findingId, reason, owner, expiry? }`; expiry re-activates the finding |
 | **Verdict** | entity | human adjudication of a finding: `accept` \| `reject` \| `correct` \| `defer`, with rationale |
@@ -119,7 +135,7 @@ downstream code** (no synonyms, no homonyms — `coding-standards.md` §Naming).
 | PRD area | Domain(s) |
 |---|---|
 | FR-CAP-1..11 (inputs, capture, auth, redaction, degradation) | Capture |
-| FR-PIPE-1..14 (pipeline stages) | Evaluation (+ Closed Loop for 14) |
+| FR-PIPE-1..14 (pipeline stages, incl. persona/task FR-PIPE-2, route inventory FR-PIPE-3) | Evaluation (`Persona`, `TaskDefinition`, `RouteInventory`) (+ Closed Loop for 14) |
 | FR-LENS-1..5 (lenses, method tag, evidence) | Evaluation + Findings |
 | FR-KB-1..5 (knowledge base) | Knowledge Base |
 | FR-OVL-1..4 (app-type overlays) | Evaluation (+ Project State for active config) |
@@ -127,7 +143,9 @@ downstream code** (no synonyms, no homonyms — `coding-standards.md` §Naming).
 | FR-SCORE-1..8 (findings, scoring, trust, multi-model, self-grounding, verdict) | Findings (+ Closed Loop for verdict/self-grounding) |
 | FR-OUT-1..4 (artifacts, plain-language, SARIF/PR) | Reporting & Integrations |
 | FR-LOOP-1..3 (closed loop, identity, human gate) | Closed Loop (+ Findings for gate) |
-| FR-IF-1..5 (CLI, MCP, skill, `.surface/`) | Interfaces (adapters) + Project State (FR-IF-5) |
+| FR-IF-1,2,3 (CLI, MCP, skill **contracts**) | Adapters + `api-contracts`/architecture (deliberately not a domain concept — see note above) |
+| FR-IF-4 (`alternatives`, `diff`) | Reporting (`alternatives` artifact) + Closed Loop (`diff`) |
+| FR-IF-5 (`.surface/` state) | Project State |
 | FR-INT-1..5 (Axe/Lighthouse, GitHub/Linear/Jira, token parsers) | Capture/Evaluation (grounding) + Reporting (export) |
 | FR-MODE-1..3 (explain, CI gate, diff/alternatives) | Findings (explain) + Closed Loop (gate/diff) + Reporting |
 | FR-RULE-1..6 (bands, gate categories, status, CI policy, identity, baseline/waiver) | Findings (1,2) + Closed Loop (3,5,6) + Reporting (4) |
@@ -138,9 +156,14 @@ Every PRD §6 capability area maps to at least one bounded context; the core loo
 ## Quality-indicator self-check
 
 - **Value objects outnumber entities** — yes: most concepts (Target, Evidence, Dimensions,
-  Location, ConfidenceBand, FindingIdentity, Citation, …) are values; only items with a
-  lifecycle across runs (Capture, AuditRun, Finding, TrackedFinding, Baseline, KnowledgeEntry,
-  IssueExport, ProjectState) are entities/aggregate roots.
+  Location, ConfidenceBand, SeverityBand, FindingIdentity, FindingDraft, Persona, Citation, …)
+  are values; `Finding` is an immutable per-run occurrence; only items with a genuine lifecycle
+  across runs (Capture, AuditRun, TrackedFinding, Baseline, KnowledgeEntry, IssueExport,
+  ProjectState) are entities/aggregate roots.
+- **Deferred Should/Could items noted, not modeled** (P3): Storybook capture source (FR-CAP-5),
+  Opportunity map (FR-OUT-2), and the orchestration-vs-domain split of `PipelineStage` (a
+  `PipelineOrchestrator` application service, review: Gemini P3) are deferred to their phase
+  and called out here so they read as intentional, not forgotten.
 - **Aggregate boundaries match transaction boundaries** — each aggregate is the smallest
   cluster that must be consistent in one write (see each file's "Aggregate boundary" note).
 - **No transaction spans aggregates** — cross-aggregate effects flow through domain events

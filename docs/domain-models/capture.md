@@ -47,11 +47,22 @@ interface CaptureArtifact {
   readonly redacted: boolean;         // true if a RedactionRule altered this artifact
 }
 
-// Value object — the honest record of what was NOT observed (FR-CAP-6, §7).
+// Value object — the honest record of what Capture could NOT observe (FR-CAP-6, §7).
+// Capture reports ONLY about its own observations; it does not know which lenses are affected
+// (that is Evaluation's concern — review: Gemini P1, customer-supplier direction). Evaluation
+// derives the affected lenses from `skippedArtifacts`.
 interface DegradationReport {
   readonly skippedArtifacts: CaptureArtifact["type"][];
   readonly skippedReason: string;     // e.g. "no browser backend installed"
-  readonly affectedLenses: string[];  // lens ids that cannot run measured on this capture
+}
+
+// Value object — evidence that the captured page is the requested Target, not a redirect/login
+// (FR-CAP-8). Makes CAP-I3 runtime-checkable instead of a process assertion (review: Codex P1).
+interface TargetVerification {
+  readonly requestedUrl: string;
+  readonly landedUrl: string;          // URL actually observed after navigation
+  readonly authInjectedBeforeNavigation: boolean;
+  readonly isRequestedTarget: boolean; // false ⟹ likely bounced to a login/redirect
 }
 
 // AGGREGATE ROOT — the result of observing a Target once.
@@ -61,6 +72,7 @@ interface Capture {
   readonly backend: CaptureBackend;       // which backend actually ran (recorded, US-001)
   readonly artifacts: CaptureArtifact[];  // internal entities — accessed only via the root
   readonly authUsed: boolean;             // whether an AuthState was injected
+  readonly verification?: TargetVerification; // present when navigation occurred (URL/route targets)
   readonly degradation?: DegradationReport;
   readonly capturedAt: Timestamp;
   readonly status: CaptureStatus;
@@ -96,7 +108,7 @@ complete one. They change together; nothing outside holds a reference to a `Capt
 |---|---|---|---|
 | CAP-I1 | `capture.artifacts.length >= 1` for `status ∈ {completed, degraded}` | after observation | reject; a capture with zero artifacts is `unreachable`, not `completed` |
 | CAP-I2 | `status === "degraded"` ⟺ `degradation` is set and non-empty | always | reject inconsistent state |
-| CAP-I3 | `authUsed === true` ⟹ navigation occurred **after** session injection | during capture | abort → `auth-failed`; never capture the login page as the target (US-002) |
+| CAP-I3 | `authUsed === true` ⟹ `verification.authInjectedBeforeNavigation === true` **and** `verification.isRequestedTarget === true` | during capture | abort → `auth-failed`; never capture the login page as the target (US-002) |
 | CAP-I4 | `backend === "static"` ⟹ `artifacts` excludes `accessibility-tree` from live DOM | always | record those types in `degradation.skippedArtifacts` |
 | CAP-I5 | every `CaptureArtifact` matched by a `RedactionRule` has `redacted === true` | on write | reject export of unredacted matched content (NFR-DATA-1) |
 | CAP-I6 | no artifact leaves `.surface/captures/` except via explicit user action | always | block transmission (NFR-DATA-1, NFR-SEC-1) — release blocker if defaulted on |
@@ -108,7 +120,8 @@ complete one. They change together; nothing outside holds a reference to a `Capt
 | `CaptureRequested` | a `Target` is submitted for observation | `{ captureId, target, requestedAt }` | Project State (progress) |
 | `CaptureCompleted` | all requested artifacts produced | `{ captureId, backend, artifactTypes }` | Evaluation |
 | `CaptureDegraded` | some artifacts could not be produced | `{ captureId, backend, degradation }` | Evaluation, Reporting (surfaces what wasn't checked) |
-| `CaptureAuthFailed` | injected `AuthState` invalid/expired | `{ captureId, reason }` | Interfaces (non-zero exit, US-002) |
+| `CaptureUnreachable` | target not reachable; no live DOM produced | `{ captureId, target, reason }` | Evaluation (degrade live-DOM lenses), Interfaces (exit-coded error, §7) |
+| `CaptureAuthFailed` | injected `AuthState` invalid/expired, or landed off-target | `{ captureId, reason }` | Interfaces (non-zero exit, US-002) |
 
 ## Backend selection policy (domain service)
 
