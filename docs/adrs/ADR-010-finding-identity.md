@@ -4,8 +4,8 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-31
-- **Depends on:** ADR-003, ADR-005
-- **Related:** ADR-004; `tech-stack.md` §11; FR-RULE-5, FR-LOOP-2; Closed Loop domain
+- **Depends on:** ADR-003, ADR-004, ADR-005
+- **Related:** `tech-stack.md` §11; FR-RULE-5, FR-LOOP-2; Closed Loop domain
 
 ## Context
 
@@ -23,6 +23,20 @@ PRD fixes the *contract* (FR-RULE-5) and leaves the *algorithm* to this phase (�
 reused. On re-audit, an anchor that cannot be matched yields `status: identity-broken`, not a
 guessed resolved/regressed. The matching algorithm tolerates bounded DOM drift; exact tolerance
 parameters are specced/tuned downstream.
+
+**Collision handling (review: Codex P1).** Coarse anchors (`component`/`file` only) can collide
+when two distinct findings share the same lens + issueType + location. The key therefore
+includes a **stable secondary discriminator** (e.g. an ordinal over the sorted set of distinct
+findings at that anchor) so distinct defects get distinct keys; if two candidates cannot be
+disambiguated within a run, both are marked **`identity-broken`** rather than merged — never
+collapse two real defects into one id.
+
+**Drift-tolerance acceptance criteria (review: Codex P2).** Before implementation, the matching
+algorithm must pass a fixture corpus exercising: unchanged node (keeps id), reordered siblings
+(keeps id), moved/renested node (keeps id when a deterministic ref exists; else identity-broken),
+attribute-only change (keeps id), and ambiguous/coarse-anchor collision (identity-broken). The
+conservative default is **prefer `identity-broken` over a wrong match**; tolerance parameters
+are revisited if the corpus shows excessive false breaks.
 
 ## Options considered
 

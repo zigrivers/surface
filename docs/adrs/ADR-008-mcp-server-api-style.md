@@ -16,14 +16,19 @@ a documented, **versioned, backward-compatible** tool schema (NFR-MCP-1).
 
 ## Decision
 
-surface exposes **two public contracts and no REST/HTTP API**:
-1. the POSIX **CLI** (ADR-007), and
+surface exposes **two machine contracts plus a conversational adapter, and no REST/HTTP API**:
+1. the POSIX **CLI** (ADR-007);
 2. an **MCP server** built on the official `@modelcontextprotocol/sdk` (`packages/mcp`),
    exposing surface's verbs as MCP tools with **versioned schemas**; an incompatible schema
-   change forces a major-version bump (NFR-MCP-1), enforced by schema snapshot tests.
+   change forces a major-version bump (NFR-MCP-1), enforced by schema snapshot tests; and
+3. the **natural-language runner skill** (FR-IF-3) — *not* a third independent protocol: it is
+   a thin conversational adapter that **maps NL intent onto CLI/MCP commands** and confirms the
+   action. Its "contract" is the intent→command mapping, owned by `api-contracts`; it adds no
+   new capability surface and inherits the CLI/MCP contracts above (review: Codex P1 — recorded
+   to reconcile with FR-IF-3 / the release gate, not omitted).
 
-Both adapters are thin layers over the same `core` services (the domain commands per context).
-The exact tool/command schemas are finalized in `api-contracts`.
+All three adapters are thin layers over the same `core` services (the domain commands per
+context). The exact tool/command/intent schemas are finalized in `api-contracts`.
 
 ## Options considered
 

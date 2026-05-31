@@ -4,7 +4,7 @@
 
 - **Status:** Accepted
 - **Date:** 2026-05-31
-- **Depends on:** ADR-002, ADR-005
+- **Depends on:** ADR-002, ADR-003, ADR-005
 - **Related:** Evaluation domain (`PipelineStage`); FR-PIPE-1..14; review-domain-modeling (Gemini P3)
 
 ## Context

@@ -23,6 +23,17 @@ guarded by a single **`proper-lockfile`** advisory lock. **No database; therefor
 `runHistory` is bounded/rotated to keep per-run write size constant (Project State domain
 note). A schema `version` field gates explicit migration (PS-I7).
 
+**Retention classes (review: Codex P1 — durable vs sensitive-transient).** `.surface/` holds
+two distinct kinds of data, handled differently (security details in ADR-013):
+
+| Class | Examples | Default | Git | Lifetime |
+|---|---|---|---|---|
+| **Durable** | `state.json`, `findings/`, `config.yml`, baselines/waivers, decisions log | persisted | safe to commit (inspectable/diffable — the value below) | until the user removes |
+| **Ephemeral evidence** | `captures/` (DOM, screenshots, computed styles) | **ephemeral per run** | **git-ignored** (may hold PII/source — NFR-DATA-1) | purged per the retention default unless the user opts to retain |
+
+The "inspectable/diffable/committable" property below applies to the **durable** class;
+captures are sensitive transient evidence and are *not* committed by default.
+
 ## Options considered
 
 | Option | Pros | Cons |

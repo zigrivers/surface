@@ -84,14 +84,19 @@
       "artifacts_verified": true
     },
     "review-adrs": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-adrs.md",
         "docs/reviews/adrs/review-summary.md",
         "docs/reviews/adrs/codex-review.json",
         "docs/reviews/adrs/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:38:24.884Z",
+      "completed_at": "2026-05-31T14:38:24.884Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "ai-memory-setup": {
       "status": "pending",
@@ -597,9 +602,9 @@
   "next_eligible": [
     "design-system",
     "git-workflow",
-    "review-adrs"
+    "system-architecture"
   ],
   "extra-steps": [],
-  "save_counter": 40,
+  "save_counter": 42,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }

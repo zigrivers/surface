@@ -45,6 +45,11 @@ surface ships **no model and no credentials**.
   on external CLIs that may be absent (degrade to single-model, record which channels ran).
 - **Risk / mitigation:** accidental transmission is a release blocker (NFR-DATA-1) → measured-
   only is the structural default (ADR-005); a model call happens only when a key is configured.
+- **Usability mitigation (review: Gemini P2):** BYO-key is friction for the P2 non-designer.
+  Beyond docs, provide a guided **`surface config setup-model`** command that detects which
+  provider keys are present, links to where each key is issued, validates a pasted key with a
+  cheap probe call, and writes it to `.env` (gitignored) — so key setup is a guided step, not a
+  documentation scavenger hunt. (Committed as the concrete mitigation; exact UX → specs.)
 
 ## Team / maintenance
 
