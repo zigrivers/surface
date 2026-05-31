@@ -150,14 +150,19 @@
       "artifacts_verified": true
     },
     "git-workflow": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/git-workflow.md",
         "scripts/setup-agent-worktree.sh",
         ".github/workflows/ci.yml",
         ".github/pull_request_template.md"
-      ]
+      ],
+      "at": "2026-05-31T15:05:36.600Z",
+      "completed_at": "2026-05-31T15:05:36.600Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "apply-fixes-and-freeze": {
       "status": "pending",
@@ -635,12 +640,15 @@
     }
   },
   "next_eligible": [
-    "git-workflow",
+    "automated-pr-review",
+    "ai-memory-setup",
+    "add-e2e-testing",
     "review-testing",
     "story-tests",
-    "platform-parity-review"
+    "platform-parity-review",
+    "claude-md-optimization"
   ],
   "extra-steps": [],
-  "save_counter": 55,
+  "save_counter": 57,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }

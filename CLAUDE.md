@@ -95,6 +95,24 @@ The `[surface-<id>]` prefix gives task↔commit traceability and session reconst
 Commit/push only when the active agent profile or the user authorizes it (see the Beads
 block above).
 
+## Git Workflow & Parallel Sessions
+
+Full guide: `docs/git-workflow.md`. Essentials:
+
+- **One task = one branch = one PR.** Branch name: `surface-<id>/<short-desc>`.
+- **PR workflow:** commit → self/AI review → rebase on `main` → push → create PR (template
+  auto-loads) → `gh pr merge --squash --auto --delete-branch` → watch the `check` CI job →
+  confirm merge. Then `bd close surface-<id>`.
+- **Parallel agents:** `scripts/setup-agent-worktree.sh <task-id> <desc>` makes a per-agent
+  worktree (sets `BEADS_ACTOR`). **Never parallelize two tasks that touch the same files** —
+  assign agents to different packages; serialize `core` changes.
+- **CI = local gate:** `.github/workflows/ci.yml` runs `pnpm run check` (job `check`); the
+  capture/grounding browser matrix runs only when those packages change.
+- **Code review / Prove It:** paste verification output in the PR; risky/subjective/brand
+  changes go to a human (principle #5).
+- **Remote status:** repo is **local-only** today (no remote); branch/worktree/commit mechanics
+  apply now, PR/CI/auto-merge activate when a GitHub remote is added.
+
 ## Upgrade Remediation
 
 If `bd` was upgraded since the last `bd init`, run `bd doctor --fix` to re-sync git hooks
