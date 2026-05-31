@@ -14,6 +14,9 @@
   "files": [
     "dist"
   ],
+  "dependencies": {
+    "zod": "catalog:"
+  },
   "scripts": {
     "build": "tsup",
     "build:smoke": "node -e \"import('./dist/index.js').then((m) => { if (m.CORE_PACKAGE_NAME !== '@surface/core') { console.error('Unexpected CORE_PACKAGE_NAME:', m.CORE_PACKAGE_NAME); process.exit(1); } }).catch((error) => { console.error(error); process.exit(1); })\"",
