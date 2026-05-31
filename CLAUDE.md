@@ -174,8 +174,22 @@ Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
 surface is a **modular-monorepo CLI + MCP tool** (no hosted service, no DB): a pure
 `@surface/core` (schema, scoring, identity, state, pipeline orchestrator) wrapped by thin
 `cli`/`mcp` adapters, with edge plugins (capture backends, framework adapters, grounding,
-reporters) behind interfaces in `core`. Full blueprint: `docs/system-architecture.md`; decisions:
-`docs/adrs/`; domain: `docs/domain-models/`.
+reporters) behind interfaces in `core`.
+
+### Doc map (where to look)
+
+| Need | Doc |
+|---|---|
+| North star / product WHAT | `docs/vision.md` · `docs/plan.md` (PRD) |
+| Features as stories + tests | `docs/user-stories.md` · `docs/story-tests-map.md` |
+| Domain model / vocabulary | `docs/domain-models/` (index + 7 contexts) |
+| Decisions (the WHY) | `docs/adrs/` (ADR-001..018 + index) |
+| System blueprint / where code goes | `docs/system-architecture.md` · `docs/project-structure.md` |
+| CLI/MCP/output contracts | `docs/api-contracts.md` |
+| Tech choices / standards | `docs/tech-stack.md` · `docs/coding-standards.md` · `docs/tdd.md` |
+| Security / ops | `docs/security-review.md` · `docs/operations-runbook.md` |
+| Dev + git workflow | `docs/dev-setup.md` · `docs/git-workflow.md` · `docs/review-standards.md` |
+| Conditional-step rulings | `docs/conditional-step-decisions.md` |
 
 ## Conventions & Patterns
 
