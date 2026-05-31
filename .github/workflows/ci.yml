@@ -22,7 +22,7 @@ jobs:
         run: corepack enable
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.13.0
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - name: Quality gate (format, lint, typecheck, test)
@@ -50,7 +50,7 @@ jobs:
       - uses: actions/setup-node@v4
         if: steps.changed.outputs.run == 'true'
         with:
-          node-version: 22
+          node-version: 22.13.0
           cache: pnpm
       - name: Install + browsers
         if: steps.changed.outputs.run == 'true'

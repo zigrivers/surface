@@ -1,0 +1,32 @@
+{
+  "name": "@surface/core",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "build:smoke": "node -e \"import('./dist/index.js').then((m) => { if (m.CORE_PACKAGE_NAME !== '@surface/core') { console.error('Unexpected CORE_PACKAGE_NAME:', m.CORE_PACKAGE_NAME); process.exit(1); } }).catch((error) => { console.error(error); process.exit(1); })\"",
+    "clean": "rm -rf dist coverage .turbo",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "eslint": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

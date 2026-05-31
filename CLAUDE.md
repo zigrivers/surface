@@ -137,7 +137,7 @@ mode, where `bd doctor` reports it is not yet supported — reinitialize with `b
 ## Build & Test
 
 Full getting-started guide: `docs/dev-setup.md`. Stack: pnpm 11 + Turborepo, TypeScript/ESM,
-Node ≥ 22. There is **no database** and no web dev server — "dev" is watch-mode compilation.
+Node ≥ 22.13.0 (pinned to the CI patch release and modern pnpm/Vite/Vitest floor). There is **no database** and no web dev server — "dev" is watch-mode compilation.
 
 ### Key Commands
 
@@ -148,11 +148,12 @@ Node ≥ 22. There is **no database** and no web dev server — "dev" is watch-m
 | `pnpm dev` | watch-mode build across packages (`turbo watch build`) |
 | `pnpm build` | build every package once |
 | `pnpm test` | run the full test suite |
-| `pnpm test:watch` | re-run tests on change |
+| `pnpm test:watch` / `pnpm run test:watch` | run package test watchers |
 | `pnpm lint` | lint all packages |
 | `pnpm typecheck` | type-check all packages |
-| `pnpm format` / `pnpm format:check` | Prettier write / check |
-| `pnpm run check` | **full local gate, identical to CI** (format-check + lint + typecheck + test) |
+| `pnpm format` | Prettier write |
+| `pnpm format:check` / `pnpm run format:check` | Prettier check |
+| `pnpm check` / `pnpm run check` | **full local gate, identical to CI** (format-check + lint + typecheck + test + build:smoke) |
 | `pnpm clean` | remove caches and build output |
 
 Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
