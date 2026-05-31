@@ -413,11 +413,16 @@
       ]
     },
     "operations": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/operations-runbook.md"
-      ]
+      ],
+      "at": "2026-05-31T15:10:29.528Z",
+      "completed_at": "2026-05-31T15:10:29.528Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-operations": {
       "status": "pending",
@@ -654,10 +659,10 @@
     "ai-memory-setup",
     "add-e2e-testing",
     "story-tests",
-    "operations",
+    "review-operations",
     "claude-md-optimization"
   ],
   "extra-steps": [],
-  "save_counter": 61,
+  "save_counter": 63,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
