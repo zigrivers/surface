@@ -17,10 +17,14 @@ prefers agent-browser's deterministic element refs (`@e1`) as evidence/identity 
 
 ## Decision
 
-Define a single **capture interface** in `packages/capture`; implement three backends behind it
-— `playwright`, `agent-browser` (invoked as an external CLI via `execa`), and `static`. Backend
-selection is a deterministic policy (record the chosen backend on the `Capture`). The interface
-is the seam that keeps the rest of the system backend-agnostic.
+Define the **`CaptureBackend` interface in `@surface/core`** (alongside the other plugin
+interfaces, so the orchestrator depends only on the abstraction — see system-architecture
+"Composition root"); implement three backends behind it in `@surface/capture` — `playwright`,
+`agent-browser` (invoked as an external CLI via `execa`), and `static`. Backend selection is a
+deterministic policy (record the chosen backend on the `Capture`). The interface is the seam
+that keeps the rest of the system backend-agnostic. *(Interface ownership clarified in
+review-architecture: it lives in `core`, not `@surface/capture`, consistent with every other
+plugin interface and the core-never-imports-a-leaf rule.)*
 
 ## Options considered
 

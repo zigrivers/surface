@@ -8,14 +8,19 @@
   "in_progress": null,
   "steps": {
     "review-architecture": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-architecture.md",
         "docs/reviews/architecture/review-summary.md",
         "docs/reviews/architecture/codex-review.json",
         "docs/reviews/architecture/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:49:43.821Z",
+      "completed_at": "2026-05-31T14:49:43.821Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "system-architecture": {
       "status": "completed",
@@ -607,10 +612,13 @@
   "next_eligible": [
     "design-system",
     "git-workflow",
-    "review-architecture",
-    "review-testing"
+    "database-schema",
+    "api-contracts",
+    "ux-spec",
+    "review-testing",
+    "story-tests"
   ],
   "extra-steps": [],
-  "save_counter": 44,
+  "save_counter": 46,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }

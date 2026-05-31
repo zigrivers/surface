@@ -50,7 +50,7 @@ thin interface adapters**, with pluggable backends at the edges:
 | Bounded context (domain) | Package / module | Notes |
 |---|---|---|
 | Project State | `core/src/state` | `.surface/` IO: atomic writes + lock (ADR-003); config slices + identity registry |
-| Evaluation | `core/src/pipeline` (orchestrator, ADR-012) + `core/src/lenses` + `grounding`/`adapters` | orchestrator sequences stages; lenses run measured/judged |
+| Evaluation | `core/src/pipeline` (orchestrator, ADR-012) + `@surface/lenses/*` leaf packages + `grounding`/`adapters` | orchestrator sequences stages; lenses are registered leaf plugins (review: Gemini P1) |
 | Findings & Backlog | `core/src/findings` | canonical `Finding` (zod), scoring/MMR, bands, gating, `ReconciliationService` |
 | Closed Loop | `core/src/closed-loop` | `FindingIdentity`, `TrackedFinding`, baselines/waivers, verdicts |
 | Capture | `@surface/capture` | backends behind the capture interface (ADR-004) |
@@ -61,6 +61,26 @@ thin interface adapters**, with pluggable backends at the edges:
 `core` owns the canonical schema and every plugin interface; all other packages depend on
 `core`, never the reverse (ADR-002 boundary rule). Adapters/reporters/capture/grounding are
 conflict-free leaf packages.
+
+## 2a. Composition root & dependency injection (how plugins wire in without core→leaf deps)
+
+`core` **defines** every plugin interface (`CaptureBackend`, `FrameworkAdapter`, `GroundingTool`,
+`Lens`, `ReportRenderer`, `GateEvaluator`, `IssueExporter`, `KnowledgeSource`, `StateStore`) but
+**imports no leaf package** — preserving the ADR-002 "core only depends downward" rule and
+preventing dependency cycles. Concrete implementations live in leaf packages and are wired in at
+a single **composition root**:
+
+- The **CLI/MCP app is the composition root.** At startup it constructs concrete plugins
+  (Playwright/agent-browser backends, axe/Lighthouse grounding, react/vue/svelte/agnostic
+  adapters, lens packages, md/json/sarif/github renderers, the knowledge loader, the state
+  store) and injects them into `core`'s `PipelineOrchestrator` via a typed **registry**
+  (constructor injection). `core` sees only the interfaces.
+- **Published-export imports only (review: Codex P2).** Leaf packages import interfaces through
+  the package's published entry points — `@surface/core/interfaces`, `@surface/core/schema` —
+  **never** `@surface/core/src/*`. A lint rule bans deep `src/*` imports (coding-standards
+  "published entry points only"); this is what keeps boundaries clean and merge-conflict-free.
+- This DI seam is also why new backends/adapters/lenses/reporters are additive leaf packages:
+  they implement an interface and register at the root; nothing in `core` changes.
 
 ## 3. The pipeline (orchestrator) — control flow
 
@@ -101,8 +121,11 @@ CLI/MCP ─ audit ─► Orchestrator ─► Capture.observe(target)
                           → Dimensions, SeverityBand, ConfidenceBand, gatedForHuman   (FND-I1..I5)
                           → ReconciliationService (depth 4–5, multi-model)            (FR-SCORE-5)
                                      │  FindingScored / FindingGated
+                                     ├─ gatedForHuman === true ──► routed to human review/Verdict queue;
+                                     │     present as proposal, NEVER auto-executed (FR-LOOP-3, FND-I5)
                                      ▼
                         Backlog synthesis (priority sort + MMR demote)  → BacklogProduced
+                          (gated findings appear in the backlog as proposals, flagged non-executable)
                                      │
                         Reporters: findings.md + findings.json (byte-stable) + backlog  (local-first, ADR-016)
                                      │
@@ -121,7 +144,9 @@ CLI ─ gate/validate ─► Orchestrator (validation stage) ─► Closed Loop
    acquire state lock (US-041) ─►
    for each prior TrackedFinding:
      match anchor (prefer @e ref, ADR-010) in new run?
-       yes + ValidationCheck passes → resolved      ── FindingResolved
+       yes + ValidationCheck passes + NOT gatedForHuman → resolved   ── FindingResolved
+       yes + ValidationCheck passes + gatedForHuman      → awaits Verdict/human-confirmed
+            validation; agent revalidation alone CANNOT mark it resolved (FR-LOOP-3, Closed Loop)
        yes + still fails            → still-failing
        was resolved, detected again → regressed      ── FindingRegressed
        no/ambiguous match           → identity-broken (never silent resolved — LOOP-I2)
@@ -142,14 +167,36 @@ Backlog ─► Reporters.export(github) ─► write local artifacts FIRST (RPT-
                                          persistent failure → unsynced, exit non-zero (US-060)
 ```
 
-### 4.4 Capture behind auth (US-002; ADR-013)
+### 4.4 Capture behind auth (US-002; FR-CAP-8; ADR-013)
 
 ```
-CLI ─ --auth-state <file> ─► Capture: inject storage-state BEFORE navigation
+CLI (--auth-state <file>) / MCP (auth-state in tool input) ─► Capture: inject storage-state BEFORE navigation
    verify landed URL is the requested target (TargetVerification, CAP-I3)
      ok    → authenticated DOM captured
-     bounced/invalid → CaptureAuthFailed, non-zero exit, NEVER capture login page as target
+     bounced/invalid → CaptureAuthFailed → CLI non-zero exit / MCP structured error;
+                       NEVER capture login page as target; auth-state redacted from logs (ADR-018)
 ```
+*Both adapters accept injected session state (FR-CAP-8) — the MCP tool takes it as input and
+maps failure to a structured MCP error (review: Codex P2).*
+
+### 4.5 Non-live / context-heavy audit (US-003; FR-CAP-1,2,4; release-gate Must)
+
+```
+CLI/MCP ─ audit --component/--screenshot/--dom + --persona/--task/--scaffold-docs ─►
+   Target construction: kind ∈ {component, screenshot, dom, url} (no live server needed)
+   Context ingestion: personas/tasks → Persona[]/TaskDefinition[]; Scaffold artifacts +
+     design tokens → SurfaceConfig/Overlay guardrails (a built-UI⟂token contradiction is a finding, US-003)
+        │
+   Capture: backend = static (no browser) → screenshot + parsed DOM (parse5/happy-dom);
+     accessibility-tree / computed-styles unavailable → DegradationReport (FR-CAP-6)
+        ▼
+   Evaluation: run the honest lens subset; adapters do source/component mapping from --component;
+     skipped measured checks reported explicitly (never fabricated — vision #2)
+        ▼
+   Findings → Backlog → Reporters (same as §4.1), with reduced-coverage note
+```
+This covers the release-gate static/source/screenshot/context inputs without a running server
+(review: Codex P1 — non-live and context-heavy paths made explicit).
 
 ## 5. Module structure (file-level, `@surface/core`)
 
@@ -158,17 +205,18 @@ core/src/
 ├── schema/            # zod: Finding, FindingDraft, Evidence, Dimensions, Location, Backlog, SurfaceError
 ├── findings/          # scoreFinding, severity/confidence bands, MMR, ReconciliationService, gate rule
 ├── closed-loop/       # FindingIdentity (hash+collision), TrackedFinding state machine, Baseline, Waiver, Verdict
-├── pipeline/          # PipelineOrchestrator, PipelineStage transitions, stage skip rules
-├── lenses/            # Lens interface + lens registry (measured/judged), per-lens modules
-├── state/             # ProjectState aggregate, atomic write (write-file-atomic), lock (proper-lockfile), config slices, migration (PS-I7)
-├── interfaces/        # published plugin interfaces: CaptureBackend, FrameworkAdapter, GroundingTool, Reporter, KnowledgeSource
+├── pipeline/          # PipelineOrchestrator, PipelineStage transitions, stage skip rules, lens registry
+├── state/             # ProjectState aggregate + StateStore (sole .surface writer), atomic write (write-file-atomic), lock (proper-lockfile), config slices, migration (PS-I7)
+├── interfaces/        # published plugin interfaces (exported as @surface/core/interfaces): CaptureBackend, FrameworkAdapter, GroundingTool, Lens, ReportRenderer, GateEvaluator, IssueExporter, KnowledgeSource, StateStore
 ├── result/            # Result<T, SurfaceError> + SurfaceError taxonomy (ADR-014)
 └── logging/           # pino logger factory, privacy-safe fields (ADR-018)
 ```
 
-Leaf packages implement `core/src/interfaces`: `capture/src/{playwright,agent-browser,static}`,
-`adapters/{react,vue,svelte,agnostic}/src`, `grounding/src/{axe,lighthouse,jsx-a11y}`,
-`reporters/src/{md,json,sarif,github}`, `knowledge/src/loader`.
+Leaf packages implement `@surface/core/interfaces` (via published exports, never deep `src/*`
+imports): `capture/src/{playwright,agent-browser,static}`, `adapters/{react,vue,svelte,agnostic}/src`,
+`grounding/src/{axe,lighthouse,jsx-a11y}`, `lenses/<lens>/src` (each lens its own package —
+review: Gemini P1), `reporters/src/{md,json,sarif,github}`, `knowledge/src/loader`. They are
+wired into the orchestrator at the composition root (§2a).
 
 ## 6. Extension points (interface + usage + constraints)
 
@@ -178,22 +226,41 @@ Leaf packages implement `core/src/interfaces`: `capture/src/{playwright,agent-br
 | **Framework adapter** | `FrameworkAdapter { supports(file): bool; introspect(src): ComponentMap }` | new `adapters/<fw>` package | uses the framework's real compiler (ADR-009); leaf package, no cross-adapter deps; ships a fixture suite (NFR-FW-1) |
 | **Grounding tool** | `GroundingTool { run(capture): ToolResult[] }` | new module in `@surface/grounding` | emits `tool-result` Evidence only; measured-wins (ADR-017); lazy-load if heavy |
 | **Lens** | `Lens { id; method; requiresModel; requiresLiveDom; evaluate(ctx): FindingDraft[] }` | `core/src/lenses/<lens>.ts` + a KB entry | must set `method`; measured lens needs tool evidence (ADR-005); judged lens never emits a measured label |
-| **Reporter** | `Reporter { format; render(findings, backlog): Report }` | new module in `@surface/reporters` | read-only over findings; local artifact first (ADR-016); no vanity score (FR-SCORE-4) |
+| **Report renderer** | `ReportRenderer { format; render(findings, backlog): Report }` | new module in `@surface/reporters` | **pure** (read-only over findings, no side effects); local artifact first (ADR-016); no vanity score (FR-SCORE-4) |
+| **Gate evaluator** | `GateEvaluator { evaluate(findings, policy): GateResult }` | `@surface/reporters` | gates on `SeverityBand`; never fails on judged/gated (FR-RULE-4) |
+| **Issue exporter** | `IssueExporter { export(localBacklogRef): IssueExport }` | `@surface/reporters` | side-effectful; consumes a **persisted local** artifact (never raw findings); retry/backoff; reports synced/unsynced (US-060) |
 | **App-type overlay** | yaml in `content/methodology/overlays/` | add a yaml file | shifts acceptance criteria per lens (FR-LENS-4); registered via overlay registry |
 | **Knowledge entry** | md+frontmatter in `content/knowledge/` | add a file | requires `## Summary`/`## Deep Guidance` + Citation + Freshness (FR-KB-1,4) |
 
-**Cannot be extended without an ADR:** the canonical `Finding`/`SurfaceError` schema, the
-measured/judged discipline, the state-file format/lock model, and the CLI/MCP contracts —
-these are the stable contracts everything else builds on (ADR-005, ADR-003, ADR-007/008).
+**Cannot be extended/changed without a new ADR** (review: Codex P2) — these are the load-bearing
+constraints everything else builds on:
+- the canonical `Finding`/`SurfaceError` schema and the measured/judged discipline (ADR-005);
+- the **persistence backend** (file-based; swapping in SQLite — the §10 escape hatch — requires
+  a superseding ADR), state-file format, and lock model (ADR-003);
+- the CLI/MCP contracts (ADR-007/008);
+- **any new public/network API surface** — REST, a remote/networked MCP listener (ADR-008);
+- **default-on data egress** of any kind, **model proxying/bundled inference**, or **telemetry**
+  (ADR-006, ADR-013, ADR-018) — all must stay opt-in.
 
 ## 7. State management
 
 Per ADR-003: `.surface/` is the single persistence surface, written via `write-file-atomic`
 under one `proper-lockfile` advisory lock, with explicit schema-version migration (PS-I7).
+
+**`StateStore` is the sole writer (review: Codex P1).** Capture, reporters, and exporters do
+**not** write `.surface/` directly — they return bytes / metadata / write-intents, and only
+`core/src/state` (the `StateStore`) writes under the lock and records artifact paths + events.
+This prevents split writes or lock bypass across packages (enforcing PS-I1). The capture
+backend produces artifact bytes; the `StateStore` persists them under `captures/`; reporters
+return rendered `Report` bytes; the `StateStore` writes them and exporters read the persisted
+local artifact before any external push (RPT-I1).
+
 Retention classes (ADR-003/013): **durable** (`state.json`, `findings/`, `config.yml`,
 baselines/waivers, decisions) committable+diffable; **ephemeral evidence** (`captures/`)
 git-ignored, purged per default unless retained. `runHistory` is rotated to bound per-run write
-size (keep last N; older rolls to `history.log` outside the locked aggregate).
+size (keep last N; older rolls to `history.log` — still written **under the same `.surface`
+StateLock** (PS-I1), just outside the rewritten `state.json` aggregate so per-run write size
+stays constant).
 
 ## 8. Cross-cutting concerns
 
@@ -231,7 +298,8 @@ size (keep last N; older rolls to `history.log` outside the locked aggregate).
 - **Routes per run (NFR-SCALE-1):** bounded by `RouteInventory.cap` (default ~50, raised by
   depth/preset); excess reported as `RoutesSkipped`, never silently dropped.
 - **Findings volume:** file-based state is the v1 choice (ADR-003) with the state layer behind
-  an interface — embedded SQLite is the documented escape hatch if volume outgrows files.
+  the `StateStore` interface — embedded SQLite is the documented escape hatch if volume outgrows
+  files, **and switching to it requires a superseding ADR** (it is a load-bearing constraint, §6).
 - **Startup/perf (NFR-PERF-1):** lazy `import()` per CLI command; Lighthouse lazy-loaded
   (ADR-001, ADR-017); `quick` preset p95 < 30s gated in CI.
 - **Write size:** `runHistory` rotation keeps the locked aggregate's per-run write bounded.

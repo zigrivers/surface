@@ -1,0 +1,21 @@
+{
+  "reviewer": "gemini-1.5-pro",
+  "overall": "The system architecture is exceptionally thorough, well-documented, and demonstrates deep alignment with its constraining ADRs and domain models. It successfully translates the project's complex requirements into a coherent, robust, and privacy-centric design. The core architectural risks appear to be well-mitigated, though a key implementation detail for plugins creates tension with the goal of modularity.",
+  "findings": [
+    {
+      "severity": "P1",
+      "pass": "Module structure",
+      "location": "Section 6. Extension points",
+      "finding": "The architecture specifies that new Lenses are added by modifying the `@surface/core` package (`core/src/lenses/<lens>.ts`). This contradicts the core modularity principle outlined in ADR-002 and `project-structure.md`, which aims to enable parallel agent work by isolating changes in leaf packages. Making `@surface/core` the modification point for a primary plugin type creates a bottleneck and increases the risk of merge conflicts, undermining a key architectural goal.",
+      "suggestion": "Revise the architecture to treat Lenses as first-class, dynamically registered plugins, similar to Reporters and framework Adapters. Lenses should reside in their own packages (e.g., `packages/lenses/<lens-name>`) and be discovered and registered by the `PipelineOrchestrator` at runtime. This would better honor the modular monorepo strategy and reduce contention on the critical `@surface/core` package."
+    },
+    {
+      "severity": "P3",
+      "pass": "Data-flow completeness",
+      "location": "Section 4.1. Audit a route \u2192 prioritized backlog",
+      "finding": "The data flow diagram does not explicitly visualize the alternative path for findings that are flagged as `gatedForHuman`. The diagram shows a single path to `Backlog synthesis`, which could imply all findings are processed the same way. While the prose and domain models cover this rule, the diagram itself is incomplete.",
+      "suggestion": "Update the data flow diagram in Section 4.1 to include a branch after the `FindingScored / FindingGated` step. This branch should show that findings where `gatedForHuman` is true are routed for human review/verdict and are not part of the primary agent-executable backlog synthesis, making the flow's handling of this critical rule visually explicit."
+    }
+  ],
+  "gate": "conditional-pass"
+}
