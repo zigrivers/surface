@@ -171,8 +171,16 @@ Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+surface is a **modular-monorepo CLI + MCP tool** (no hosted service, no DB): a pure
+`@surface/core` (schema, scoring, identity, state, pipeline orchestrator) wrapped by thin
+`cli`/`mcp` adapters, with edge plugins (capture backends, framework adapters, grounding,
+reporters) behind interfaces in `core`. Full blueprint: `docs/system-architecture.md`; decisions:
+`docs/adrs/`; domain: `docs/domain-models/`.
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+Path-scoped rules auto-load from **`.claude/rules/`** (TypeScript style, the measured/judged trust
+discipline, testing) — these summarize; the source docs own the detail
+(`docs/coding-standards.md`, `docs/domain-models/findings.md`, `docs/tdd.md`). Memory stack:
+`docs/ai-memory-setup.md` (Tier 1 rules enabled; Beads is the persistent memory of record;
+context7 MCP for library docs).
