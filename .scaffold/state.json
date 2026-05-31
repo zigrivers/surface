@@ -229,11 +229,16 @@
       ]
     },
     "domain-modeling": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/domain-models/"
-      ]
+      ],
+      "at": "2026-05-31T14:15:41.593Z",
+      "completed_at": "2026-05-31T14:15:41.593Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-domain-modeling": {
       "status": "pending",
@@ -582,9 +587,9 @@
   "next_eligible": [
     "design-system",
     "git-workflow",
-    "domain-modeling"
+    "review-domain-modeling"
   ],
   "extra-steps": [],
-  "save_counter": 34,
+  "save_counter": 36,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
