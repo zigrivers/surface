@@ -108,8 +108,10 @@ Full guide: `docs/git-workflow.md`. Essentials:
   assign agents to different packages; serialize `core` changes.
 - **CI = local gate:** `.github/workflows/ci.yml` runs `pnpm run check` (job `check`); the
   capture/grounding browser matrix runs only when those packages change.
-- **Code review / Prove It:** paste verification output in the PR; risky/subjective/brand
-  changes go to a human (principle #5).
+- **Code review (mandatory):** before merge run `scaffold run review-pr` (MMR: Codex+Gemini+Claude
+  + code-reviewer agent); fallback `scripts/cli-pr-review.sh <base>`. Fix all P0/P1, re-review,
+  then merge. Severity defs + criteria: `docs/review-standards.md`. Paste verification output in
+  the PR; risky/subjective/brand changes go to a human (principle #5).
 - **Remote status:** repo is **local-only** today (no remote); branch/worktree/commit mechanics
   apply now, PR/CI/auto-merge activate when a GitHub remote is added.
 

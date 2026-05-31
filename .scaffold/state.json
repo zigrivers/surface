@@ -117,14 +117,19 @@
       ]
     },
     "automated-pr-review": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "AGENTS.md",
         "docs/review-standards.md",
         "scripts/cli-pr-review.sh",
         "scripts/await-pr-review.sh"
-      ]
+      ],
+      "at": "2026-05-31T15:19:43.929Z",
+      "completed_at": "2026-05-31T15:19:43.929Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "design-system": {
       "status": "skipped",
@@ -685,12 +690,11 @@
     }
   },
   "next_eligible": [
-    "automated-pr-review",
     "ai-memory-setup",
     "claude-md-optimization",
     "implementation-plan"
   ],
   "extra-steps": [],
-  "save_counter": 75,
+  "save_counter": 77,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
