@@ -167,11 +167,16 @@
       "artifacts_verified": true
     },
     "coding-standards": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/coding-standards.md"
-      ]
+      ],
+      "at": "2026-05-31T00:55:58.801Z",
+      "completed_at": "2026-05-31T00:55:58.801Z",
+      "completed_by": "user",
+      "depth": 3,
+      "artifacts_verified": true
     },
     "project-structure": {
       "status": "pending",
@@ -560,10 +565,11 @@
     }
   },
   "next_eligible": [
-    "coding-standards",
+    "tdd",
+    "project-structure",
     "domain-modeling"
   ],
   "extra-steps": [],
-  "save_counter": 28,
+  "save_counter": 29,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
