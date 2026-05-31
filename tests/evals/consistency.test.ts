@@ -13,9 +13,25 @@ describe("eval:consistency", () => {
     const pkg = JSON.parse(read("package.json")) as { scripts: Record<string, string> };
     const claude = read("CLAUDE.md");
     // Key Commands reference `pnpm <script>`; assert each referenced script is defined.
-    for (const script of ["dev", "build", "test", "test:watch", "lint", "typecheck", "format", "format:check", "check", "clean"]) {
+    for (const script of [
+      "dev",
+      "build",
+      "test",
+      "test:watch",
+      "lint",
+      "typecheck",
+      "format",
+      "format:check",
+      "check",
+      "clean",
+    ]) {
       expect(pkg.scripts, `package.json missing script: ${script}`).toHaveProperty(script);
-      expect(claude, `CLAUDE.md should reference 'pnpm ${script}'`).toContain(`pnpm ${script.includes(":") ? "run " + script : script}`.replace("pnpm run check", "pnpm run check"));
+      expect(claude, `CLAUDE.md should reference 'pnpm ${script}'`).toContain(
+        `pnpm ${script.includes(":") ? "run " + script : script}`.replace(
+          "pnpm run check",
+          "pnpm run check",
+        ),
+      );
     }
   });
 
