@@ -410,12 +410,17 @@
       "artifacts_verified": true
     },
     "create-evals": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "tests/evals/",
         "docs/eval-standards.md"
-      ]
+      ],
+      "at": "2026-05-31T15:18:09.218Z",
+      "completed_at": "2026-05-31T15:18:09.218Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "operations": {
       "status": "completed",
@@ -682,10 +687,10 @@
   "next_eligible": [
     "automated-pr-review",
     "ai-memory-setup",
-    "create-evals",
-    "claude-md-optimization"
+    "claude-md-optimization",
+    "implementation-plan"
   ],
   "extra-steps": [],
-  "save_counter": 73,
+  "save_counter": 75,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
