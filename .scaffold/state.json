@@ -248,13 +248,18 @@
       "artifacts_verified": true
     },
     "add-e2e-testing": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "tests/screenshots/",
         "maestro/",
         "playwright.config.ts"
-      ]
+      ],
+      "at": "2026-05-31T15:15:07.440Z",
+      "completed_at": "2026-05-31T15:15:07.440Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "domain-modeling": {
       "status": "completed",
@@ -672,11 +677,10 @@
   "next_eligible": [
     "automated-pr-review",
     "ai-memory-setup",
-    "add-e2e-testing",
     "story-tests",
     "claude-md-optimization"
   ],
   "extra-steps": [],
-  "save_counter": 69,
+  "save_counter": 71,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }

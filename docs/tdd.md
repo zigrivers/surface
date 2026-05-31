@@ -20,6 +20,18 @@ is done only when tests pass and output is shown — never "it seems to work."
 | **Capture** | Playwright/agent-browser backends | Vitest + Playwright | real headless browser against local fixture HTML; agent-browser behind an interface, contract-tested |
 | **Pipeline/integration** | capture→lenses→findings→backlog→re-audit | Vitest | real file-based `.surface/` in a temp dir; model calls mocked |
 | **CLI/MCP contract** | exit codes, `--json` shape, MCP tool schema | Vitest (spawn) | real process; assert NFR-CLI-1 / NFR-MCP-1 |
+| **CLI e2e** | spawn the built `surface` binary; closed-loop smoke on a seeded fixture app | Vitest (spawn) + a local fixture server | real process + real `.surface/`; model calls mocked. *Skeleton: `tests/e2e/cli-smoke.e2e.test.ts`* |
+
+## E2E scope — when to use it (surface has no frontend of its own)
+
+surface is a **CLI/MCP tool, not a web app** — there is no surface UI to drive with Playwright.
+Its e2e layer is therefore **CLI e2e**: spawn the binary and assert the contract + the closed
+loop on a seeded fixture (`audit → findings.json → fix → re-audit → resolved`). **Use e2e** for
+the binary contract (exit codes, `--json`), the full closed-loop on a fixture app, and `gate`
+exit behavior. **Use unit/adapter/grounding tests** (not e2e) for scoring, identity hashing,
+per-framework introspection, and tool interpretation — they're faster and more precise.
+Playwright appears in surface only **inside the Capture layer** (testing the capture backend
+against fixture HTML), never as a frontend-e2e driver.
 
 ## Non-Negotiable Test Types
 - **Determinism tests (SC-4, NFR-DET-1):** every *measured*-finding producer — same captured
