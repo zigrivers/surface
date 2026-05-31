@@ -18,6 +18,7 @@
     "dist"
   ],
   "dependencies": {
+    "pino": "catalog:",
     "zod": "catalog:"
   },
   "scripts": {
@@ -30,6 +31,7 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@types/node": "catalog:",
     "eslint": "catalog:",
     "tsup": "catalog:",
     "typescript": "catalog:",
