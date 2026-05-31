@@ -1,0 +1,42 @@
+{
+  "reviewer": "Gemini 1.5 Pro",
+  "overall": "The implementation plan is well-structured, with a clear wave-based DAG, good risk assessment, and explicit traceability to architecture and stories. However, it contains a critical P0 task sizing issue that makes the CLI implementation task un-executable, and a P1 story coverage gap that misses a 'should' tier feature.",
+  "findings": [
+    {
+      "severity": "P0",
+      "pass": "Task sizing",
+      "task": "T-061",
+      "finding": "Task T-061 'CLI verbs' bundles 15 distinct CLI commands into a single task. This violates the 'agent-sized task' constraint (~150 LOC, \u22643 files) by several orders of magnitude and is not executable by a single agent in one session.",
+      "suggestion": "Break T-061 into 15 separate tasks, one for each verb (e.g., T-061.01 'CLI verb: init', T-061.02 'CLI verb: run', etc.). These can be parallelized to a degree, though they will all contend for the central commander app file."
+    },
+    {
+      "severity": "P1",
+      "pass": "Story/AC coverage",
+      "task": "Wave 2",
+      "finding": "The implementation plan is missing a task to cover US-004 'Multi-state & dual-theme capture'. This is a 'should'-tier story and its absence means key capture functionality for dynamic applications and different color schemes will not be built.",
+      "suggestion": "Add a new task to Wave 2 (Capture) to implement US-004. This task would depend on T-021 (Playwright backend) and would involve implementing the task-flow recipe runner and the `prefers-color-scheme` toggling during capture."
+    },
+    {
+      "severity": "P2",
+      "pass": "Task sizing",
+      "task": "T-047",
+      "finding": "Task T-047 'Author core KB entries' is a content-writing task, not a software development task. Its size is unbounded ('core KB entries') and the acceptance criteria are vague ('structure'). This is not an agent-executable coding task.",
+      "suggestion": "Replace T-047 with a 'scaffold' task: 'T-047-Scaffold: Create placeholder KB entries'. This task would create the file structure and markdown files for each required KB entry with correct frontmatter, but with 'TODO' content. The content authoring itself should be a separate, human-driven process or a different kind of automated task."
+    },
+    {
+      "severity": "P2",
+      "pass": "Architecture coverage",
+      "task": "Wave 1",
+      "finding": "The plan implements ReconciliationService (T-013) as part of the core domain logic, but the architecture diagram shows all plugin-like components as separate leaf packages. While it's a 'should' tier feature, its placement in `core` slightly violates the 'leaf-plugin' pattern for external-facing services like multi-model reconciliation.",
+      "suggestion": "Consider refactoring T-013 into its own package, `@surface/reconciliation`, that depends on `@surface/core`. This would better align with the modular architecture described in ADR-002 and system-architecture.md, even for a 'should' feature."
+    },
+    {
+      "severity": "P3",
+      "pass": "DAG validity",
+      "task": "Wave 3",
+      "finding": "Task T-041 (Usability lens) and subsequent judged lenses depend on T-046 (KB loader). However, there is an implicit dependency on T-047 (Author core KB entries) for the loader to have any meaningful content to load. An agent could execute T-046 and then T-041 and have it work but produce poor results due to an empty KB.",
+      "suggestion": "Make the dependency explicit. Add a dependency from T-041 and other judged lenses (T-042, T-043, T-044) on T-047 (or its scaffolded replacement). Alternatively, ensure the test for T-046 includes seeding some dummy KB content."
+    }
+  ],
+  "gate": "conditional-pass"
+}

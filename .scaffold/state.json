@@ -324,7 +324,7 @@
       "artifacts_verified": true
     },
     "implementation-plan-review": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-tasks.md",
@@ -332,7 +332,12 @@
         "docs/reviews/implementation-plan/review-summary.md",
         "docs/reviews/implementation-plan/codex-review.json",
         "docs/reviews/implementation-plan/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:25:28.422Z",
+      "completed_at": "2026-05-31T15:25:28.422Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "implementation-plan": {
       "status": "completed",
@@ -710,9 +715,15 @@
     }
   },
   "next_eligible": [
-    "implementation-plan-review"
+    "cross-phase-consistency",
+    "traceability-matrix",
+    "decision-completeness",
+    "critical-path-walkthrough",
+    "implementability-dry-run",
+    "dependency-graph-validation",
+    "scope-creep-check"
   ],
   "extra-steps": [],
-  "save_counter": 85,
+  "save_counter": 87,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
