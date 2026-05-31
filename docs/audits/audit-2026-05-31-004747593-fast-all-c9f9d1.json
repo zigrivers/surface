@@ -1,0 +1,115 @@
+{
+  "report_id": "audit-2026-05-31-004747593-fast-all-c9f9d1",
+  "engine_output": {
+    "schema_version": "1.0",
+    "invocation": {
+      "command": "audit",
+      "args": {
+        "triggered_by": "phase-boundary",
+        "step": "tech-stack",
+        "phase_label": "after tech stack"
+      },
+      "started_at": "2026-05-31T00:47:47.593Z",
+      "completed_at": "2026-05-31T00:47:48.156Z",
+      "scaffold_version": "3.30.0"
+    },
+    "availability": {
+      "git": {
+        "status": "available"
+      },
+      "gh": {
+        "status": "available"
+      },
+      "pipeline_docs": {
+        "status": "degraded",
+        "reason": "2/5 canonical artifacts present",
+        "evidence_paths": [
+          "docs/plan.md",
+          "docs/tech-stack.md"
+        ]
+      },
+      "tests": {
+        "status": "unavailable",
+        "reason": "no cached test run; run tests to populate"
+      },
+      "state": {
+        "status": "available",
+        "evidence_paths": [
+          ".scaffold/state.json"
+        ]
+      },
+      "beads": {
+        "status": "available"
+      },
+      "mmr": {
+        "status": "unavailable",
+        "reason": "no MMR jobs found in .mmr/jobs/"
+      },
+      "audit_history": {
+        "status": "unavailable",
+        "reason": "no audit JSON sidecars under docs/audits/"
+      },
+      "ledger": {
+        "events_read": 0,
+        "malformed_lines": 0,
+        "sources": []
+      }
+    },
+    "snapshot": null,
+    "replay": null,
+    "findings": [],
+    "needs_attention": [],
+    "graph_stats": {
+      "nodes_by_kind": {
+        "feature": 0,
+        "story": 0,
+        "ac": 0,
+        "plan_task": 0,
+        "playbook_task": 0,
+        "test": 0,
+        "file": 153,
+        "decision": 0
+      },
+      "edges_by_kind": {},
+      "orphans_by_kind": {},
+      "unsanctioned_uses": 0,
+      "ad_hoc_token_uses": 0
+    },
+    "fix_threshold": "P2",
+    "verdict": "pass",
+    "summary": {
+      "total": 0,
+      "by_severity": {
+        "P0": 0,
+        "P1": 0,
+        "P2": 0,
+        "P3": 0
+      },
+      "by_severity_status": {
+        "P0": {
+          "open": 0,
+          "acknowledged": 0,
+          "skipped": 0
+        },
+        "P1": {
+          "open": 0,
+          "acknowledged": 0,
+          "skipped": 0
+        },
+        "P2": {
+          "open": 0,
+          "acknowledged": 0,
+          "skipped": 0
+        },
+        "P3": {
+          "open": 0,
+          "acknowledged": 0,
+          "skipped": 0
+        }
+      },
+      "blocking": 0,
+      "acknowledged": 0,
+      "skipped_lenses": 0
+    }
+  }
+}

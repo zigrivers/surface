@@ -1,0 +1,106 @@
+[
+  {
+    "category": "CLI framework",
+    "choice": "citty v0.1.x",
+    "why": "Modern, composable CLI definition from the unjs ecosystem with automatic ESM optimization and zero-dependency help generation.",
+    "alternativeRejected": "oclif (excessive boilerplate and heavy dependency tree for a lightweight audit tool)",
+    "aiCompat": "High; utilizes clear, declarative object structures that are easy for agents to extend.",
+    "gotcha": "Smaller ecosystem than commander, but more idiomatic for modern TypeScript monorepos."
+  },
+  {
+    "category": "MCP server SDK",
+    "choice": "@modelcontextprotocol/sdk v1.x",
+    "why": "The official standard for building MCP servers to ensure native compatibility with LLM agents.",
+    "alternativeRejected": "Custom JSON-RPC (lacks community middleware and standard tool-call schema definitions)",
+    "aiCompat": "Excellent; industry-standard patterns are well-represented in current training data.",
+    "gotcha": "None; it is the mandatory protocol for the agent-first goal."
+  },
+  {
+    "category": "Monorepo tooling",
+    "choice": "pnpm workspaces + turborepo v2.x",
+    "why": "Fastest installation and intelligent task caching for the core/cli/mcp package split.",
+    "alternativeRejected": "Nx (too architecturally opinionated and complex for a utility CLI)",
+    "aiCompat": "High; simple turbo.json configuration is very resilient to agent modification.",
+    "gotcha": "Turborepo remote caching setup can be nuanced in CI environments."
+  },
+  {
+    "category": "Build/bundle",
+    "choice": "tsup v8.x",
+    "why": "Zero-config esbuild-based bundler that handles dual CJS/ESM and automatically generates d.ts files.",
+    "alternativeRejected": "tsc (lacks bundling and minification required for single-binary distribution)",
+    "aiCompat": "Excellent; uses a single simple config or CLI flags that agents handle reliably.",
+    "gotcha": "None."
+  },
+  {
+    "category": "Test runner",
+    "choice": "vitest v3.x",
+    "why": "Blazing fast unit and integration testing with native ESM support and Jest-compatible API.",
+    "alternativeRejected": "Jest (significant overhead and configuration complexity in TypeScript/ESM environments)",
+    "aiCompat": "Perfect; leverages existing Jest training data while providing better ESM reliability.",
+    "gotcha": "Browser-mode testing requires separate configuration for Playwright integration."
+  },
+  {
+    "category": "Lint/format",
+    "choice": "biome v1.9.x",
+    "why": "Consolidates linting and formatting into a single Rust-powered tool that is 100x faster than the ESLint/Prettier stack.",
+    "alternativeRejected": "ESLint + Prettier (slow startup times and frequent plugin version conflicts)",
+    "aiCompat": "Moderate; follows strict, logical defaults that prevent the style-drift often caused by AI-generated code.",
+    "gotcha": "Does not support some niche ESLint plugins; requires manual verification for custom a11y rules."
+  },
+  {
+    "category": "Schema/validation",
+    "choice": "zod v3.x",
+    "why": "TypeScript-first schema declaration that provides both runtime validation and static type safety for project findings.",
+    "alternativeRejected": "Valibot (smaller bundle but lacks the rich ecosystem of integrations needed for CLI tools)",
+    "aiCompat": "Industry standard; agents write and maintain Zod schemas with near-zero hallucination.",
+    "gotcha": "None."
+  },
+  {
+    "category": "Config/knowledge-base",
+    "choice": "yaml v2.x + gray-matter v4.x",
+    "why": "Industry standard for human-editable configurations and Markdown-based knowledge base frontmatter.",
+    "alternativeRejected": "JSON (hostile for human comments and long-form guidance documentation)",
+    "aiCompat": "Excellent; YAML is a native format for LLM reasoning and configuration tasks.",
+    "gotcha": "None."
+  },
+  {
+    "category": "Grounding integration",
+    "choice": "axe-playwright + lighthouse v12.x (Library)",
+    "why": "Programmatic library invocation allows for deterministic measurement and fine-grained control within the MCP context.",
+    "alternativeRejected": "CLI invocation (parsing shell output is fragile and adds process management overhead)",
+    "aiCompat": "High; clear programmatic APIs are well-documented and predictable for agents.",
+    "gotcha": "Lighthouse adds a significant dependency footprint; must be lazy-loaded."
+  },
+  {
+    "category": "Framework adapters",
+    "choice": "@typescript-eslint/parser + happy-dom v15.x",
+    "why": "Fastest combination for static code introspection and lightweight DOM simulation for non-browser audits.",
+    "alternativeRejected": "jsdom (too slow for high-volume static component analysis)",
+    "aiCompat": "High; follows standard compiler and DOM APIs that agents already use for scraping/auditing.",
+    "gotcha": "happy-dom lacks full CSS layout engine support for high-fidelity visual 'judged' findings."
+  },
+  {
+    "category": "Multi-model invocation",
+    "choice": "mmr (Multi-Model Review tool)",
+    "why": "Leverages existing ecosystem tools for model reconciliation and verdict consensus as defined in the Scaffold methodology.",
+    "alternativeRejected": "Direct SDKs (requires complex manual implementation of retry logic and multi-provider auth)",
+    "aiCompat": "Excellent; natively integrated into the agent's existing workflow skills.",
+    "gotcha": "Adds a runtime dependency on the presence of the mmr CLI."
+  },
+  {
+    "category": "Reading-level analysis",
+    "choice": "retext-readability v8.x",
+    "why": "Modular, community-vetted engine for calculating Flesch-Kincaid and Gunning Fog scores on interface copy.",
+    "alternativeRejected": "automated-readability (less extensible and harder to integrate into a unified analysis pipeline)",
+    "aiCompat": "High; straightforward API with clear input/output expectations.",
+    "gotcha": "None."
+  },
+  {
+    "category": "Critical Missing Piece",
+    "choice": "Drizzle ORM + Better-SQLite3",
+    "why": "Provides a robust local persistence layer for stable finding identity, waivers, and re-audit history.",
+    "alternativeRejected": "Flat JSON files (high risk of race conditions and slow for matching findings across thousands of lines of state)",
+    "aiCompat": "High; SQL and Drizzle schemas are very intuitive for AI agents to query and migrate.",
+    "gotcha": "Requires native bindings which can occasionally complicate Homebrew/npx distribution if not pre-compiled."
+  }
+]

@@ -1,0 +1,130 @@
+[
+  {
+    "category": "CLI framework/argument parser",
+    "choice": "commander@14.x",
+    "why": "Best fit for a deterministic npm/npx CLI with many verbs, POSIX-style flags, TypeScript types, and minimal framework weight.",
+    "alternativeRejected": "oclif: strong for plugin-heavy enterprise CLIs, but too much scaffold/runtime machinery for surface v1.",
+    "aiCompat": "Very strong: abundant training examples and conventional command/action patterns.",
+    "gotcha": "Commander v14 requires modern Node; implement consistent exit codes, --json handling, and command registry discipline yourself."
+  },
+  {
+    "category": "MCP server SDK",
+    "choice": "@modelcontextprotocol/sdk@1.29.x",
+    "why": "Official TypeScript SDK with stdio and HTTP transports, tool schemas, and broad agent-client compatibility.",
+    "alternativeRejected": "Hand-rolled JSON-RPC: avoids a dependency but risks subtle protocol/version incompatibilities.",
+    "aiCompat": "Strong and improving fast: official SDK examples dominate MCP TypeScript training data.",
+    "gotcha": "Use v1.x for production now; v2 is still a moving target, and versions before 1.25.x had notable security issues."
+  },
+  {
+    "category": "Monorepo tooling",
+    "choice": "pnpm@11.x workspaces + turbo@2.9.x",
+    "why": "pnpm gives strict, fast, disk-efficient workspaces; Turborepo adds simple cached task orchestration without Nx-level framework ownership.",
+    "alternativeRejected": "Nx: more powerful project graph and generators, but heavier than needed for a CLI/MCP/library monorepo.",
+    "aiCompat": "Very strong: pnpm + turbo is a common, well-documented TypeScript monorepo pattern.",
+    "gotcha": "pnpm 11 expects modern Node 22+; lock down install scripts/minimum release age because npm supply-chain risk is high in 2026."
+  },
+  {
+    "category": "Build/bundle for libs+CLI",
+    "choice": "tsup@8.5.x + tsc --noEmit",
+    "why": "tsup gives fast esbuild-powered bundling, shebang-friendly CLI output, and clean ESM/CJS library builds while tsc owns type correctness.",
+    "alternativeRejected": "tsc-only: simpler but does not bundle CLI assets/dependencies well and produces less portable npm binaries.",
+    "aiCompat": "Strong: common in modern TypeScript CLIs and libraries with many examples.",
+    "gotcha": "tsup does not typecheck by default; run tsc separately and explicitly externalize Playwright/Lighthouse/native-heavy deps."
+  },
+  {
+    "category": "Test runner",
+    "choice": "vitest@4.1.x",
+    "why": "Fast TypeScript-native runner with Jest-like APIs, snapshots, coverage, mocks, and good monorepo ergonomics.",
+    "alternativeRejected": "node:test: stable and dependency-free, but weaker ecosystem for mocks, snapshots, browser-mode adjacency, and agent familiarity.",
+    "aiCompat": "Very strong: Jest-compatible conventions make AI-generated tests more reliable.",
+    "gotcha": "ESM mocking/import order can still surprise; keep integration capture tests explicit and use Playwright for real browser assertions."
+  },
+  {
+    "category": "Lint/format",
+    "choice": "eslint@9.x flat config + typescript-eslint@8.x + prettier@3.8.x",
+    "why": "Most mature rule/plugin ecosystem for TypeScript, Node CLIs, security rules, accessibility-adjacent checks, and custom project rules.",
+    "alternativeRejected": "biome@2.4.x: much faster, but still weaker for custom/framework/plugin depth across React/Vue/Svelte and Node tooling.",
+    "aiCompat": "Very strong: ESLint and Prettier conventions are deeply represented in training data.",
+    "gotcha": "Flat config is more verbose; keep one shared workspace config package to avoid config drift."
+  },
+  {
+    "category": "Schema/validation for findings + config",
+    "choice": "zod@4.1.x",
+    "why": "Best TypeScript-first schema ergonomics for findings, config, MCP tool inputs, JSON Schema export, and runtime validation.",
+    "alternativeRejected": "valibot: smaller and fast, but weaker convention strength and fewer examples for complex agent-facing contracts.",
+    "aiCompat": "Very strong: Zod is the default mental model for TypeScript runtime schemas in AI-generated code.",
+    "gotcha": "Zod 4 changed internals; standardize on one major version and snapshot generated JSON Schemas."
+  },
+  {
+    "category": "Config + knowledge-base file format",
+    "choice": "yaml@2.8.x for .surface/config.yml + Markdown KB entries with YAML frontmatter parsed by gray-matter@4.0.3",
+    "why": "Human-editable config and inspectable Markdown knowledge entries match the PRD while keeping metadata structured.",
+    "alternativeRejected": "JSON/JSONC-only: easier for machines but worse for curated KB prose, citations, and maintainer editing.",
+    "aiCompat": "Strong: YAML config plus Markdown frontmatter is a highly conventional docs/tooling format.",
+    "gotcha": "gray-matter is stable but old; use yaml directly for config validation and treat frontmatter as input to Zod."
+  },
+  {
+    "category": "Accessibility/perf grounding integration",
+    "choice": "@axe-core/playwright@4.11.x + axe-core@4.11.x via Playwright pages; lighthouse@12.x programmatic Node API via launched Chrome",
+    "why": "Library invocation gives structured results, stable evidence capture, and better control than scraping CLI output.",
+    "alternativeRejected": "Axe/Lighthouse CLIs: useful manually, but less controllable for stable IDs, evidence anchors, retries, and machine-readable contracts.",
+    "aiCompat": "Strong: Playwright + axe-core and Lighthouse JSON are widely documented and familiar to agents.",
+    "gotcha": "Lighthouse is ESM/browser-version sensitive; pin Chrome/Lighthouse in CI and keep axe-core MPL notices intact."
+  },
+  {
+    "category": "Framework adapters + DOM/HTML parsing",
+    "choice": "@babel/parser@7.29.x + @typescript-eslint/typescript-estree@8.x + @vue/compiler-sfc@3.5.x + svelte/compiler@5.55.x + parse5@8.0.x",
+    "why": "Use each framework's native parser/compiler where possible, with parse5 for spec-compliant framework-agnostic HTML/DOM parsing.",
+    "alternativeRejected": "tree-sitter-only: good generic parsing, but weaker framework/compiler semantics for Vue SFCs, Svelte, and JSX/TSX transforms.",
+    "aiCompat": "Strong: these are canonical parser choices with many examples and predictable AST conventions.",
+    "gotcha": "Exact DOM-to-source/component mapping remains immature; expect source-map heuristics and adapter-specific fixture suites."
+  },
+  {
+    "category": "Multi-model invocation",
+    "choice": "execa@9.x adapter layer that invokes installed CLIs: codex exec, claude -p --output-format json, and gemini -p --output-format json",
+    "why": "CLI adapters preserve each provider's BYO auth, local permissions model, and agent ergonomics without surface storing provider keys.",
+    "alternativeRejected": "Direct SDK aggregation: cleaner APIs, but shifts auth/key handling into surface and does not cover Codex/Gemini/Claude CLI behavior consistently.",
+    "aiCompat": "Medium-strong but immature: terminal AI CLIs are now common, but flags and JSON output schemas still move quickly.",
+    "gotcha": "Treat provider CLIs as volatile integrations: version-detect, timeout, sandbox, force read-only/non-edit modes, and validate all JSON output."
+  },
+  {
+    "category": "Reading-level/content analysis library",
+    "choice": "unified/retext stack: retext@9.x + retext-english@5.x + retext-readability@8.0.0 + retext-equality@7.x",
+    "why": "Gives AST-based prose analysis, readability formulas, lint-style messages, and room for tone/inclusive-language rules.",
+    "alternativeRejected": "text-readability: simpler formulas, but lacks a composable message pipeline and content-lint ecosystem.",
+    "aiCompat": "Moderate: unified/retext is established, but less common in AI examples than Zod/Vitest/ESLint.",
+    "gotcha": "Mostly English-centric; mark non-English analysis as degraded until locale-specific plugins are added."
+  },
+  {
+    "category": "State, locking, and resumability",
+    "choice": "proper-lockfile@4.x + write-file-atomic@6.x",
+    "why": "Directly supports .surface/state.json integrity, interrupted-run safety, and concurrent audit/re-audit protection.",
+    "alternativeRejected": "Ad hoc fs writes: simpler initially, but risks corrupting state and breaking stable finding identity.",
+    "aiCompat": "Moderate: conventional Node file-safety libraries, though agents often forget this layer without explicit tests.",
+    "gotcha": "Handle stale locks carefully and test Windows/macOS/Linux filesystem behavior."
+  },
+  {
+    "category": "GitHub Issues, Checks, and PR annotations",
+    "choice": "@octokit/rest@22.x + @octokit/graphql@9.x + SARIF v2.1.0 emitted with node-sarif-builder@3.2.x",
+    "why": "Covers required GitHub Issues export, richer Checks/annotations, and CI-native SARIF without shelling out to gh.",
+    "alternativeRejected": "gh CLI only: convenient locally, but less predictable in CI/MCP contexts and harder to unit test.",
+    "aiCompat": "Strong: Octokit and SARIF are well-known integration formats with stable examples.",
+    "gotcha": "GitHub auth scopes, rate limits, and annotation limits need explicit batching/backoff and local artifact fallback."
+  },
+  {
+    "category": "Screenshot evidence, cropping, and redaction",
+    "choice": "sharp@0.34.x",
+    "why": "Fast, mature Node image processing for screenshot crops, highlighted evidence regions, thumbnails, and pixel redaction.",
+    "alternativeRejected": "jimp: pure JS and simpler installs, but much slower and weaker for large screenshots/batch processing.",
+    "aiCompat": "Strong: sharp is the standard Node image-processing library with abundant examples.",
+    "gotcha": "Native/libvips binaries can affect install portability; verify npm, npx, and Homebrew install paths on all target platforms."
+  },
+  {
+    "category": "Structured logging and run observability",
+    "choice": "pino@10.x",
+    "why": "Low-overhead JSON logging fits CLI --json, MCP diagnostics, CI logs, and future opt-in telemetry without inventing a log format.",
+    "alternativeRejected": "console/debug only: fine early, but insufficient for structured run histories and agent-readable failures.",
+    "aiCompat": "Strong: Pino is a common Node logging convention and easy for agents to use correctly.",
+    "gotcha": "Never write diagnostics to MCP stdout; route logs to stderr/files so protocol JSON is not corrupted."
+  }
+]

@@ -188,11 +188,16 @@
       ]
     },
     "tech-stack": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/tech-stack.md"
-      ]
+      ],
+      "at": "2026-05-31T00:47:47.591Z",
+      "completed_at": "2026-05-31T00:47:47.591Z",
+      "completed_by": "user",
+      "depth": 3,
+      "artifacts_verified": true
     },
     "add-e2e-testing": {
       "status": "pending",
@@ -541,9 +546,9 @@
   },
   "next_eligible": [
     "user-stories",
-    "tech-stack"
+    "coding-standards"
   ],
   "extra-steps": [],
-  "save_counter": 22,
+  "save_counter": 24,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
