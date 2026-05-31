@@ -1,3 +1,4 @@
 {"id":"int-cf94cbbc1bc992741120d67305f85278","kind":"field_change","created_at":"2026-05-31T00:59:46.237702Z","actor":"Ken Allred","issue_id":"surface-4i6","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-87b346f306ba96b859092ad915aa73e0","kind":"field_change","created_at":"2026-05-31T00:59:46.536318Z","actor":"Ken Allred","issue_id":"surface-q2p","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
 {"id":"int-c705584c39250754147c23e03ecf639c","kind":"field_change","created_at":"2026-05-31T00:59:46.859763Z","actor":"Ken Allred","issue_id":"surface-tjk","extra":{"field":"status","new_value":"closed","old_value":"open","reason":"Closed"}}
+{"id":"int-e1c2fc3fee618ac99470e6526b1d2e4b","kind":"field_change","created_at":"2026-05-31T14:15:26.875836Z","actor":"Ken Allred","issue_id":"surface-4i6","extra":{"field":"status","new_value":"in_progress","old_value":"closed"}}

@@ -1,0 +1,39 @@
+{
+  "reviewer": "Gemini 1.5 Pro",
+  "overall": "The ADRs establish a solid technical foundation, particularly in the choice of the core TS/Node stack and its tooling. However, the review reveals critical gaps, especially a contradiction regarding the need for server authentication and missing strategies for error handling and testing. These omissions, if unaddressed, will lead to inconsistent implementation and downstream rework.",
+  "findings": [
+    {
+      "severity": "P1",
+      "pass": "Contradiction",
+      "adr": "index.md",
+      "location": "Decisions Not Applicable (N/A)",
+      "finding": "The ADR index lists 'Authentication/Authorization' as N/A, reasoning that surface is a CLI tool. This contradicts the PRD's requirement for an MCP server (FR-IF-2) and auth-state injection (FR-CAP-8), which are server-like and auth-related concerns that require a security design.",
+      "suggestion": "Create a new ADR for 'Server Authentication and Security' that defines the security model for the MCP server, even if it's 'no auth in v1'. The decision and its risks (e.g., localhost-only binding, token-based security for agent access, etc.) must be explicitly recorded, not dismissed."
+    },
+    {
+      "severity": "P1",
+      "pass": "Missing decisions",
+      "adr": "N/A",
+      "location": "N/A",
+      "finding": "There is no ADR defining a unified Error Handling Strategy. It's unclear how errors should be structured, propagated from sub-systems (like capture backends or adapters) to the core, and exposed to different interfaces (CLI vs. MCP server). This will lead to inconsistent error handling across the modular monorepo.",
+      "suggestion": "Create an ADR for 'Error Handling' that defines custom error classes, a standard error response format/schema for the MCP API, and guidelines for error logging vs. user-facing messages."
+    },
+    {
+      "severity": "P2",
+      "pass": "Unresolved trade-offs",
+      "adr": "ADR-006-byo-key-model-access.md",
+      "location": "Consequences",
+      "finding": "The ADR acknowledges that the BYO-key model is a friction point for users, and the only mitigation offered is 'clear documentation'. This doesn't sufficiently address the usability challenge of acquiring, managing, and securing API keys, which could be an adoption blocker for the P2 (non-designer builder) persona.",
+      "suggestion": "Enhance the ADR to include a plan for a future 'Helper' or 'Wizard' command in the CLI (`surface config setup-model`) that guides users through finding their API key on provider websites and setting it securely in an environment file. This makes the mitigation more concrete than just 'documentation'."
+    },
+    {
+      "severity": "P2",
+      "pass": "Missing decisions",
+      "adr": "N/A",
+      "location": "N/A",
+      "finding": "While `tech-stack.md` selects Vitest, there is no ADR that formalizes the project's overall Testing Strategy. The strategy should define the scope and goals of unit, integration, and E2E tests, where they should live in the monorepo, and what the minimum coverage targets are for different package types (e.g., core, adapters, cli).",
+      "suggestion": "Create an ADR for 'Testing Strategy' that consolidates the testing approach, referencing the choice of Vitest from `tech-stack.md` and setting clear expectations for contributors and agents."
+    }
+  ],
+  "gate": "fail"
+}

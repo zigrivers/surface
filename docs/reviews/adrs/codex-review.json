@@ -1,0 +1,103 @@
+{
+  "reviewer": "Codex (GPT-5)",
+  "overall": "The ADR set is broadly coherent and the recorded dependency graph is acyclic, but it under-records several architecture-significant decisions that the PRD, domain model, and tech stack already treat as mandatory. The highest-risk gaps are privacy/redaction/retention, runner-skill/API coverage, reporting/export semantics, and verification architecture; these will cause downstream rework if left to specs or implementation convention.",
+  "findings": [
+    {
+      "severity": "P1",
+      "pass": "Contradiction",
+      "adr": "ADR-008",
+      "location": "Decision",
+      "finding": "ADR-008 states that surface exposes exactly two public contracts, CLI and MCP, but PRD FR-IF-3 and the release gate require a natural-language runner skill, and the domain model explicitly says CLI/MCP/runner skill contracts are owned by api-contracts/architecture.",
+      "suggestion": "Amend ADR-008 to either include the runner skill as a third public adapter contract, with versioning/compatibility expectations, or explicitly classify it as non-public/generated and reconcile that with FR-IF-3."
+    },
+    {
+      "severity": "P1",
+      "pass": "Contradiction",
+      "adr": "ADR-003",
+      "location": "Decision / Consequences",
+      "finding": "ADR-003 treats captures as persisted `.surface/captures/` state and emphasizes readable/diffable/committable state, but PRD NFR-DATA-1 says captures are ephemeral per run unless the user opts to retain them. The ADR does not distinguish durable state from sensitive transient evidence.",
+      "suggestion": "Revise ADR-003 to define retention classes: durable state/findings/config, ephemeral captures by default, explicit opt-in retention, purge behavior, and which artifacts are safe to commit."
+    },
+    {
+      "severity": "P1",
+      "pass": "Missing decisions",
+      "adr": "index",
+      "location": "Criteria-mandated categories that are N/A",
+      "finding": "The index records auth as N/A but does not record a security/privacy boundary ADR despite PRD NFR-SEC-1, NFR-DATA-1, FR-CAP-8, and FR-CAP-11 requiring auth-state injection, domain allowlists, no default exfiltration, redaction, and local-only retention.",
+      "suggestion": "Add an ADR for security/data handling covering auth-state inputs, model/integration exfiltration gates, redaction policy, retention/purge defaults, domain allowlists, network interception opt-in, and release-blocking security review criteria."
+    },
+    {
+      "severity": "P1",
+      "pass": "Missing decisions",
+      "adr": "index",
+      "location": "Decision log",
+      "finding": "There is no ADR for Reporting & Integrations even though the domain model makes it a bounded context and tech-stack §12 chooses Octokit, SARIF, sharp, local-artifact-first export, retry/backoff, and CI reporter behavior.",
+      "suggestion": "Add an ADR for reporting/export architecture: local artifacts as source of truth, report formats, SARIF validation, GitHub Issues/Checks/PR annotations, retry/backoff, partial export semantics, and failure exit-code behavior."
+    },
+    {
+      "severity": "P1",
+      "pass": "Missing decisions",
+      "adr": "index",
+      "location": "Decision log",
+      "finding": "There is no ADR for verification/test architecture, despite multiple release-blocking contracts: measured-finding determinism, CLI contract tests, MCP schema snapshots, capture backend matrix, adapter fixture suites, identity transition tests, SARIF validation, and perf gates.",
+      "suggestion": "Add a verification architecture ADR that records Vitest/Playwright test layers, contract-test ownership, golden/snapshot policy, capture matrix, determinism tests, perf benchmarks, and release gates mapped to NFRs."
+    },
+    {
+      "severity": "P1",
+      "pass": "Missing decisions",
+      "adr": "index",
+      "location": "Decision log",
+      "finding": "The core grounding/lens architecture has no ADR. Tech-stack §8/§13 chooses axe, Lighthouse, eslint-plugin-jsx-a11y, and retext, while ADR-005 only says measured findings need tool evidence and ADR-012 only places orchestration in a service.",
+      "suggestion": "Add an ADR for grounding and lens execution that records measured producers, judged producers, source-of-truth precedence, lazy loading of heavy tools, lens plugin boundaries, and how tool outputs become canonical Evidence."
+    },
+    {
+      "severity": "P1",
+      "pass": "Unresolved trade-offs",
+      "adr": "ADR-010",
+      "location": "Decision / Consequences",
+      "finding": "The fallback identity anchor can degrade to `selector | component | file`, but file- or component-only anchors can collide for multiple findings with the same lens and issueType in the same location. The ADR says keys are immutable and never reused but does not define collision detection or disambiguation.",
+      "suggestion": "Specify collision handling: include a stable secondary discriminator when anchors are coarse, detect duplicate identity candidates in a run, and mark ambiguous matches `identity-broken` rather than merging distinct defects."
+    },
+    {
+      "severity": "P2",
+      "pass": "Unresolved trade-offs",
+      "adr": "ADR-010",
+      "location": "Decision",
+      "finding": "ADR-010 defers bounded DOM-drift tolerance parameters downstream while making stable identity a trust primitive. The mitigation says prefer `identity-broken`, but there is no revisit trigger, acceptance threshold, or test corpus requirement.",
+      "suggestion": "Add explicit drift-tolerance acceptance criteria and revisit triggers, such as fixture-based identity tests for unchanged, reordered, moved, and ambiguous nodes, with conservative defaults required before implementation starts."
+    },
+    {
+      "severity": "P2",
+      "pass": "Decision-dependency integrity",
+      "adr": "ADR-010",
+      "location": "Header / Decision dependency graph",
+      "finding": "ADR-010 relies on ADR-004's agent-browser deterministic element refs as the preferred identity anchor, but ADR-004 is only listed as Related, not as a dependency.",
+      "suggestion": "Add ADR-004 to ADR-010's Depends on list and update the index dependency graph."
+    },
+    {
+      "severity": "P2",
+      "pass": "Decision-dependency integrity",
+      "adr": "ADR-012",
+      "location": "Header / Decision",
+      "finding": "ADR-012 says the orchestrator drives resumability through Project State and `AuditRun.currentStage`, but it does not depend on ADR-003, which records the file-based state and locking decision that makes resumability possible.",
+      "suggestion": "Add ADR-003 to ADR-012's Depends on list and update the index dependency graph."
+    },
+    {
+      "severity": "P2",
+      "pass": "Missing rationale",
+      "adr": "ADR-005",
+      "location": "Decision",
+      "finding": "ADR-005 embeds a broad error-handling strategy, `Result<T, SurfaceError>` across package boundaries with throwing confined to CLI/MCP edges, inside the measured/judged invariant ADR. The ADR does not give enough context for sad-path requirements such as degraded runs, retryable integrations, MCP version errors, and exit-code mapping.",
+      "suggestion": "Either split error handling into a dedicated ADR or expand ADR-005 with SurfaceError taxonomy, retry/degradation semantics, CLI/MCP mappings, and consequences for package APIs."
+    },
+    {
+      "severity": "P2",
+      "pass": "Missing decisions",
+      "adr": "index",
+      "location": "Decision log",
+      "finding": "Observability is chosen in tech-stack §12 as pino and required by PRD NFR-OBS-1 for structured run logs and knowledge-gap signals, but no ADR records logging boundaries, event taxonomy, redaction of logs, or opt-in telemetry posture.",
+      "suggestion": "Add a lightweight observability ADR covering structured logs, run/event IDs, knowledge-gap signals, privacy-safe logging, verbosity controls, and whether any telemetry exists."
+    }
+  ],
+  "gate": "conditional-pass"
+}

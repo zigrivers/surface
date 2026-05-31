@@ -1,0 +1,112 @@
+{
+  "reviewer": "GPT-5 Codex",
+  "overall": "The context map captures the rough product loop, but several core PRD contracts are not modeled as enforceable domain concepts. I would not proceed to ADRs yet: stable public finding identity, agent-executable backlog semantics, and .surface ownership are ambiguous enough to cause architectural rework.",
+  "findings": [
+    {
+      "severity": "P0",
+      "pass": "PRD Coverage",
+      "location": "docs/domain-models/findings.md > Backlog; docs/domain-models/closed-loop.md > ValidationCheck",
+      "finding": "The PRD's core value proposition is an agent-executable, re-verifiable backlog, but BacklogEntry only contains findingId, priority, rank, and duplicate metadata. Acceptance criteria, runnable validation checks, implementation context, and task/export readiness are not part of the backlog aggregate; ValidationCheck appears later on TrackedFinding and is not tied to the backlog item the agent executes.",
+      "suggestion": "Introduce an AgentTask or FixBacklogEntry aggregate/value owned by Findings & Backlog with finding identity, evidence/context, acceptance criteria, validationCheck, gatedForHuman execution policy, and export status. Make FR-LOOP-1's detect→task→acceptance criteria→validation check lifecycle explicit before ADRs."
+    },
+    {
+      "severity": "P0",
+      "pass": "Ubiquitous Language Consistency",
+      "location": "docs/domain-models/index.md > Finding/FindingIdentity glossary; docs/domain-models/findings.md > Finding.id; docs/domain-models/reporting.md > GateResult/IssueExport",
+      "finding": "The PRD requires stable finding IDs in machine artifacts and across re-runs, but the model defines Finding.id as identity within a run while stable identity lives separately as FindingIdentity.identityKey. Reporting, exports, gate results, and backlog entries all use FindingId, so the public contract would expose unstable IDs exactly where agents and CI need stable IDs.",
+      "suggestion": "Rename the within-run identifier to FindingOccurrenceId and make the public Finding.id either the stable identityKey or an explicit StableFindingId derived from FindingIdentity. Use the stable ID in findings.json, backlog entries, gate results, exports, baselines, waivers, verdicts, and explain commands."
+    },
+    {
+      "severity": "P0",
+      "pass": "Bounded Context Integrity",
+      "location": "docs/domain-models/project-state.md > Responsibility/Aggregate boundary; docs/domain-models/capture.md > CaptureArtifact.path/CAP-I6; docs/domain-models/reporting.md > Report.path/RPT-I1",
+      "finding": "Project State claims it is the only context that writes .surface/, but Capture writes .surface/captures/ artifacts and Reporting writes .surface/ reports. This creates contradictory persistence ownership and no explicit integration boundary for atomic writes, retention, redaction, and source-of-truth guarantees.",
+      "suggestion": "Choose one ownership model. Either Project State owns only state.json/config/identity/decisions while Capture and Reporting own their subdirectories, or Project State exposes a published ArtifactStore/StateStore service used by Capture and Reporting. Then update invariants and events so write ownership is enforceable."
+    },
+    {
+      "severity": "P1",
+      "pass": "PRD Coverage",
+      "location": "docs/domain-models/index.md > PRD feature coverage; docs/domain-models/capture.md > Target/Commands handled",
+      "finding": "The coverage matrix claims FR-CAP-1..11 are covered by Capture, but Storybook ingestion (FR-CAP-5), multi-state task-flow capture (FR-CAP-9), and dual-theme capture (FR-CAP-10) are not actually modeled. Target has no storybook kind, Capture has only a single optional Theme, and there is no FlowStep/StateCapture/ThemePair concept or event for unreachable task-flow steps.",
+      "suggestion": "Add explicit value objects for StorybookTarget, TaskFlowRecipe, FlowStep, CapturedState, and ThemeVariant, or narrow the coverage matrix to release-gate features only. Add invariants/events for unreachable steps and per-theme findings."
+    },
+    {
+      "severity": "P1",
+      "pass": "PRD Coverage",
+      "location": "docs/domain-models/index.md > Interfaces paragraph and coverage matrix",
+      "finding": "FR-IF-1..3 are mapped to 'Interfaces (adapters)', but there is no bounded context or domain contract for CLI verbs, MCP tool versioning, natural-language runner behavior, command exit codes, or schema compatibility. The index says these are not domains, yet the review target claims every PRD §6 feature maps to at least one domain.",
+      "suggestion": "Either add an Interface Contracts context or explicitly mark FR-IF as adapter-only traceability outside the domain model. At minimum, model command/tool contracts, versioned schemas, exit-code policy, and command-to-domain command mapping as published language."
+    },
+    {
+      "severity": "P1",
+      "pass": "Bounded Context Integrity",
+      "location": "docs/domain-models/project-state.md > SurfaceConfig",
+      "finding": "SurfaceConfig imports concepts owned by multiple contexts: Preset/Depth/AppType from Evaluation, ExportTarget/GatePolicy from Reporting, RedactionRule from Capture, and confidence cutoffs from Findings. This makes Project State a coupling hub rather than a generic context and lets contexts depend on each other's internal types through config.",
+      "suggestion": "Split SurfaceConfig into published configuration slices owned by each context, with Project State storing serialized config and exposing typed read models through ACLs. For example CaptureConfig, EvaluationConfig, FindingsPolicy, ReportingConfig."
+    },
+    {
+      "severity": "P1",
+      "pass": "Aggregate Boundary",
+      "location": "docs/domain-models/closed-loop.md > Baseline/Waiver/FindingStatus",
+      "finding": "Active waivers are modeled as changing a TrackedFinding's status to ignored, but ignored is also a FindingStatus. Once ignored overwrites new/still-failing/resolved/regressed, the model cannot test LOOP-I6's requirement to return to the detected status after expiry without hidden state.",
+      "suggestion": "Do not encode waiver state as the primary finding status. Keep detection status and gate disposition separate, e.g. status = still-failing plus gateDisposition = ignoredByWaiver, with prior status preserved and expiry recomputation deterministic."
+    },
+    {
+      "severity": "P1",
+      "pass": "Entity vs Value Object",
+      "location": "docs/domain-models/findings.md > Finding aggregate",
+      "finding": "Finding is classified as an aggregate root, but the modeled object is immutable, has identity only within a run, and has no lifecycle after Closed Loop wraps it as TrackedFinding. The aggregate boundary is justified mainly by validation of its own fields, which is value-object behavior, not aggregate lifecycle behavior.",
+      "suggestion": "Either make Finding a value object/occurrence emitted by Evaluation and tracked by TrackedFinding, or give it a real aggregate lifecycle with stable identity, state transitions, and owned child entities. Avoid both a Finding aggregate and a separate TrackedFinding aggregate owning the meaningful lifecycle."
+    },
+    {
+      "severity": "P1",
+      "pass": "Domain Event Completeness",
+      "location": "docs/domain-models/evaluation.md > Domain events",
+      "finding": "FindingDetected only carries runId, draftId, lensId, and method, but Findings is listed as the consumer for scoring. That payload is insufficient to construct or validate a Finding because it lacks evidence, dimensions, location, issueType, title/rationale, and cited heuristics.",
+      "suggestion": "Make FindingDetected carry the full FindingDraft payload or replace it with a command/read-model handoff whose schema is the published language. Events that trigger downstream aggregate creation must contain enough data to do so without reaching into Evaluation internals."
+    },
+    {
+      "severity": "P1",
+      "pass": "Domain Event Completeness",
+      "location": "docs/domain-models/capture.md > State machine/Domain events; docs/domain-models/evaluation.md > State machine/Domain events",
+      "finding": "Meaningful terminal and stage transitions lack events. Capture has an unreachable terminal state with no CaptureUnreachable event, and AuditRun has a full stage state machine but no stage-transition events, failure event, or explicit skipped-lens event beyond a coarse AuditRunDegraded.",
+      "suggestion": "Add events for CaptureUnreachable, AuditRunStageAdvanced, AuditRunFailed, LensSkipped, and ValidationRequested/Completed. Include payloads sufficient for Project State resumability and Reporting's 'what could not be checked' output."
+    },
+    {
+      "severity": "P1",
+      "pass": "Invariant Testability",
+      "location": "docs/domain-models/findings.md > FND-I2",
+      "finding": "FND-I2 references presentedAsMeasured, but no such field exists on Finding or Evidence. As written, the invariant cannot be implemented as a runtime check and does not actually prevent a judged finding from being rendered as measured.",
+      "suggestion": "Model presentation method explicitly in report/view models or make rendering derive method only from Finding.method. Replace the invariant with a check over concrete fields, e.g. reportFinding.methodLabel === finding.method and finding.method === 'judged' forbids measured-only evidence claims."
+    },
+    {
+      "severity": "P1",
+      "pass": "Invariant Testability",
+      "location": "docs/domain-models/capture.md > CAP-I3",
+      "finding": "CAP-I3 says navigation occurred after session injection, but Capture stores only authUsed: boolean. The domain state has no timestamp, step log, or auth target verification data, so the invariant cannot be checked after the fact and cannot prove the login page was not captured as the target.",
+      "suggestion": "Add an ObservationStep or NavigationTrace value object with ordered events for auth injection and navigation, plus a target verification result. Then enforce auth-before-navigation and target-not-login-page as runtime-checkable predicates."
+    },
+    {
+      "severity": "P1",
+      "pass": "PRD Coverage",
+      "location": "docs/domain-models/findings.md > Dimensions; docs/domain-models/reporting.md > GatePolicy",
+      "finding": "The gate policy fails on new measured P0/P1 findings, but Dimensions.severity is normalized 0..1 and there is no SeverityBand/P-level field. Reporting therefore cannot implement FR-RULE-4 without inventing an unstated mapping outside the domain.",
+      "suggestion": "Add a canonical SeverityBand value object, e.g. P0|P1|P2|P3, derived from severity and policy thresholds, and require GatePolicy to evaluate that band. Use the same term in findings.json, reports, and CI gate output."
+    },
+    {
+      "severity": "P2",
+      "pass": "Aggregate Boundary",
+      "location": "docs/domain-models/index.md > Context map relationship types; docs/domain-models/closed-loop.md > Bounded-context interface",
+      "finding": "The model says Findings and Closed Loop share a kernel on Finding + FindingIdentity while also saying Findings owns the canonical Finding definition and Closed Loop wraps findings by identity. Sharing the whole Finding aggregate across two core contexts weakens the boundary and invites Closed Loop to depend on Findings internals.",
+      "suggestion": "Limit the shared kernel to immutable identifiers and status-relevant read models: StableFindingId/FindingIdentity, FindingMethod, gatedForHuman, validationCheck reference. Treat the full Finding schema as a published language owned by Findings, not shared kernel."
+    },
+    {
+      "severity": "P2",
+      "pass": "Invariant Testability",
+      "location": "docs/domain-models/evaluation.md > EVAL-I7",
+      "finding": "EVAL-I7 says measured wins when a measurement disagrees with a model judgment, but no conflict object, comparison rule, or resolved-fact field is modeled. It is a policy statement rather than a runtime-checkable invariant.",
+      "suggestion": "Model MeasurementClaim and JudgedClaim, then add a SynthesisDecision with sourceOfTruth = measured|judged and a rule that measured claims override judged claims for the same fact key."
+    }
+  ],
+  "gate": "fail"
+}

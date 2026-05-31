@@ -8,21 +8,31 @@
   "in_progress": null,
   "steps": {
     "review-architecture": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-architecture.md",
         "docs/reviews/architecture/review-summary.md",
         "docs/reviews/architecture/codex-review.json",
         "docs/reviews/architecture/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:49:43.821Z",
+      "completed_at": "2026-05-31T14:49:43.821Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "system-architecture": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/system-architecture.md"
-      ]
+      ],
+      "at": "2026-05-31T14:47:48.578Z",
+      "completed_at": "2026-05-31T14:47:48.578Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "multi-agent-resume": {
       "status": "pending",
@@ -55,102 +65,160 @@
       "produces": []
     },
     "claude-md-optimization": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "CLAUDE.md"
-      ]
+      ],
+      "at": "2026-05-31T15:22:04.417Z",
+      "completed_at": "2026-05-31T15:22:04.417Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "workflow-audit": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "CLAUDE.md",
         "docs/git-workflow.md",
         "docs/coding-standards.md",
         "tasks/lessons.md"
-      ]
+      ],
+      "at": "2026-05-31T15:22:42.343Z",
+      "completed_at": "2026-05-31T15:22:42.343Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "adrs": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/adrs/"
-      ]
+      ],
+      "at": "2026-05-31T14:33:51.427Z",
+      "completed_at": "2026-05-31T14:33:51.427Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-adrs": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-adrs.md",
         "docs/reviews/adrs/review-summary.md",
         "docs/reviews/adrs/codex-review.json",
         "docs/reviews/adrs/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:38:24.884Z",
+      "completed_at": "2026-05-31T14:38:24.884Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "ai-memory-setup": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         ".claude/rules/",
         "docs/ai-memory-setup.md"
-      ]
+      ],
+      "at": "2026-05-31T15:20:43.755Z",
+      "completed_at": "2026-05-31T15:20:43.755Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "automated-pr-review": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "AGENTS.md",
         "docs/review-standards.md",
         "scripts/cli-pr-review.sh",
         "scripts/await-pr-review.sh"
-      ]
+      ],
+      "at": "2026-05-31T15:19:43.929Z",
+      "completed_at": "2026-05-31T15:19:43.929Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "design-system": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/design-system.md",
         "docs/coding-standards.md"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.639Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "dev-env-setup": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/dev-setup.md"
-      ]
+      ],
+      "at": "2026-05-31T14:11:53.041Z",
+      "completed_at": "2026-05-31T14:11:53.041Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "git-workflow": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/git-workflow.md",
         "scripts/setup-agent-worktree.sh",
         ".github/workflows/ci.yml",
         ".github/pull_request_template.md"
-      ]
+      ],
+      "at": "2026-05-31T15:05:36.600Z",
+      "completed_at": "2026-05-31T15:05:36.600Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "apply-fixes-and-freeze": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/fix-log.md"
-      ]
+      ],
+      "at": "2026-05-31T15:35:53.021Z",
+      "completed_at": "2026-05-31T15:35:53.021Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "developer-onboarding-guide": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/onboarding-guide.md"
-      ]
+      ],
+      "at": "2026-05-31T15:36:44.390Z",
+      "completed_at": "2026-05-31T15:36:44.390Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "implementation-playbook": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/implementation-playbook.md"
-      ]
+      ],
+      "at": "2026-05-31T15:37:37.769Z",
+      "completed_at": "2026-05-31T15:37:37.769Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "beads": {
       "status": "completed",
@@ -215,43 +283,63 @@
       "artifacts_verified": true
     },
     "add-e2e-testing": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "tests/screenshots/",
         "maestro/",
         "playwright.config.ts"
-      ]
+      ],
+      "at": "2026-05-31T15:15:07.440Z",
+      "completed_at": "2026-05-31T15:15:07.440Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "domain-modeling": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/domain-models/"
-      ]
+      ],
+      "at": "2026-05-31T14:15:41.593Z",
+      "completed_at": "2026-05-31T14:15:41.593Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-domain-modeling": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-domain-modeling.md",
         "docs/reviews/domain-modeling/review-summary.md",
         "docs/reviews/domain-modeling/codex-review.json",
         "docs/reviews/domain-modeling/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:22:08.846Z",
+      "completed_at": "2026-05-31T14:22:08.846Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "platform-parity-review": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/platform-parity-review.md",
         "docs/reviews/platform-parity/review-summary.md",
         "docs/reviews/platform-parity/codex-review.json",
         "docs/reviews/platform-parity/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:09:17.414Z",
+      "completed_at": "2026-05-31T15:09:17.414Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "implementation-plan-review": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-tasks.md",
@@ -259,14 +347,24 @@
         "docs/reviews/implementation-plan/review-summary.md",
         "docs/reviews/implementation-plan/codex-review.json",
         "docs/reviews/implementation-plan/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:25:28.422Z",
+      "completed_at": "2026-05-31T15:25:28.422Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "implementation-plan": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/implementation-plan.md"
-      ]
+      ],
+      "at": "2026-05-31T15:23:30.362Z",
+      "completed_at": "2026-05-31T15:23:30.362Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "create-prd": {
       "status": "completed",
@@ -357,185 +455,277 @@
       "artifacts_verified": true
     },
     "create-evals": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "tests/evals/",
         "docs/eval-standards.md"
-      ]
+      ],
+      "at": "2026-05-31T15:18:09.218Z",
+      "completed_at": "2026-05-31T15:18:09.218Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "operations": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/operations-runbook.md"
-      ]
+      ],
+      "at": "2026-05-31T15:10:29.528Z",
+      "completed_at": "2026-05-31T15:10:29.528Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-operations": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-operations.md",
         "docs/reviews/operations/review-summary.md",
         "docs/reviews/operations/codex-review.json",
         "docs/reviews/operations/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:11:37.027Z",
+      "completed_at": "2026-05-31T15:11:37.027Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-security": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-security.md",
         "docs/reviews/security/review-summary.md",
         "docs/reviews/security/codex-review.json",
         "docs/reviews/security/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:14:01.309Z",
+      "completed_at": "2026-05-31T15:14:01.309Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-testing": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-testing.md",
         "docs/reviews/testing/review-summary.md",
         "docs/reviews/testing/codex-review.json",
         "docs/reviews/testing/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:07:47.336Z",
+      "completed_at": "2026-05-31T15:07:47.336Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "security": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/security-review.md"
-      ]
+      ],
+      "at": "2026-05-31T15:12:20.941Z",
+      "completed_at": "2026-05-31T15:12:20.941Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "story-tests": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "tests/acceptance/",
         "docs/story-tests-map.md"
-      ]
+      ],
+      "at": "2026-05-31T15:16:04.559Z",
+      "completed_at": "2026-05-31T15:16:04.559Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "api-contracts": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/api-contracts.md"
-      ]
+      ],
+      "at": "2026-05-31T14:57:02.969Z",
+      "completed_at": "2026-05-31T14:57:02.969Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "database-schema": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/database-schema.md"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.642Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "review-api": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-api.md",
         "docs/reviews/api/review-summary.md",
         "docs/reviews/api/codex-review.json",
         "docs/reviews/api/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:59:02.081Z",
+      "completed_at": "2026-05-31T14:59:02.081Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-database": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-database.md",
         "docs/reviews/database/review-summary.md",
         "docs/reviews/database/codex-review.json",
         "docs/reviews/database/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.642Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "review-ux": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-ux.md",
         "docs/reviews/ux/review-summary.md",
         "docs/reviews/ux/codex-review.json",
         "docs/reviews/ux/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.643Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "ux-spec": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/ux-spec.md"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.643Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "critical-path-walkthrough": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/critical-path-walkthrough.md",
         "docs/validation/critical-path-walkthrough/review-summary.md",
         "docs/validation/critical-path-walkthrough/codex-review.json",
         "docs/validation/critical-path-walkthrough/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:43.613Z",
+      "completed_at": "2026-05-31T15:33:43.613Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "cross-phase-consistency": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/cross-phase-consistency.md",
         "docs/validation/cross-phase-consistency/review-summary.md",
         "docs/validation/cross-phase-consistency/codex-review.json",
         "docs/validation/cross-phase-consistency/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:10.867Z",
+      "completed_at": "2026-05-31T15:33:10.867Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "decision-completeness": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/decision-completeness.md",
         "docs/validation/decision-completeness/review-summary.md",
         "docs/validation/decision-completeness/codex-review.json",
         "docs/validation/decision-completeness/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:43.266Z",
+      "completed_at": "2026-05-31T15:33:43.266Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "dependency-graph-validation": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/dependency-graph-validation.md",
         "docs/validation/dependency-graph-validation/review-summary.md",
         "docs/validation/dependency-graph-validation/codex-review.json",
         "docs/validation/dependency-graph-validation/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:44.325Z",
+      "completed_at": "2026-05-31T15:33:44.325Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "implementability-dry-run": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/implementability-dry-run.md",
         "docs/validation/implementability-dry-run/review-summary.md",
         "docs/validation/implementability-dry-run/codex-review.json",
         "docs/validation/implementability-dry-run/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:43.974Z",
+      "completed_at": "2026-05-31T15:33:43.974Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "scope-creep-check": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/scope-creep-check.md",
         "docs/validation/scope-creep-check/review-summary.md",
         "docs/validation/scope-creep-check/codex-review.json",
         "docs/validation/scope-creep-check/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:44.676Z",
+      "completed_at": "2026-05-31T15:33:44.676Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "traceability-matrix": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/traceability-matrix.md",
         "docs/validation/traceability-matrix/review-summary.md",
         "docs/validation/traceability-matrix/codex-review.json",
         "docs/validation/traceability-matrix/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:42.907Z",
+      "completed_at": "2026-05-31T15:33:42.907Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "create-vision": {
       "status": "completed",
@@ -574,7 +764,15 @@
       "artifacts_verified": true
     }
   },
-  "next_eligible": [],
+  "next_eligible": [
+    "single-agent-start",
+    "single-agent-resume",
+    "multi-agent-start",
+    "multi-agent-resume",
+    "quick-task",
+    "new-enhancement"
+  ],
   "extra-steps": [],
-  "save_counter": 32
+  "save_counter": 107,
+  "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }

@@ -10,3 +10,19 @@
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# Node / pnpm / Turborepo
+node_modules/
+dist/
+.turbo/
+*.tsbuildinfo
+coverage/
+*.log
+
+# Environment files (.env.example IS committed as documentation)
+.env
+.env.*
+!.env.example
+
+# surface per-project runtime state (created in the user's project, not this repo)
+.surface/

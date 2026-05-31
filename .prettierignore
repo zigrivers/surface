@@ -1,0 +1,18 @@
+# Build output & deps
+dist/
+node_modules/
+.turbo/
+coverage/
+
+# Tooling / generated state (not ours to format)
+.scaffold/
+.beads/
+.dolt/
+.claude/
+pnpm-lock.yaml
+
+# Prose & authored content — preserve hand-formatting (tables, HTML comments, YAML overlays)
+docs/
+content/
+fixtures/
+*.md

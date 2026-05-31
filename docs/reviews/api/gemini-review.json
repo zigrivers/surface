@@ -1,0 +1,35 @@
+{
+  "reviewer": "gemini-1.5-pro",
+  "overall": "The interface contracts are impressively thorough, especially in their strict adherence to a CLI/MCP-only surface (ADR-008) and the robust definition of error handling (ADR-014), versioning, and the 'measured vs. judged' trust spine. The fidelity between the core `Finding` schema and the domain model is high. However, several gaps exist where the full power of the domain model isn't exposed through the contracts, particularly in agent-facing tools and lifecycle state observability.",
+  "findings": [
+    {
+      "severity": "P1",
+      "pass": "Operation coverage",
+      "location": "Section 3. MCP tool contract",
+      "finding": "The MCP tool contract is missing key analytical and orchestration capabilities that are present in the CLI. Specifically, there are no MCP tool equivalents for the `diff`, `alternatives`, `run`, and `next` commands.",
+      "suggestion": "Add `surface_diff`, `surface_alternatives`, `surface_run_step`, and `surface_next_steps` to the MCP tool surface. These represent core analytical (FR-IF-4) and orchestration functions that a programmatic agent (the primary MCP user) would need for full control, matching the capabilities available to a human at the CLI."
+    },
+    {
+      "severity": "P2",
+      "pass": "Payload/domain fidelity",
+      "location": "Section 2. CLI command contract & Section 3. MCP tool contract",
+      "finding": "The API contract does not expose a direct way to query the cross-run lifecycle state of a finding. The `closed-loop.md` domain model defines rich `TrackedFinding` states (`FindingStatus`, `GateDisposition`), but the contracts only provide indirect access via the `diff` command. A user or agent cannot directly ask for the history or current status of a specific finding identity.",
+      "suggestion": "Add a new command/tool, such as `status <finding-identity-key>`, that returns the full `TrackedFinding` aggregate, including its status, gate disposition, and history. This would make the closed-loop's value fully observable through the API."
+    },
+    {
+      "severity": "P2",
+      "pass": "Error-contract completeness",
+      "location": "Section 6. Error catalog",
+      "finding": "Several commands, such as `explain` and `verdict`, only list a single domain-specific error code (`finding_not_found`) in the contract table, which fails to meet the review criteria of '>=2 domain-specific error codes per command'. This underspecifies behavior for other potential failures.",
+      "suggestion": "For each command, brainstorm and document at least one additional domain-specific failure mode. For `explain`, this could be `evidence_missing`. For `verdict`, it could be `invalid_verdict_transition`. This makes the contract more robust and the tool's behavior more predictable for consumers."
+    },
+    {
+      "severity": "P3",
+      "pass": "Payload/domain fidelity",
+      "location": "Section 4. Canonical output schemas (`Finding`)",
+      "finding": "The `Finding` schema in the contract contains a `suggestedPatch` field, which is excellent. However, the domain model (`findings.md`) notes this is for MEASURED findings only (FND-I3), a critical constraint that is mentioned in the prose but not enforced structurally by the type definition itself in the contract documentation.",
+      "suggestion": "While the prose is clear, consider making this constraint even more explicit in the `Finding` type definition comment within `api-contracts.md` to reinforce the invariant at the point of reference, e.g., `suggestedPatch?: SuggestedPatch; // Invariant: MUST only be present when method === 'measured' (FND-I3)`."
+    }
+  ],
+  "gate": "conditional-pass"
+}

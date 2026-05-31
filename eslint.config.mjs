@@ -21,6 +21,10 @@ export default tseslint.config(
     },
   },
   // Applied by the react adapter to target sources as a static a11y grounding pass:
-  { files: ["**/*.{jsx,tsx}"], plugins: { "jsx-a11y": jsxA11y }, rules: jsxA11y.configs.recommended.rules },
+  {
+    files: ["**/*.{jsx,tsx}"],
+    plugins: { "jsx-a11y": jsxA11y },
+    rules: jsxA11y.configs.recommended.rules,
+  },
   prettier,
 );

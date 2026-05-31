@@ -3,12 +3,24 @@
   "private": true,
   "type": "module",
   "packageManager": "pnpm@11.0.0",
-  "engines": { "node": ">=22" },
+  "engines": {
+    "node": ">=22"
+  },
   "license": "MIT",
   "scripts": {
+    "dev": "turbo watch build",
     "build": "turbo run build",
     "test": "turbo run test",
+    "test:watch": "turbo watch test",
     "lint": "turbo run lint",
-    "typecheck": "turbo run typecheck"
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "check": "pnpm run format:check && turbo run lint typecheck test",
+    "clean": "turbo run clean && rm -rf node_modules/.cache .turbo"
+  },
+  "devDependencies": {
+    "prettier": "^3.3.0",
+    "turbo": "^2.5.0"
   }
 }

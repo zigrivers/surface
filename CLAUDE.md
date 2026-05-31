@@ -95,6 +95,26 @@ The `[surface-<id>]` prefix gives task↔commit traceability and session reconst
 Commit/push only when the active agent profile or the user authorizes it (see the Beads
 block above).
 
+## Git Workflow & Parallel Sessions
+
+Full guide: `docs/git-workflow.md`. Essentials:
+
+- **One task = one branch = one PR.** Branch name: `surface-<id>/<short-desc>`.
+- **PR workflow:** commit → self/AI review → rebase on `main` → push → create PR (template
+  auto-loads) → `gh pr merge --squash --auto --delete-branch` → watch the `check` CI job →
+  confirm merge. Then `bd close surface-<id>`.
+- **Parallel agents:** `scripts/setup-agent-worktree.sh <task-id> <desc>` makes a per-agent
+  worktree (sets `BEADS_ACTOR`). **Never parallelize two tasks that touch the same files** —
+  assign agents to different packages; serialize `core` changes.
+- **CI = local gate:** `.github/workflows/ci.yml` runs `pnpm run check` (job `check`); the
+  capture/grounding browser matrix runs only when those packages change.
+- **Code review (mandatory):** before merge run `scaffold run review-pr` (MMR: Codex+Gemini+Claude
+  + code-reviewer agent); fallback `scripts/cli-pr-review.sh <base>`. Fix all P0/P1, re-review,
+  then merge. Severity defs + criteria: `docs/review-standards.md`. Paste verification output in
+  the PR; risky/subjective/brand changes go to a human (principle #5).
+- **Remote status:** repo is **local-only** today (no remote); branch/worktree/commit mechanics
+  apply now, PR/CI/auto-merge activate when a GitHub remote is added.
+
 ## Upgrade Remediation
 
 If `bd` was upgraded since the last `bd init`, run `bd doctor --fix` to re-sync git hooks
@@ -116,18 +136,65 @@ mode, where `bd doctor` reports it is not yet supported — reinitialize with `b
 
 ## Build & Test
 
-_Add your build and test commands here_
+Full getting-started guide: `docs/dev-setup.md`. Stack: pnpm 11 + Turborepo, TypeScript/ESM,
+Node ≥ 22. There is **no database** and no web dev server — "dev" is watch-mode compilation.
 
-```bash
-# Example:
-# npm install
-# npm test
-```
+### Key Commands
+
+| Command | What it does |
+|---|---|
+| `corepack enable` | activate the pinned pnpm (one-time) |
+| `pnpm install` | install all workspace dependencies |
+| `pnpm dev` | watch-mode build across packages (`turbo watch build`) |
+| `pnpm build` | build every package once |
+| `pnpm test` | run the full test suite |
+| `pnpm test:watch` | re-run tests on change |
+| `pnpm lint` | lint all packages |
+| `pnpm typecheck` | type-check all packages |
+| `pnpm format` / `pnpm format:check` | Prettier write / check |
+| `pnpm run check` | **full local gate, identical to CI** (format-check + lint + typecheck + test) |
+| `pnpm clean` | remove caches and build output |
+
+Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
+
+### Dev Environment
+
+- **First-time setup (≤ 5 steps):** clone → `corepack enable` → `pnpm install` →
+  `cp .env.example .env` (optional) → `pnpm run check`.
+- **Model keys are optional.** With none set, surface runs measured-only and transmits
+  nothing (NFR-DATA-1). Add keys in `.env` (gitignored) to enable judged / multi-model
+  findings; `.env.example` documents every variable.
+- **Run the CLI locally:** build `@surface/cli`, then `pnpm --filter @surface/cli exec npm link`
+  to expose the `surface` binary; or run from source via `tsx src/index.ts`.
+- **Prove It:** before claiming a change works, run `pnpm run check` and show the output.
+  `pnpm run check` is exactly what CI runs.
 
 ## Architecture Overview
 
-_Add a brief overview of your project architecture_
+surface is a **modular-monorepo CLI + MCP tool** (no hosted service, no DB): a pure
+`@surface/core` (schema, scoring, identity, state, pipeline orchestrator) wrapped by thin
+`cli`/`mcp` adapters, with edge plugins (capture backends, framework adapters, grounding,
+reporters) behind interfaces in `core`.
+
+### Doc map (where to look)
+
+| Need | Doc |
+|---|---|
+| North star / product WHAT | `docs/vision.md` · `docs/plan.md` (PRD) |
+| Features as stories + tests | `docs/user-stories.md` · `docs/story-tests-map.md` |
+| Domain model / vocabulary | `docs/domain-models/` (index + 7 contexts) |
+| Decisions (the WHY) | `docs/adrs/` (ADR-001..018 + index) |
+| System blueprint / where code goes | `docs/system-architecture.md` · `docs/project-structure.md` |
+| CLI/MCP/output contracts | `docs/api-contracts.md` |
+| Tech choices / standards | `docs/tech-stack.md` · `docs/coding-standards.md` · `docs/tdd.md` |
+| Security / ops | `docs/security-review.md` · `docs/operations-runbook.md` |
+| Dev + git workflow | `docs/dev-setup.md` · `docs/git-workflow.md` · `docs/review-standards.md` |
+| Conditional-step rulings | `docs/conditional-step-decisions.md` |
 
 ## Conventions & Patterns
 
-_Add your project-specific conventions here_
+Path-scoped rules auto-load from **`.claude/rules/`** (TypeScript style, the measured/judged trust
+discipline, testing) — these summarize; the source docs own the detail
+(`docs/coding-standards.md`, `docs/domain-models/findings.md`, `docs/tdd.md`). Memory stack:
+`docs/ai-memory-setup.md` (Tier 1 rules enabled; Beads is the persistent memory of record;
+context7 MCP for library docs).

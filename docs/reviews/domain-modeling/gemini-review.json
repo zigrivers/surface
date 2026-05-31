@@ -1,0 +1,35 @@
+{
+  "reviewer": "Gemini 1.5 Pro",
+  "overall": "The domain model is exceptionally strong, demonstrating a deep understanding of DDD principles. It features clear aggregate boundaries, a robust ubiquitous language, and testable invariants. The model is almost ready for the next phase, pending the resolution of one significant boundary violation and a few minor refinement opportunities.",
+  "findings": [
+    {
+      "severity": "P1",
+      "pass": "Bounded Context Integrity",
+      "location": "docs/domain-models/capture.md",
+      "finding": "The `Capture` context has knowledge of the `Evaluation` context's internal details. Specifically, `DegradationReport` contains `affectedLenses`, which requires `Capture` to know about the lenses that `Evaluation` uses. This violates the one-way, customer-supplier relationship where `Evaluation` is the downstream customer.",
+      "suggestion": "Remove `affectedLenses` from `DegradationReport`. The `Capture` context should only report on what it failed to observe (e.g., `skippedArtifacts: ['accessibility-tree']`). The `Evaluation` context should be responsible for consuming this report and determining which of its own lenses are affected."
+    },
+    {
+      "severity": "P2",
+      "pass": "Domain Event Completeness",
+      "location": "docs/domain-models/findings.md",
+      "finding": "The domain model for `Findings` does not explicitly represent how multi-model review (FR-SCORE-5) contributes to a `Finding`'s confidence. While `Dimensions` includes a `confidence` score, the process of reconciling multiple model outputs to arrive at this score is treated as an external implementation detail rather than a first-class domain concept or service.",
+      "suggestion": "Consider modeling a `ReconciliationService` within the `Findings` domain. This service would take multiple `FindingDraft`s (one from each model) for the same underlying issue and produce a single, reconciled `Finding` with an adjusted `confidence` score and evidence from all sources. This would make the multi-model logic an explicit part of the domain."
+    },
+    {
+      "severity": "P2",
+      "pass": "Ubiquitous Language Consistency",
+      "location": "docs/domain-models/index.md",
+      "finding": "The term `FindingDraft` is used in the `evaluation.md` file to describe the pre-scored output of a lens, but it is not defined in the canonical ubiquitous language glossary in `index.md`. This creates a small gap in the otherwise excellent shared language.",
+      "suggestion": "Add `FindingDraft` to the ubiquitous language glossary in `index.md`. Define it as a transient value object representing a potential finding emitted by a lens before it is processed, scored, and given a stable identity by the Findings context."
+    },
+    {
+      "severity": "P3",
+      "pass": "Bounded Context Integrity",
+      "location": "docs/domain-models/evaluation.md",
+      "finding": "The `AuditRun` aggregate's state machine (`PipelineStage`) mixes domain concepts with process orchestration. While functional, this embeds a specific execution workflow into the domain model, potentially making it less flexible.",
+      "suggestion": "Consider refactoring the pipeline orchestration logic into a separate application service or a stateless domain service (`PipelineOrchestrator`). The `Evaluation` context would then focus purely on the core domain concern: applying a set of `Lens`es to a `Capture` to produce `FindingDraft`s, without being responsible for the step-by-step flow of the entire run."
+    }
+  ],
+  "gate": "conditional-pass"
+}
