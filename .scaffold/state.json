@@ -197,11 +197,16 @@
       "artifacts_verified": true
     },
     "developer-onboarding-guide": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/onboarding-guide.md"
-      ]
+      ],
+      "at": "2026-05-31T15:36:44.390Z",
+      "completed_at": "2026-05-31T15:36:44.390Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "implementation-playbook": {
       "status": "pending",
@@ -755,9 +760,9 @@
     }
   },
   "next_eligible": [
-    "developer-onboarding-guide"
+    "implementation-playbook"
   ],
   "extra-steps": [],
-  "save_counter": 103,
+  "save_counter": 105,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
