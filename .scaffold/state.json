@@ -465,11 +465,16 @@
       "artifacts_verified": true
     },
     "security": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/security-review.md"
-      ]
+      ],
+      "at": "2026-05-31T15:12:20.941Z",
+      "completed_at": "2026-05-31T15:12:20.941Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "story-tests": {
       "status": "pending",
@@ -664,10 +669,10 @@
     "ai-memory-setup",
     "add-e2e-testing",
     "story-tests",
-    "security",
+    "review-security",
     "claude-md-optimization"
   ],
   "extra-steps": [],
-  "save_counter": 65,
+  "save_counter": 67,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
