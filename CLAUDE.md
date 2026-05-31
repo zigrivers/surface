@@ -2,6 +2,27 @@
 
 This file provides instructions and context for AI coding agents working on this project.
 
+> `surface` is an open-source CLI + MCP server that audits the *built, running* UI of web
+> apps. Strategic docs: `docs/vision.md` (North Star), `docs/plan.md` (PRD). Build against
+> the **v1.0 Release Gate** in `docs/plan.md` §8 first.
+
+## Core Principles
+
+These four tenets govern every change. They override convenience, and they outrank any
+instinct to cut corners under time pressure.
+
+1. **Simplicity** — Choose the simplest design that solves the *actual* problem. No
+   speculative abstraction, no framework where a function will do. surface's own
+   anti-vision applies to its codebase: don't build everything at once.
+2. **No Laziness** — No stubs, `TODO`s, swallowed errors, or "good enough" shortcuts left
+   behind. If something is out of scope, file a Beads issue; don't fake it. Match the
+   surrounding code's style and rigor.
+3. **TDD** — Write the failing test first, watch it fail, make it pass, refactor. This is
+   non-negotiable for features and bugfixes (see the TDD standard once `tdd` runs).
+4. **Prove It** — Never claim something works because "it seems to." Run the tests, show
+   the output, verify the behavior. Evidence before assertions — surface holds *itself* to
+   the standard it audits (PRD NFR-OWNOUT-1).
+
 <!-- BEGIN BEADS INTEGRATION v:1 profile:minimal hash:6cd5cc61 -->
 ## Beads Issue Tracker
 
@@ -57,6 +78,41 @@ This protocol applies when ending a Beads implementation workflow. It is subordi
 - If a required sync or push is blocked, stop and report the exact command and error.
 <!-- END BEADS INTEGRATION -->
 
+## Commit Convention
+
+Every commit references its Beads task with the **project issue prefix** (this repo's
+prefix is `surface`, so IDs look like `surface-q2p` — *not* the generic `bd-` placeholder):
+
+```
+[surface-<id>] <type>(<scope>): <summary>
+
+- bullet describing the change
+- bullet describing the test/verification
+```
+
+`<type>` follows Conventional Commits (`feat`, `fix`, `chore`, `docs`, `test`, `refactor`).
+The `[surface-<id>]` prefix gives task↔commit traceability and session reconstruction.
+Commit/push only when the active agent profile or the user authorizes it (see the Beads
+block above).
+
+## Upgrade Remediation
+
+If `bd` was upgraded since the last `bd init`, run `bd doctor --fix` to re-sync git hooks
+and project config. This fixes errors like `unknown command "hook" for "bd"` from stale
+post-checkout / post-merge hook shims. *(Note: on this machine `bd` is in embedded-Dolt
+mode, where `bd doctor` reports it is not yet supported — reinitialize with `bd init
+--force` if hooks/config drift.)*
+
+## Autonomous Behavior
+
+- **Session start:** read `tasks/lessons.md`, then `bd ready` to find work; `bd update
+  <id> --claim` before starting.
+- **Capture lessons immediately** when corrected, when a test fails on a pattern you should
+  have known, or when you discover a project convention — append to `tasks/lessons.md`.
+- **Don't mark a task done on "it seems to work"** — Prove It (tests pass, output shown).
+- **File follow-ups as Beads issues** rather than leaving `TODO`s in code.
+- **Respect the human gate:** surface's own principle #5 — risky/subjective/brand changes
+  go to a human; the same applies to risky changes in this repo.
 
 ## Build & Test
 
