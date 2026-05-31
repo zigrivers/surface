@@ -185,11 +185,16 @@
       "artifacts_verified": true
     },
     "apply-fixes-and-freeze": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/fix-log.md"
-      ]
+      ],
+      "at": "2026-05-31T15:35:53.021Z",
+      "completed_at": "2026-05-31T15:35:53.021Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "developer-onboarding-guide": {
       "status": "pending",
@@ -750,9 +755,9 @@
     }
   },
   "next_eligible": [
-    "apply-fixes-and-freeze"
+    "developer-onboarding-guide"
   ],
   "extra-steps": [],
-  "save_counter": 101,
+  "save_counter": 103,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
