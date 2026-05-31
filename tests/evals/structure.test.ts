@@ -11,9 +11,16 @@ const has = (p: string) => existsSync(resolve(ROOT, p));
 describe("eval:structure", () => {
   it("the declared monorepo packages exist", () => {
     for (const pkg of [
-      "packages/core", "packages/cli", "packages/mcp", "packages/capture",
-      "packages/grounding", "packages/adapters/react", "packages/adapters/vue",
-      "packages/adapters/svelte", "packages/adapters/agnostic", "packages/knowledge",
+      "packages/core",
+      "packages/cli",
+      "packages/mcp",
+      "packages/capture",
+      "packages/grounding",
+      "packages/adapters/react",
+      "packages/adapters/vue",
+      "packages/adapters/svelte",
+      "packages/adapters/agnostic",
+      "packages/knowledge",
       "packages/reporters",
     ]) {
       expect(has(pkg), `missing package dir: ${pkg}`).toBe(true);
