@@ -77,14 +77,19 @@
       "artifacts_verified": true
     },
     "workflow-audit": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "CLAUDE.md",
         "docs/git-workflow.md",
         "docs/coding-standards.md",
         "tasks/lessons.md"
-      ]
+      ],
+      "at": "2026-05-31T15:22:42.343Z",
+      "completed_at": "2026-05-31T15:22:42.343Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "adrs": {
       "status": "completed",
@@ -700,10 +705,9 @@
     }
   },
   "next_eligible": [
-    "workflow-audit",
     "implementation-plan"
   ],
   "extra-steps": [],
-  "save_counter": 81,
+  "save_counter": 83,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
