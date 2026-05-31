@@ -127,12 +127,15 @@
       ]
     },
     "design-system": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/design-system.md",
         "docs/coding-standards.md"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.639Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "dev-env-setup": {
       "status": "completed",
@@ -459,11 +462,14 @@
       ]
     },
     "database-schema": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/database-schema.md"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.642Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "review-api": {
       "status": "pending",
@@ -476,31 +482,40 @@
       ]
     },
     "review-database": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-database.md",
         "docs/reviews/database/review-summary.md",
         "docs/reviews/database/codex-review.json",
         "docs/reviews/database/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.642Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "review-ux": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-ux.md",
         "docs/reviews/ux/review-summary.md",
         "docs/reviews/ux/codex-review.json",
         "docs/reviews/ux/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.643Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "ux-spec": {
-      "status": "pending",
+      "status": "skipped",
       "source": "pipeline",
       "produces": [
         "docs/ux-spec.md"
-      ]
+      ],
+      "at": "2026-05-31T14:56:55.643Z",
+      "reason": "user-requested",
+      "completed_by": "scaffold-skip"
     },
     "critical-path-walkthrough": {
       "status": "pending",
@@ -610,15 +625,12 @@
     }
   },
   "next_eligible": [
-    "design-system",
     "git-workflow",
-    "database-schema",
     "api-contracts",
-    "ux-spec",
     "review-testing",
     "story-tests"
   ],
   "extra-steps": [],
-  "save_counter": 46,
+  "save_counter": 51,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
