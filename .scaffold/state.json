@@ -425,14 +425,19 @@
       "artifacts_verified": true
     },
     "review-operations": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-operations.md",
         "docs/reviews/operations/review-summary.md",
         "docs/reviews/operations/codex-review.json",
         "docs/reviews/operations/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:11:37.027Z",
+      "completed_at": "2026-05-31T15:11:37.027Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-security": {
       "status": "pending",
@@ -659,10 +664,10 @@
     "ai-memory-setup",
     "add-e2e-testing",
     "story-tests",
-    "review-operations",
+    "security",
     "claude-md-optimization"
   ],
   "extra-steps": [],
-  "save_counter": 63,
+  "save_counter": 65,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }

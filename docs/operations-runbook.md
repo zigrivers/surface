@@ -20,6 +20,14 @@
 
 What remains and matters: **shipping good releases and rolling back bad ones.**
 
+### Environments (no dev/staging/prod tiers)
+
+surface has **no server environments**. The "environments" are: **local dev** (a contributor's
+machine, `docs/dev-setup.md`), **CI** (the `check` job + matrices, `docs/git-workflow.md`), and
+the **published artifact** (npm + Homebrew). There is no staging/production tier to differ
+between; the user's own machine is where surface actually runs. The closest analog to a
+"staging→prod" promotion is the **verify smoke** (below) gating the npm→Homebrew bump.
+
 ## Deployment pipeline (= release pipeline; extends the base CI)
 
 Stages (build → test → publish → verify → rollback-ready), extending the `check` CI job:
