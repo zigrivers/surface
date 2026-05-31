@@ -116,13 +116,38 @@ mode, where `bd doctor` reports it is not yet supported — reinitialize with `b
 
 ## Build & Test
 
-_Add your build and test commands here_
+Full getting-started guide: `docs/dev-setup.md`. Stack: pnpm 11 + Turborepo, TypeScript/ESM,
+Node ≥ 22. There is **no database** and no web dev server — "dev" is watch-mode compilation.
 
-```bash
-# Example:
-# npm install
-# npm test
-```
+### Key Commands
+
+| Command | What it does |
+|---|---|
+| `corepack enable` | activate the pinned pnpm (one-time) |
+| `pnpm install` | install all workspace dependencies |
+| `pnpm dev` | watch-mode build across packages (`turbo watch build`) |
+| `pnpm build` | build every package once |
+| `pnpm test` | run the full test suite |
+| `pnpm test:watch` | re-run tests on change |
+| `pnpm lint` | lint all packages |
+| `pnpm typecheck` | type-check all packages |
+| `pnpm format` / `pnpm format:check` | Prettier write / check |
+| `pnpm run check` | **full local gate, identical to CI** (format-check + lint + typecheck + test) |
+| `pnpm clean` | remove caches and build output |
+
+Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
+
+### Dev Environment
+
+- **First-time setup (≤ 5 steps):** clone → `corepack enable` → `pnpm install` →
+  `cp .env.example .env` (optional) → `pnpm run check`.
+- **Model keys are optional.** With none set, surface runs measured-only and transmits
+  nothing (NFR-DATA-1). Add keys in `.env` (gitignored) to enable judged / multi-model
+  findings; `.env.example` documents every variable.
+- **Run the CLI locally:** build `@surface/cli`, then `pnpm --filter @surface/cli exec npm link`
+  to expose the `surface` binary; or run from source via `tsx src/index.ts`.
+- **Prove It:** before claiming a change works, run `pnpm run check` and show the output.
+  `pnpm run check` is exactly what CI runs.
 
 ## Architecture Overview
 
