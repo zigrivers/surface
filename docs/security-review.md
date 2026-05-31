@@ -60,6 +60,7 @@
 | Findings | `findings.json`/`.md`, backlog | Medium (may embed snippets) | local source of truth; redaction applied on **export** (ADR-013/016) |
 | Secrets | model API keys, tracker tokens | **Critical** | env/`.env` only, git-ignored, never logged, never in `.surface/` |
 | Durable state | `state.json`, identity registry, config | Low–Medium | local, inspectable; no secrets stored |
+| Knowledge entries | `content/knowledge/*` (KnowledgeEntry) | **Public** | shipped reference data; no sensitivity; integrity matters (don't let a poisoned entry inject content into a judging prompt — entries are static + reviewed) |
 
 ## Input validation (zod at every boundary — ADR-005)
 
