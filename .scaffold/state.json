@@ -487,12 +487,17 @@
       "artifacts_verified": true
     },
     "story-tests": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "tests/acceptance/",
         "docs/story-tests-map.md"
-      ]
+      ],
+      "at": "2026-05-31T15:16:04.559Z",
+      "completed_at": "2026-05-31T15:16:04.559Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "api-contracts": {
       "status": "completed",
@@ -677,10 +682,10 @@
   "next_eligible": [
     "automated-pr-review",
     "ai-memory-setup",
-    "story-tests",
+    "create-evals",
     "claude-md-optimization"
   ],
   "extra-steps": [],
-  "save_counter": 71,
+  "save_counter": 73,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
