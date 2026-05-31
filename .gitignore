@@ -1,0 +1,12 @@
+# >>> scaffold managed
+.scaffold/generated/
+.scaffold/lock.json
+.scaffold/*.tmp
+.scaffold/**/*.tmp
+# <<< scaffold managed
+
+# Beads / Dolt files (added by bd init)
+.dolt/
+*.db
+.beads-credential-key
+.beads/proxieddb/
