@@ -608,74 +608,109 @@
       "completed_by": "scaffold-skip"
     },
     "critical-path-walkthrough": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/critical-path-walkthrough.md",
         "docs/validation/critical-path-walkthrough/review-summary.md",
         "docs/validation/critical-path-walkthrough/codex-review.json",
         "docs/validation/critical-path-walkthrough/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:43.613Z",
+      "completed_at": "2026-05-31T15:33:43.613Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "cross-phase-consistency": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/cross-phase-consistency.md",
         "docs/validation/cross-phase-consistency/review-summary.md",
         "docs/validation/cross-phase-consistency/codex-review.json",
         "docs/validation/cross-phase-consistency/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:10.867Z",
+      "completed_at": "2026-05-31T15:33:10.867Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "decision-completeness": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/decision-completeness.md",
         "docs/validation/decision-completeness/review-summary.md",
         "docs/validation/decision-completeness/codex-review.json",
         "docs/validation/decision-completeness/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:43.266Z",
+      "completed_at": "2026-05-31T15:33:43.266Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "dependency-graph-validation": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/dependency-graph-validation.md",
         "docs/validation/dependency-graph-validation/review-summary.md",
         "docs/validation/dependency-graph-validation/codex-review.json",
         "docs/validation/dependency-graph-validation/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:44.325Z",
+      "completed_at": "2026-05-31T15:33:44.325Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "implementability-dry-run": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/implementability-dry-run.md",
         "docs/validation/implementability-dry-run/review-summary.md",
         "docs/validation/implementability-dry-run/codex-review.json",
         "docs/validation/implementability-dry-run/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:43.974Z",
+      "completed_at": "2026-05-31T15:33:43.974Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "scope-creep-check": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/scope-creep-check.md",
         "docs/validation/scope-creep-check/review-summary.md",
         "docs/validation/scope-creep-check/codex-review.json",
         "docs/validation/scope-creep-check/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:44.676Z",
+      "completed_at": "2026-05-31T15:33:44.676Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "traceability-matrix": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/validation/traceability-matrix.md",
         "docs/validation/traceability-matrix/review-summary.md",
         "docs/validation/traceability-matrix/codex-review.json",
         "docs/validation/traceability-matrix/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T15:33:42.907Z",
+      "completed_at": "2026-05-31T15:33:42.907Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "create-vision": {
       "status": "completed",
@@ -715,15 +750,9 @@
     }
   },
   "next_eligible": [
-    "cross-phase-consistency",
-    "traceability-matrix",
-    "decision-completeness",
-    "critical-path-walkthrough",
-    "implementability-dry-run",
-    "dependency-graph-validation",
-    "scope-creep-check"
+    "apply-fixes-and-freeze"
   ],
   "extra-steps": [],
-  "save_counter": 87,
+  "save_counter": 101,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
