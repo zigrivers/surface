@@ -186,11 +186,16 @@
       ]
     },
     "tdd": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/tdd-standards.md"
-      ]
+      ],
+      "at": "2026-05-31T00:56:32.940Z",
+      "completed_at": "2026-05-31T00:56:32.940Z",
+      "completed_by": "user",
+      "depth": 3,
+      "artifacts_verified": true
     },
     "tech-stack": {
       "status": "completed",
@@ -565,11 +570,10 @@
     }
   },
   "next_eligible": [
-    "tdd",
     "project-structure",
     "domain-modeling"
   ],
   "extra-steps": [],
-  "save_counter": 29,
+  "save_counter": 30,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
