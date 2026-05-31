@@ -1,0 +1,19 @@
+{
+  "generated": "2026-05-30",
+  "method": "claude-only (batch velocity; multi-model available on re-run)",
+  "personas": {"P1-agent": ["US-001","US-020","US-022","US-040","US-050","US-051","US-060"],
+               "P2-builder": ["US-002","US-003","US-005","US-012","US-021","US-031","US-014","US-015"],
+               "P3-ci-maintainer": ["US-023","US-032","US-042","US-061"]},
+  "coverage": [
+    {"area":"Capture (FR-CAP-1..11)","stories":["US-001","US-002","US-003","US-004","US-005"],"status":"covered"},
+    {"area":"Pipeline/lenses (FR-PIPE,FR-LENS)","stories":["US-010","US-011","US-012","US-013","US-014"],"status":"covered"},
+    {"area":"Findings/scoring/trust (FR-SCORE,FR-RULE-1..2)","stories":["US-020","US-021","US-022","US-023"],"status":"covered"},
+    {"area":"Output/reporting (FR-OUT,FR-MODE-1)","stories":["US-030","US-031","US-032"],"status":"covered"},
+    {"area":"Closed loop/state/baselines (FR-LOOP,FR-RULE-3..6)","stories":["US-040","US-041","US-042"],"status":"covered"},
+    {"area":"Interfaces (FR-IF-1..4)","stories":["US-050","US-051","US-052","US-015"],"status":"covered"},
+    {"area":"Integrations (FR-INT)","stories":["US-060","US-061"],"status":"covered"},
+    {"area":"KB/presets/multi-model (FR-KB,FR-METH,FR-SCORE-5)","stories":["US-070","US-071","US-013"],"status":"covered"}
+  ],
+  "deferred_no_v1_story": ["FR-PIPE-12 competitive review (could)","FR-CAP-5 Storybook (could; noted under US-001/US-004)","FR-KB-3/5 extra categories (could)"],
+  "gaps_found_and_fixed": ["cognitive walkthrough + conversion audit -> US-014","alternatives/diff -> US-015"]
+}

@@ -82,6 +82,21 @@ NFR-PORT-1)
 - **Given** preset `accessibility-first` at depth 4, **When** I run all, **Then** the lens set
   and thresholds match that preset/overlay and the active config is recorded.
 
+### US-014 — Cognitive walkthrough & conversion audit [should]
+*As P2, I want task-flow friction and conversion blockers found.* (FR-PIPE-10,11; FR-LENS-2)
+- **Given** a defined task/persona and a captured flow, **When** the cognitive-walkthrough
+  lens runs, **Then** each step is evaluated as a first-time user and friction points are
+  emitted as findings citing the relevant heuristic.
+- **Given** a conversion-critical path (e.g., checkout) under the e-commerce overlay, **When**
+  the conversion lens runs, **Then** friction findings are tagged to that path.
+
+### US-015 — Bounded alternatives & before/after diff [should]
+*As P2, I want options and proof of improvement.* (FR-IF-4, FR-MODE-3)
+- **Given** an existing view, **When** I run `surface alternatives <target>`, **Then** surface
+  proposes bounded improvements to that view (never a blank-canvas design) with rationale.
+- **Given** a before and after capture, **When** I run `surface diff <before> <after>`,
+  **Then** surface reports which findings were resolved/introduced between them.
+
 ## Epic E3 — Findings, Scoring & Trust
 
 ### US-020 — Structured, evidence-bearing findings [gate]
