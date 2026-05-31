@@ -18,11 +18,16 @@
       ]
     },
     "system-architecture": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/system-architecture.md"
-      ]
+      ],
+      "at": "2026-05-31T14:47:48.578Z",
+      "completed_at": "2026-05-31T14:47:48.578Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "multi-agent-resume": {
       "status": "pending",
@@ -602,9 +607,10 @@
   "next_eligible": [
     "design-system",
     "git-workflow",
-    "system-architecture"
+    "review-architecture",
+    "review-testing"
   ],
   "extra-steps": [],
-  "save_counter": 42,
+  "save_counter": 44,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
