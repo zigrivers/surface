@@ -1,0 +1,56 @@
+{
+  "reviewer": "gpt-5-codex",
+  "overall": "The document correctly judges surface as a CLI/MCP/artifact contract, not a REST API. However, it overclaims interface parity and error completeness: the MCP surface is missing documented operations, and several machine contracts are not precise enough for downstream implementation.",
+  "findings": [
+    {
+      "severity": "P0",
+      "pass": "operation coverage",
+      "location": "§3 MCP tool contract; §9 Traceability",
+      "finding": "§9 claims audit, capture, explain, backlog, validate, gate, baseline, verdict, diff, and alternatives all map to CLI and MCP, but §3 has no `surface_diff` or `surface_alternatives`. §2 also lists `init`, `run`, and `next` as CLI verbs from FR-IF-1 while §3 says MCP exposes one tool per agent-relevant CLI verb, yet those tools are absent or explicitly unscoped.",
+      "suggestion": "Add MCP contracts for `surface_diff` and `surface_alternatives` at minimum. Either add `surface_init`, `surface_run`, and `surface_next`, or explicitly classify them as CLI-only administrative verbs and remove/qualify the parity claim."
+    },
+    {
+      "severity": "P1",
+      "pass": "error-contract completeness",
+      "location": "§2 CLI command contract; §3 MCP tool contract; §6 Error catalog",
+      "finding": "The contract says every command/tool has a consistent error envelope and §2 promises primary error codes, but many entries have fewer than two domain-specific codes: `next` has none, `explain`, `validate`, `baseline`, `alternatives`, and `diff` have one, and `surface_gate` lists errors as `—`. There is also a direct conflict: §2 says `audit` can return `1 model_unavailable`, while §6 says `model_unavailable` is a degradation with exit 0.",
+      "suggestion": "Create a per-command and per-tool error matrix with at least two stable domain errors, kind, CLI exit, MCP mapping, and message template. Resolve `model_unavailable` by making it exit 0 degradation unless a strict mode or judged-only command truly requires a model."
+    },
+    {
+      "severity": "P1",
+      "pass": "auth/data requirements",
+      "location": "§2 `audit`; §3 MCP tool contract; §5 Inputs that aren't endpoints",
+      "finding": "Auth-state injection is only wired into `surface_capture` in MCP. `surface_audit` performs capture internally but its input lacks `authState?: AuthStateRef`, and the CLI `audit` row does not explicitly list `--auth-state`, so authenticated audits are not covered end-to-end on both interfaces.",
+      "suggestion": "Add `authState?: AuthStateRef` to `surface_audit` and any capture-taking MCP tools, and list `--auth-state` for CLI `audit` and `alternatives`. Require target verification output or structured `auth_injection_failed` errors so login-page captures cannot masquerade as successful audits."
+    },
+    {
+      "severity": "P1",
+      "pass": "idempotency/determinism",
+      "location": "§1 Idempotency & determinism; §2 `baseline`/`verdict`/`backlog`; §4 `findings.json`; §7 Rate limits & retries",
+      "finding": "`all commands are safely re-runnable` is asserted but not specified for mutating operations. Re-running `baseline`, `verdict`, `init`, or `backlog --export` could create duplicate baselines, duplicate verdict records, overwritten config, or duplicate tracker issues; additionally, `findings.json` claims byte-stability while carrying `generatedAt`, which is unstable unless tied to a fixed run record.",
+      "suggestion": "Define idempotency semantics per mutating verb: `init` no-op versus `--force`, baseline snapshot keying, verdict upsert by identity/reuse policy, export idempotency by target plus finding identity, and retry behavior. Clarify whether `generatedAt` is part of deterministic input, fixed at run creation, or excluded from byte-stability tests."
+    },
+    {
+      "severity": "P1",
+      "pass": "payload/domain fidelity",
+      "location": "§4 Backlog / GateResult / SARIF; §2 `diff`",
+      "finding": "The public schemas lose closed-loop state required by the domain model. `diff` only returns `resolved`, `introduced`, and `stillFailing`, omitting `regressed` and `identity-broken`; `GateResult` lacks `FindingStatus`, `GateDisposition`, baseline/waiver context, and per-finding method/severity data; `surface_backlog` can return a bare `Backlog` whose entries only contain `findingId`, so consumers cannot tell which entries are judged, gated, waived, or non-executable without an unspecified join.",
+      "suggestion": "Expose a tracked finding read model or expanded backlog/gate entries containing `identityKey`, `findingId`, `method`, `severityBand`, `gatedForHuman`, `FindingStatus`, and `GateDisposition`. Expand `diff` to cover every `FindingStatus`, and carry the same fields into SARIF `properties` where applicable."
+    },
+    {
+      "severity": "P2",
+      "pass": "versioning consistency",
+      "location": "§1 Versioning; §3 Versioning & compatibility; §4 Canonical output schemas",
+      "finding": "The versioning policy is directionally correct but underspecified. `schemaVersion` is said to version the JSON envelope plus output schemas, while MCP schemas separately carry a version, but the contract does not name the MCP version field, define discovery shape, or state which changes bump CLI semver versus artifact `schemaVersion` versus MCP major.",
+      "suggestion": "Add a compatibility table: CLI package semver, JSON envelope version, `findings.json` schema version, SARIF version, and MCP tool schema version. Define exact breaking/additive examples and the required bump for each."
+    },
+    {
+      "severity": "P2",
+      "pass": "payload/domain fidelity",
+      "location": "§2 `capture`; §5 `Target`",
+      "finding": "`storybook` is exposed as a target/flag in the API contract, but the Capture domain model's `Target.kind` excludes it and the plan treats Storybook capture as deferred. That makes the interface contract ahead of the canonical domain model.",
+      "suggestion": "Either add `storybook` to the Capture domain model and define its artifact/degradation behavior, or mark it explicitly deferred/experimental and remove it from the stable v1 contract."
+    }
+  ],
+  "gate": "fail"
+}

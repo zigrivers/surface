@@ -477,14 +477,19 @@
       "completed_by": "scaffold-skip"
     },
     "review-api": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/reviews/review-api.md",
         "docs/reviews/api/review-summary.md",
         "docs/reviews/api/codex-review.json",
         "docs/reviews/api/gemini-review.json"
-      ]
+      ],
+      "at": "2026-05-31T14:59:02.081Z",
+      "completed_at": "2026-05-31T14:59:02.081Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-database": {
       "status": "skipped",
@@ -631,11 +636,11 @@
   },
   "next_eligible": [
     "git-workflow",
-    "review-api",
     "review-testing",
-    "story-tests"
+    "story-tests",
+    "platform-parity-review"
   ],
   "extra-steps": [],
-  "save_counter": 53,
+  "save_counter": 55,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
