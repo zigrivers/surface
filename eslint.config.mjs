@@ -1,10 +1,13 @@
-// Flat config (ESLint 9). Stack: TypeScript + Prettier + jsx-a11y.
+// Flat config (ESLint 9). This root config is used by every workspace package.
+// Stack: TypeScript + Prettier + jsx-a11y.
 // jsx-a11y is intentionally present: it doubles as a static a11y *grounding* input
 // for the React adapter (see docs/tech-stack.md §4), not only project self-linting.
 import js from "@eslint/js";
 import tseslint from "typescript-eslint";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import prettier from "eslint-config-prettier";
+
+const disableTypeChecked = tseslint.configs.disableTypeChecked;
 
 export default tseslint.config(
   { ignores: ["**/dist/**", "**/node_modules/**", ".surface/**", "docs/**"] },
@@ -19,6 +22,11 @@ export default tseslint.config(
       "no-console": ["error", { allow: ["error"] }],
       eqeqeq: ["error", "always"],
     },
+  },
+  {
+    files: ["**/*.config.{js,mjs,cjs,ts,mts,cts}"],
+    languageOptions: disableTypeChecked.languageOptions,
+    rules: disableTypeChecked.rules,
   },
   // Applied by the react adapter to target sources as a static a11y grounding pass:
   {

@@ -4,23 +4,31 @@
   "type": "module",
   "packageManager": "pnpm@11.0.0",
   "engines": {
-    "node": ">=22"
+    "node": ">=22.13.0"
   },
   "license": "MIT",
   "scripts": {
     "dev": "turbo watch build",
     "build": "turbo run build",
     "test": "turbo run test",
-    "test:watch": "turbo watch test",
+    "test:watch": "turbo run test:watch",
+    "test:evals": "vitest run tests/evals",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm run format:check && turbo run lint typecheck test",
+    "check": "pnpm run format:check && turbo run lint typecheck test build:smoke",
     "clean": "turbo run clean && rm -rf node_modules/.cache .turbo"
   },
   "devDependencies": {
-    "prettier": "^3.3.0",
-    "turbo": "^2.5.0"
+    "@eslint/js": "catalog:",
+    "eslint": "catalog:",
+    "eslint-config-prettier": "catalog:",
+    "eslint-plugin-jsx-a11y": "catalog:",
+    "prettier": "catalog:",
+    "turbo": "^2.5.0",
+    "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
+    "vitest": "catalog:"
   }
 }

@@ -3,7 +3,7 @@
 # surface — Development Setup
 
 > Local development guide for the `surface` monorepo (pnpm + Turborepo, TypeScript/ESM,
-> Node ≥ 22). surface is a **CLI + MCP server** — there is no web dev server and **no
+> Node ≥ 22.13.0, pinned to the CI patch release and modern pnpm/Vite/Vitest floor). surface is a **CLI + MCP server** — there is no web dev server and **no
 > database**; "dev mode" means watch-mode compilation plus a locally linked `surface` binary.
 > The canonical command list lives in `CLAUDE.md` → **Key Commands**; this file explains
 > the workflow behind it.
@@ -12,7 +12,7 @@
 
 | Tool | Version | Why |
 |---|---|---|
-| Node.js | **≥ 22** (LTS) | runtime + ESM; matches `engines` in `package.json` |
+| Node.js | **≥ 22.13.0** (LTS) | runtime + ESM; matches `engines` and the CI patch release |
 | pnpm | **11.x** | workspace package manager (pinned via `packageManager`) |
 | Git | any recent | version control + Beads hooks |
 
@@ -23,7 +23,7 @@ corepack enable
 corepack prepare pnpm@11.0.0 --activate
 ```
 
-Verify: `node -v` (≥ 22) and `pnpm -v` (11.x).
+Verify: `node -v` (≥ 22.13.0) and `pnpm -v` (11.x).
 
 ## First-time setup (clone → running, ≤ 5 steps)
 
@@ -42,7 +42,7 @@ keys only to enable judged / multi-model findings.
 
 ```bash
 pnpm dev            # watch-mode build across all packages (turbo watch build)
-pnpm test:watch     # re-run tests on change (turbo watch test)
+pnpm test:watch     # run package test watchers
 pnpm run check      # the full local gate, identical to CI
 ```
 
@@ -113,16 +113,16 @@ never inside this repo. There is no `db-setup` / `db-reset` step. See
 ## Platform notes (Mac / Linux / WSL)
 
 - **macOS**: install Node via the official installer, `nvm`, or `brew install node`. Corepack handles pnpm.
-- **Linux**: use your distro's Node ≥ 22 packages or `nvm`. Nothing else is platform-specific — there are no native build steps in dev (Playwright browsers are fetched on demand by the `capture` package when first used).
+- **Linux**: use your distro's Node ≥ 22.13.0 packages or `nvm`. Nothing else is platform-specific — there are no native build steps in dev (Playwright browsers are fetched on demand by the `capture` package when first used).
 - **WSL2**: work inside the Linux filesystem (`~/…`), **not** `/mnt/c/…` — file-watching (`turbo watch`, Vitest) is slow and unreliable on the Windows-mounted FS. Otherwise identical to Linux.
 
 ## Verification checklist
 
 After setup, confirm each of these passes:
 
-- [ ] `node -v` reports ≥ 22 and `pnpm -v` reports 11.x
+- [ ] `node -v` reports ≥ 22.13.0 and `pnpm -v` reports 11.x
 - [ ] `pnpm install` completes with no errors
-- [ ] `pnpm run check` is green (format, lint, typecheck, test)
+- [ ] `pnpm run check` is green (format, lint, typecheck, test, build smoke)
 - [ ] `pnpm dev` starts watch-mode and rebuilds on a saved change
 - [ ] `pnpm test:watch` re-runs on a saved test change
 - [ ] (once `packages/cli` is built) `surface --help` resolves to your local build
@@ -131,7 +131,7 @@ After setup, confirm each of these passes:
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `Unsupported engine` / wrong Node | Node < 22 active | `nvm use 22` or reinstall Node ≥ 22 |
+| `Unsupported engine` / wrong Node | Node < 22.13.0 active | `nvm install 22.13.0 && nvm use 22.13.0` or reinstall Node ≥ 22.13.0 |
 | `pnpm: command not found` | Corepack not enabled | `corepack enable && corepack prepare pnpm@11.0.0 --activate` |
 | `turbo: command not found` | deps not installed | `pnpm install` (turbo is a root devDependency) |
 | `pnpm dev` does nothing | no package defines a `build` task yet | expected on the skeleton; tasks appear as packages land |
