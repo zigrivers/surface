@@ -320,11 +320,16 @@
       ]
     },
     "user-stories": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/user-stories.md"
-      ]
+      ],
+      "at": "2026-05-31T00:53:38.234Z",
+      "completed_at": "2026-05-31T00:53:38.234Z",
+      "completed_by": "user",
+      "depth": 3,
+      "artifacts_verified": true
     },
     "create-evals": {
       "status": "pending",
@@ -545,10 +550,10 @@
     }
   },
   "next_eligible": [
-    "user-stories",
+    "review-user-stories",
     "coding-standards"
   ],
   "extra-steps": [],
-  "save_counter": 24,
+  "save_counter": 26,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
