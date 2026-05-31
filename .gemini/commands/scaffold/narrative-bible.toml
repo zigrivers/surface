@@ -1,0 +1,9 @@
+description = "Run scaffold narrative-bible through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Document world lore, characters, dialogue systems, and narrative pacing
+Purpose: Creates a narrative bible covering world lore, character profiles, dialogue system design, branching narrative structure, and narrative pacing. Conditional on narrative depth.
+
+User request: scaffold narrative-bible
+"""

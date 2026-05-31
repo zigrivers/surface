@@ -1,0 +1,9 @@
+description = "Run scaffold claude-md-optimization through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Consolidate and optimize CLAUDE.md for maximum signal density
+Purpose: Removes redundancy from CLAUDE.md, fixes terminology inconsistencies, front-loads critical patterns (TDD, commit format, worktrees), and keeps it under 200 lines so agents actually read and follow it.
+
+User request: scaffold claude-md-optimization
+"""

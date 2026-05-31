@@ -1,0 +1,9 @@
+description = "Run scaffold ai-behavior-design through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design NPC AI architecture, pathfinding, perception systems, and difficulty scaling
+Purpose: Documents AI architecture (behavior trees, GOAP, utility AI, state machines), pathfinding strategy, perception systems, difficulty scaling, and companion AI behavior.
+
+User request: scaffold ai-behavior-design
+"""

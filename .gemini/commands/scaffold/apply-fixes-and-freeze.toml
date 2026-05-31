@@ -1,0 +1,9 @@
+description = "Run scaffold apply-fixes-and-freeze through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Apply validation findings and freeze documentation
+Purpose: Applies all findings from the validation phase, fixes blocking issues, and freezes every document with a version marker — signaling that specs are implementation-ready.
+
+User request: scaffold apply-fixes-and-freeze
+"""

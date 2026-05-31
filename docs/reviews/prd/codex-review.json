@@ -1,0 +1,65 @@
+[
+  {
+    "severity": "P1",
+    "pass": "Feature Scoping Completeness",
+    "location": "§3 Scope Philosophy & Scope Risk, §8 Feature Prioritization, §15 Phased Delivery Plan",
+    "description": "MoSCoW containment is internally inconsistent: §3 says the release-success critical path is web/React with measured accessibility, but §8 marks all framework adapters, both capture backends, MCP, runner skill, GitHub export, four overlays, and many lenses as Must-Have, while §15 says Vue/Svelte land within v1.0 as parallel adapter work. This makes it unclear what actually blocks v1 release.",
+    "suggestion": "Split Must-Have into a true v1.0 release gate and non-gating v1.x commitments. For example: make React/Next + one capture backend + measured accessibility + closed loop the v1.0 gate, then classify Vue/Svelte, second capture backend, broader overlays, and exports as v1.0 stretch or v1.1 unless they truly block release."
+  },
+  {
+    "severity": "P1",
+    "pass": "Constraint & Dependency Documentation",
+    "location": "§11 Constraints, §12 Dependencies",
+    "description": "External dependencies are listed, but their operational constraints are not documented: GitHub Issues API auth/rate limits, Lighthouse/Axe runtime assumptions, Playwright browser install/runtime costs, agent-browser availability/API stability, MCP SDK version constraints, and optional model CLI costs/auth/rate limits are absent.",
+    "suggestion": "Add a dependency table with owner, required/optional status, auth model, rate limits, cost/licensing, offline behavior, minimum supported version, and product impact if unavailable."
+  },
+  {
+    "severity": "P1",
+    "pass": "NFR Quantification",
+    "location": "§10 Non-Functional Requirements",
+    "description": "Several required NFR categories are absent or not quantified: scalability, availability, data retention, browser/device support, and accessibility of surface's own human-facing outputs. i18n and observability are present only as Should items without measurable targets or thresholds.",
+    "suggestion": "Add explicit NFR entries or N/A rationales for each missing category. Include numeric targets such as max routes/views per run, supported browser versions and viewport/device matrix, artifact retention defaults, log/telemetry fields, and locale support boundaries."
+  },
+  {
+    "severity": "P1",
+    "pass": "Downstream Readiness for User Stories",
+    "location": "§6.7 Findings, scoring & prioritization; §6.9 Agent workflow / closed loop; §16 Open Questions",
+    "description": "Several business rules needed for acceptance criteria are intentionally left open: confidence thresholds, scoring weights, MMR parameters, stable finding identity behavior, and CI gate semantics. These are core to prioritization, human gating, re-audit status, and agent execution, so user stories would require guesswork.",
+    "suggestion": "Define product-level rules before user stories, even if exact algorithms remain for specs. For example: confidence bands, human-gate categories, required identity inputs, status transition rules, and default CI failure policy."
+  },
+  {
+    "severity": "P2",
+    "pass": "Success Criteria Measurability",
+    "location": "§9 Success Criteria",
+    "description": "SC-5 uses the target 'Single digits (%)' for judged false-positive rate, which is not a precise target value. SC-6 requires 'judged-severity reduced' but does not define the scale, minimum delta, evaluator, or sample size.",
+    "suggestion": "Replace vague targets with exact thresholds and sampling rules, such as '<10% false-positive rate on a labeled sample of at least N findings' and 'median judged severity decreases by at least one severity level on N fixed benchmark apps after one fix cycle.'"
+  },
+  {
+    "severity": "P2",
+    "pass": "Persona & Stakeholder Coverage",
+    "location": "§4 Target Users / Personas",
+    "description": "P3 groups multiple secondary beneficiaries into bullets instead of complete personas. The CI/platform maintainer in particular has distinct goals and constraints around gates, noise, configuration, and rollout that are not captured as behavior/success criteria.",
+    "suggestion": "Promote the CI/platform maintainer or team-without-design-QA into a full persona with current behavior, constraints, success metrics, and authority boundaries, or explicitly fold those needs into P1 with acceptance-level detail."
+  },
+  {
+    "severity": "P2",
+    "pass": "Error & Edge Case Coverage",
+    "location": "§7 Sad paths & error scenarios",
+    "description": "Sad paths cover capture and confidence failures, but do not cover several features with user input or external dependencies: GitHub export failures, MCP tool errors/version mismatch, Storybook ingestion failures, malformed Scaffold artifacts, oversized route inventories, flaky dynamic pages, interrupted runs, and concurrent re-audits mutating `.surface/state.json`.",
+    "suggestion": "Add error cases for each integration and stateful workflow, including retry/partial-output behavior, exit codes, state-locking rules, and how interrupted or concurrent runs preserve finding identity."
+  },
+  {
+    "severity": "P2",
+    "pass": "Problem Statement Rigor",
+    "location": "§1 Problem Statement",
+    "description": "The evidence claims are concrete but uncited in the PRD, including scanner coverage percentages and European Accessibility Act penalty/enforcement details. Because these claims motivate urgency and legal risk, downstream work may inherit unverified assumptions.",
+    "suggestion": "Attach citations or source references for each empirical/legal claim, or mark them as assumptions needing validation before they drive prioritization, risk, or messaging."
+  },
+  {
+    "severity": "P3",
+    "pass": "Feature Scoping Completeness",
+    "location": "§6.10 Interfaces, §11 Constraints",
+    "description": "Some technology choices read like implementation decisions rather than product requirements, especially 'TypeScript CLI' and mirroring Scaffold's runtime architecture. Other named technologies such as MCP, Axe/Lighthouse, and capture backends are more defensible as product scope because they define integrations or user-facing compatibility.",
+    "suggestion": "Move implementation-language and internal architecture prescriptions to tech-stack/architecture docs, and keep the PRD focused on externally observable compatibility, interfaces, and behavior."
+  }
+]

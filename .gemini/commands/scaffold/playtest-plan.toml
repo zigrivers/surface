@@ -1,0 +1,9 @@
+description = "Run scaffold playtest-plan through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design playtest strategy with types, scheduling, feedback collection, FTUE observation, and balance testing
+Purpose: Designs your playtest strategy — internal, focused, and external playtests tied to milestone gates — with feedback templates, FTUE observation protocols, balance testing methodology, and participant recruitment plans.
+
+User request: scaffold playtest-plan
+"""

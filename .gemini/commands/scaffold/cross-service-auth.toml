@@ -1,0 +1,9 @@
+description = "Run scaffold cross-service-auth through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define inter-service trust model — mTLS, service tokens, audience scoping
+Purpose: Designs the internal service identity and trust framework: mutual TLS configuration, service-to-service token issuance and validation, audience scoping, and zero-trust boundary definitions.
+
+User request: scaffold cross-service-auth
+"""

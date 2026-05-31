@@ -1,0 +1,89 @@
+{
+  "session_id": "f5466102-c52f-4729-8f11-57e60774781a",
+  "response": "[\n  {\n    \"severity\": \"P1\",\n    \"pass\": \"Feature Scoping Completeness\",\n    \"location\": \"§8 Feature Prioritization (MoSCoW)\",\n    \"description\": \"The Must-Have list mandates 'all framework adapters: React/Next + Vue + Svelte + framework-agnostic DOM/HTML' for v1. Despite §3's acknowledgment of scope risk, making 4 separate framework adapters strict Must-Haves undermines actual MoSCoW tradeoff mechanics and risks failing the v1.0 delivery.\",\n    \"suggestion\": \"Retain React/Next and framework-agnostic HTML as v1.0 Must-Haves to prove the closed loop. Move Vue and Svelte to Should-Have (v1.1) to enforce a true critical path.\"\n  },\n  {\n    \"severity\": \"P1\",\n    \"pass\": \"NFR Quantification\",\n    \"location\": \"§10 Non-Functional Requirements\",\n    \"description\": \"Data retention and privacy NFRs are completely absent. The tool captures DOM snapshots, screenshots, and source code (which may contain PII or proprietary data), but there is no quantified requirement for how long this data is retained, where it is stored, or how it is purged.\",\n    \"suggestion\": \"Add an NFR-DATA-1 specifying local-only storage constraints by default, explicit retention bounds (e.g., ephemeral per run unless saved to .surface/), and handling of captured sensitive data.\"\n  },\n  {\n    \"severity\": \"P2\",\n    \"pass\": \"Constraint & Dependency Documentation\",\n    \"location\": \"§11 Constraints & §12 Dependencies\",\n    \"description\": \"While external multi-model CLIs (Codex/Gemini) and AI inference are required for 'judged' findings, the PRD lacks constraints regarding API costs, rate-limiting, and BYO-key authentication requirements for these external services.\",\n    \"suggestion\": \"Add a constraint documenting the operational costs/rate-limit thresholds for LLM API usage and specify the authentication contract (e.g., user must provide their own API keys via environment variables).\"\n  },\n  {\n    \"severity\": \"P2\",\n    \"pass\": \"Error & Edge Case Coverage\",\n    \"location\": \"§7 Sad paths & error scenarios\",\n    \"description\": \"The error scenarios do not cover large-data failure modes, specifically when a captured DOM snapshot, accessibility tree, or component tree exceeds the context window limits of the underlying LLM used for judged findings.\",\n    \"suggestion\": \"Add a sad path for context-window overflow, detailing the fallback behavior (e.g., DOM truncation, subset evaluation, or degrading to measured-only findings).\"\n  }\n]",
+  "stats": {
+    "models": {
+      "gemini-3.1-flash-lite": {
+        "api": {
+          "totalRequests": 5,
+          "totalErrors": 0,
+          "totalLatencyMs": 23712
+        },
+        "tokens": {
+          "input": 83253,
+          "prompt": 136225,
+          "candidates": 140,
+          "total": 141270,
+          "cached": 52972,
+          "thoughts": 4905,
+          "tool": 0
+        },
+        "roles": {
+          "utility_router": {
+            "totalRequests": 5,
+            "totalErrors": 0,
+            "totalLatencyMs": 23712,
+            "tokens": {
+              "input": 83253,
+              "prompt": 136225,
+              "candidates": 140,
+              "total": 141270,
+              "cached": 52972,
+              "thoughts": 4905,
+              "tool": 0
+            }
+          }
+        }
+      },
+      "gemini-3.1-pro-preview": {
+        "api": {
+          "totalRequests": 1,
+          "totalErrors": 0,
+          "totalLatencyMs": 19052
+        },
+        "tokens": {
+          "input": 34128,
+          "prompt": 34128,
+          "candidates": 596,
+          "total": 35927,
+          "cached": 0,
+          "thoughts": 1203,
+          "tool": 0
+        },
+        "roles": {
+          "main": {
+            "totalRequests": 1,
+            "totalErrors": 0,
+            "totalLatencyMs": 19052,
+            "tokens": {
+              "input": 34128,
+              "prompt": 34128,
+              "candidates": 596,
+              "total": 35927,
+              "cached": 0,
+              "thoughts": 1203,
+              "tool": 0
+            }
+          }
+        }
+      }
+    },
+    "tools": {
+      "totalCalls": 0,
+      "totalSuccess": 0,
+      "totalFail": 0,
+      "totalDurationMs": 0,
+      "totalDecisions": {
+        "accept": 0,
+        "reject": 0,
+        "modify": 0,
+        "auto_accept": 0
+      },
+      "byName": {}
+    },
+    "files": {
+      "totalLinesAdded": 0,
+      "totalLinesRemoved": 0
+    }
+  }
+}

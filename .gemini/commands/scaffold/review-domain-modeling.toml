@@ -1,0 +1,9 @@
+description = "Run scaffold review-domain-modeling through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review domain models for completeness, consistency, and downstream readiness
+Purpose: Verifies every PRD feature maps to a domain entity, checks that business rules are enforceable, and ensures the shared vocabulary is consistent across all project files.
+
+User request: scaffold review-domain-modeling
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold implementation-playbook through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Create the playbook that AI agents follow during implementation
+Purpose: Writes the playbook agents reference during every coding session — task execution order, which docs to read before each task, the TDD loop to follow, quality gates to pass, and the handoff format between agents.
+
+User request: scaffold implementation-playbook
+"""

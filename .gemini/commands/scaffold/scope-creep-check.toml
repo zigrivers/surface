@@ -1,0 +1,9 @@
+description = "Run scaffold scope-creep-check through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Verify specs stay aligned to PRD boundaries
+Purpose: Compares everything that has been specified against the original PRD and flags anything that was not in the requirements — features, components, or tasks that crept in without justification.
+
+User request: scaffold scope-creep-check
+"""

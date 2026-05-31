@@ -1,0 +1,9 @@
+description = "Run scaffold review-user-stories through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Multi-pass review of user stories for PRD coverage, quality, and downstream readiness
+Purpose: Verifies every PRD feature maps to at least one story, checks that acceptance criteria are specific enough to test, validates story independence, and builds a requirements traceability index at higher depths.
+
+User request: scaffold review-user-stories
+"""

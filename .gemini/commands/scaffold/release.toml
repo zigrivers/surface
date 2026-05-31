@@ -1,0 +1,9 @@
+description = "Run scaffold release through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Run the target project's release ceremony
+Purpose: Run the target project's release ceremony. Analyze conventional commits to
+
+User request: scaffold release
+"""

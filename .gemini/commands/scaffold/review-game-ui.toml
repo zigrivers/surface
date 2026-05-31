@@ -1,0 +1,9 @@
+description = "Run scaffold review-game-ui through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review game UI specification for completeness, accessibility coverage, and controller navigation
+Purpose: Multi-pass review of game UI spec checking HUD clarity, menu completeness, controller accessibility, settings coverage, FTUE effectiveness, state machine completeness, and platform shell compliance.
+
+User request: scaffold review-game-ui
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold spark through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Explore a raw project idea through Socratic questioning and research
+Purpose: Takes a vague idea and turns it into a well-formed idea brief through probing questions, competitive research, and innovation expansion. At higher depths, dispatches multi-model research and adversarial stress-testing. Feeds directly into create-vision.
+
+User request: scaffold spark
+"""

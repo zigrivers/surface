@@ -1,0 +1,9 @@
+description = "Run scaffold design-system through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Create a cohesive design system with tokens and component patterns for frontend
+Purpose: Creates a visual language — color palette (WCAG-compliant), typography scale, spacing system, component patterns — and generates working theme config files for your frontend framework.
+
+User request: scaffold design-system
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold version-bump through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Bump version and update changelog without tagging or releasing
+Purpose: Bump the project version and update the changelog without tagging, pushing, or
+
+User request: scaffold version-bump
+"""

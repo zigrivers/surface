@@ -1,0 +1,9 @@
+description = "Run scaffold review-ux through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review UX specification for completeness and usability
+Purpose: Verifies every user story has a flow, accessibility requirements are met, all error states are documented, and the design system is used consistently.
+
+User request: scaffold review-ux
+"""

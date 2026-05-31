@@ -1,0 +1,9 @@
+description = "Run scaffold tech-stack through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Research and document tech stack decisions with rationale for each choice
+Purpose: Researches technology options for your project — language, framework, database, hosting, auth — evaluates each against your requirements, and documents every choice with rationale and alternatives considered.
+
+User request: scaffold tech-stack
+"""

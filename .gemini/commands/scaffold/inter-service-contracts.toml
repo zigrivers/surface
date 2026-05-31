@@ -1,0 +1,9 @@
+description = "Run scaffold inter-service-contracts through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design API contracts between services with versioning, retries, and failure isolation
+Purpose: Specifies internal service-to-service API contracts including versioning strategy, backward compatibility rules, retry policies, timeout budgets, idempotency requirements, and failure isolation patterns.
+
+User request: scaffold inter-service-contracts
+"""

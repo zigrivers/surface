@@ -1,0 +1,9 @@
+description = "Run scaffold session-analyzer through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Analyze session history to find automation opportunities
+Purpose: Analyze all Claude Code sessions on this computer and identify repeated tasks,
+
+User request: scaffold session-analyzer
+"""

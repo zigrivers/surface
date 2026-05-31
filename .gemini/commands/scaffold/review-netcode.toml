@@ -1,0 +1,9 @@
+description = "Run scaffold review-netcode through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review netcode specification for latency tolerance, bandwidth, cheat resistance, and edge cases
+Purpose: Multi-pass review of netcode spec checking latency tolerance, bandwidth compliance, cheat resistance, determinism verification, and connection edge cases.
+
+User request: scaffold review-netcode
+"""

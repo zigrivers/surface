@@ -1,0 +1,9 @@
+description = "Run scaffold traceability-matrix through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Build traceability from PRD requirements through architecture to implementation tasks
+Purpose: Builds a map showing that every PRD requirement traces through to user stories, architecture components, implementation tasks, and test cases — with no gaps in either direction.
+
+User request: scaffold traceability-matrix
+"""

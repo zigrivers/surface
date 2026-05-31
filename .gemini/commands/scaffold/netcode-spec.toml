@@ -1,0 +1,9 @@
+description = "Run scaffold netcode-spec through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design network topology, tick rate, prediction, reconciliation, and anti-cheat architecture
+Purpose: Specifies client-server or P2P topology, tick rate, client prediction, server reconciliation, lag compensation, bandwidth budgets, and anti-cheat architecture for multiplayer games.
+
+User request: scaffold netcode-spec
+"""

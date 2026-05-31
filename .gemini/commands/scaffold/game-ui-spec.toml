@@ -1,0 +1,9 @@
+description = "Run scaffold game-ui-spec through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Specify HUD, menus, controller navigation, settings, FTUE, and UI state machines for games
+Purpose: Replaces design-system and ux-spec for game projects. Covers UI visual tokens, HUD, menu hierarchy, controller navigation, settings screens, FTUE/tutorial, UI state machines, and responsive behavior.
+
+User request: scaffold game-ui-spec
+"""

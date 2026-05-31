@@ -1,0 +1,9 @@
+description = "Run scaffold review-economy through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review economy design for inflation trajectories, exploit vectors, ethical monetization, and legal compliance
+Purpose: Multi-pass review of economy design checking inflation/deflation trajectories, exploit vectors, ethical monetization compliance, pay-to-win detection, legal compliance per market, progression-monetization separation, and live-service sustainability.
+
+User request: scaffold review-economy
+"""

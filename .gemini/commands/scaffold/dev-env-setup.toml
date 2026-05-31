@@ -1,0 +1,9 @@
+description = "Run scaffold dev-env-setup through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Configure local dev environment with live reload and simple commands
+Purpose: Configures your project so a single command starts everything — dev server with live reload, local database, environment variables — and documents the setup in a getting-started guide.
+
+User request: scaffold dev-env-setup
+"""

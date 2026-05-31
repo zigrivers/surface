@@ -1,0 +1,9 @@
+description = "Run scaffold dashboard through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Open visual pipeline dashboard in browser
+Purpose: Open a visual pipeline dashboard in the browser showing progress, phase grouping,
+
+User request: scaffold dashboard
+"""

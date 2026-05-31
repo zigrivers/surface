@@ -1,0 +1,9 @@
+description = "Run scaffold beads through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Initialize Beads task tracking with CLAUDE.md conventions and lessons file
+Purpose: Sets up Beads task tracking with a lessons-learned file for cross-session learning, and creates the initial CLAUDE.md skeleton with core principles and workflow conventions.
+
+User request: scaffold beads
+"""

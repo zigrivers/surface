@@ -1,0 +1,30 @@
+[
+  {
+    "severity": "P1",
+    "pass": "Feature Scoping Completeness",
+    "location": "§8 Feature Prioritization (MoSCoW)",
+    "description": "The Must-Have list mandates 'all framework adapters: React/Next + Vue + Svelte + framework-agnostic DOM/HTML' for v1. Despite §3's acknowledgment of scope risk, making 4 separate framework adapters strict Must-Haves undermines actual MoSCoW tradeoff mechanics and risks failing the v1.0 delivery.",
+    "suggestion": "Retain React/Next and framework-agnostic HTML as v1.0 Must-Haves to prove the closed loop. Move Vue and Svelte to Should-Have (v1.1) to enforce a true critical path."
+  },
+  {
+    "severity": "P1",
+    "pass": "NFR Quantification",
+    "location": "§10 Non-Functional Requirements",
+    "description": "Data retention and privacy NFRs are completely absent. The tool captures DOM snapshots, screenshots, and source code (which may contain PII or proprietary data), but there is no quantified requirement for how long this data is retained, where it is stored, or how it is purged.",
+    "suggestion": "Add an NFR-DATA-1 specifying local-only storage constraints by default, explicit retention bounds (e.g., ephemeral per run unless saved to .surface/), and handling of captured sensitive data."
+  },
+  {
+    "severity": "P2",
+    "pass": "Constraint & Dependency Documentation",
+    "location": "§11 Constraints & §12 Dependencies",
+    "description": "While external multi-model CLIs (Codex/Gemini) and AI inference are required for 'judged' findings, the PRD lacks constraints regarding API costs, rate-limiting, and BYO-key authentication requirements for these external services.",
+    "suggestion": "Add a constraint documenting the operational costs/rate-limit thresholds for LLM API usage and specify the authentication contract (e.g., user must provide their own API keys via environment variables)."
+  },
+  {
+    "severity": "P2",
+    "pass": "Error & Edge Case Coverage",
+    "location": "§7 Sad paths & error scenarios",
+    "description": "The error scenarios do not cover large-data failure modes, specifically when a captured DOM snapshot, accessibility tree, or component tree exceeds the context window limits of the underlying LLM used for judged findings.",
+    "suggestion": "Add a sad path for context-window overflow, detailing the fallback behavior (e.g., DOM truncation, subset evaluation, or degrading to measured-only findings)."
+  }
+]

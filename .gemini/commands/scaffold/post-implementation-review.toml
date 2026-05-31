@@ -1,0 +1,9 @@
+description = "Run scaffold post-implementation-review through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Run a systematic three-channel post-implementation code review across the entire codebase
+Purpose: Run a systematic three-channel post-implementation code review across the entire codebase after an AI agent completes all implementation tasks.
+
+User request: scaffold post-implementation-review
+"""

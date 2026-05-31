@@ -1,0 +1,9 @@
+description = "Run scaffold project-structure through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design directory layout and scaffold the actual project structure
+Purpose: Designs a directory layout optimized for parallel AI agent work (minimizing file conflicts), documents where each type of file belongs, and creates the actual directories in your project.
+
+User request: scaffold project-structure
+"""

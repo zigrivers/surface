@@ -1,0 +1,9 @@
+description = "Run scaffold save-system-spec through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Specify persistence strategy, serialization format, save slots, cloud save, corruption detection, anti-tamper, and migration
+Purpose: Specifies the save system — what data is persisted (adapts by persistence level), serialization format, save slot management, cloud save per platform, auto-save strategy, corruption detection and recovery, anti-tamper measures, and save format migration strategy for patches and DLC.
+
+User request: scaffold save-system-spec
+"""

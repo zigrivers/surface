@@ -1,0 +1,9 @@
+description = "Run scaffold security through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Security review and documentation
+Purpose: Conducts a security review of your entire system — OWASP Top 10 coverage, input validation rules for every user-facing field, data classification, secrets management, CORS policy, rate limiting, and a threat model covering all trust boundaries.
+
+User request: scaffold security
+"""

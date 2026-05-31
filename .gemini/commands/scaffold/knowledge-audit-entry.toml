@@ -1,0 +1,8 @@
+description = "Run scaffold knowledge-audit-entry through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Audit one knowledge entry against its declared sources via grounded web retrieval
+
+User request: scaffold knowledge-audit-entry
+"""

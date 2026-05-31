@@ -1,0 +1,9 @@
+description = "Run scaffold story-tests through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Generate test skeletons from user story acceptance criteria
+Purpose: Generates a test skeleton file for each user story — one pending test case per acceptance criterion, tagged with story and criterion IDs — giving agents a TDD starting point for every feature.
+
+User request: scaffold story-tests
+"""

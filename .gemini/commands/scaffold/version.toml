@@ -1,0 +1,9 @@
+description = "Run scaffold version through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Show installed and latest scaffold version
+Purpose: Show the installed scaffold version and check if a newer version is available.
+
+User request: scaffold version
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold integration-test-plan through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design contract tests, cross-service E2E flows, and service mocking strategy
+Purpose: Plans the cross-service testing strategy: consumer-driven contract tests, integration test flows covering critical multi-service journeys, and service dependency mocking approaches for isolated testing.
+
+User request: scaffold integration-test-plan
+"""

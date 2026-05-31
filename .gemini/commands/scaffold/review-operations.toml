@@ -1,0 +1,9 @@
+description = "Run scaffold review-operations through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review operations runbook for completeness and safety
+Purpose: Verifies the full deployment lifecycle is documented, monitoring covers latency/errors/saturation, alert thresholds have rationale, and common failure scenarios have runbook entries.
+
+User request: scaffold review-operations
+"""

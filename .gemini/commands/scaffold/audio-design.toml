@@ -1,0 +1,9 @@
+description = "Run scaffold audio-design through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define audio direction, SFX categories, adaptive music, middleware config, spatial audio, VO plan, and platform loudness targets
+Purpose: Establishes audio direction, SFX category taxonomy, adaptive music system, middleware configuration (Wwise/FMOD), spatial audio setup, voice-over pipeline, platform-specific loudness targets (LUFS), and memory budget allocation from performance budgets.
+
+User request: scaffold audio-design
+"""

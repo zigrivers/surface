@@ -1,0 +1,9 @@
+description = "Run scaffold performance-budgets through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define frame budgets, memory budgets, GPU budgets, and platform-specific performance targets
+Purpose: Establishes per-system frame time allocations, per-platform memory budgets, GPU/draw call limits, loading time targets, and thermal constraints. Every budget has a measurement method and alert threshold.
+
+User request: scaffold performance-budgets
+"""

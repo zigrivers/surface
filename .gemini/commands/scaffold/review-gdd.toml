@@ -1,0 +1,9 @@
+description = "Run scaffold review-gdd through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Multi-pass review of game design document for pillar coherence, mechanic clarity, and scope feasibility
+Purpose: Stress-tests the GDD through multiple review passes checking pillar coherence, core loop closure, mechanic implementability, progression feasibility, scope assessment, and downstream readiness for user stories.
+
+User request: scaffold review-gdd
+"""

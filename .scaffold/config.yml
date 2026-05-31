@@ -1,0 +1,15 @@
+version: 2
+methodology: deep
+platforms:
+  - claude-code
+  - codex
+  - gemini
+project:
+  platforms: []
+  projectType: cli
+  cliConfig:
+    interactivity: hybrid
+    distributionChannels:
+      - package-manager
+      - system-package-manager
+    hasStructuredOutput: true

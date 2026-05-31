@@ -1,0 +1,9 @@
+description = "Run scaffold single-agent-resume through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Resume single-agent work after a break
+Purpose: Recovers context from the previous session — reads lessons learned, checks git state, reconciles merged PRs — and continues the TDD loop from where you left off.
+
+User request: scaffold single-agent-resume
+"""

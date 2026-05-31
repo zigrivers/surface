@@ -1,0 +1,9 @@
+description = "Run scaffold coding-standards through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Create prescriptive coding standards tailored to the project's tech stack
+Purpose: Creates coding standards tailored to your tech stack — naming conventions, error handling patterns, import organization, AI-specific rules — and generates working linter and formatter config files.
+
+User request: scaffold coding-standards
+"""

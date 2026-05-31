@@ -1,0 +1,89 @@
+{
+  "session_id": "9f0ff7e4-cc6e-403d-bee9-f8f2e6a75791",
+  "response": "[\n  {\n    \"severity\": \"P1\",\n    \"pass\": \"Vision Clarity\",\n    \"location\": \"1. Vision Statement\",\n    \"description\": \"The core vision statement ('Anyone who can build an interface can ship one... no design degree required') fails the swap test. It could equally describe a UI component library (like Tailwind UI), a website builder (like Squarespace), or an AI UI generator (like v0.dev). It describes the end result of 'shipping' but misses the product's unique mechanism: auditing and fixing an existing, post-MVP interface.\",\n    \"suggestion\": \"Revise the statement to anchor on the product's actual space (automated evaluation/repair). For example: 'Every built interface gets a tireless, objective design QA that turns invisible defects into executable fixes.'\"\n  }\n]",
+  "stats": {
+    "models": {
+      "gemini-3.1-flash-lite": {
+        "api": {
+          "totalRequests": 5,
+          "totalErrors": 0,
+          "totalLatencyMs": 31646
+        },
+        "tokens": {
+          "input": 43429,
+          "prompt": 104455,
+          "candidates": 145,
+          "total": 109500,
+          "cached": 61026,
+          "thoughts": 4900,
+          "tool": 0
+        },
+        "roles": {
+          "utility_router": {
+            "totalRequests": 5,
+            "totalErrors": 0,
+            "totalLatencyMs": 31646,
+            "tokens": {
+              "input": 43429,
+              "prompt": 104455,
+              "candidates": 145,
+              "total": 109500,
+              "cached": 61026,
+              "thoughts": 4900,
+              "tool": 0
+            }
+          }
+        }
+      },
+      "gemini-3.1-pro-preview": {
+        "api": {
+          "totalRequests": 1,
+          "totalErrors": 0,
+          "totalLatencyMs": 14350
+        },
+        "tokens": {
+          "input": 27774,
+          "prompt": 27774,
+          "candidates": 178,
+          "total": 29120,
+          "cached": 0,
+          "thoughts": 1168,
+          "tool": 0
+        },
+        "roles": {
+          "main": {
+            "totalRequests": 1,
+            "totalErrors": 0,
+            "totalLatencyMs": 14350,
+            "tokens": {
+              "input": 27774,
+              "prompt": 27774,
+              "candidates": 178,
+              "total": 29120,
+              "cached": 0,
+              "thoughts": 1168,
+              "tool": 0
+            }
+          }
+        }
+      }
+    },
+    "tools": {
+      "totalCalls": 0,
+      "totalSuccess": 0,
+      "totalFail": 0,
+      "totalDurationMs": 0,
+      "totalDecisions": {
+        "accept": 0,
+        "reject": 0,
+        "modify": 0,
+        "auto_accept": 0
+      },
+      "byName": {}
+    },
+    "files": {
+      "totalLinesAdded": 0,
+      "totalLinesRemoved": 0
+    }
+  }
+}

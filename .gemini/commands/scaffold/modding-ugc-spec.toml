@@ -1,0 +1,9 @@
+description = "Run scaffold modding-ugc-spec through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Specify mod API surface, packaging format, sandboxing, versioning, content moderation, and distribution channels
+Purpose: Specifies the modding and user-generated content system — mod API surface and capability tiers, packaging format and validation, runtime sandboxing, compatibility and versioning strategy, content moderation pipeline, and distribution channels (Steam Workshop, mod.io, local file-based) with platform certification implications.
+
+User request: scaffold modding-ugc-spec
+"""

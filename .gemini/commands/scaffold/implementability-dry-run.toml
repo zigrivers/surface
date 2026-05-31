@@ -1,0 +1,9 @@
+description = "Run scaffold implementability-dry-run through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Dry-run specs as implementing agent, catching ambiguity
+Purpose: Simulates picking up each task as an implementing agent and flags anything ambiguous — unclear acceptance criteria, missing input files, undefined error handling — that would force an agent to guess.
+
+User request: scaffold implementability-dry-run
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold prompt-pipeline through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Display full pipeline reference
+Purpose: Display the prompt pipeline order as a quick reference. This is a pure
+
+User request: scaffold prompt-pipeline
+"""

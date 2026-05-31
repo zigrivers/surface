@@ -1,0 +1,9 @@
+description = "Run scaffold ai-memory-setup through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Configure AI memory and context management with modular rules, optional MCP memory server, lifecycle hooks, and external context integration
+Purpose: Extracts conventions from your docs into path-scoped rule files that load automatically, optimizes CLAUDE.md with a pointer pattern, and optionally sets up persistent cross-session memory.
+
+User request: scaffold ai-memory-setup
+"""

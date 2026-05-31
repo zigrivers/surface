@@ -1,0 +1,9 @@
+description = "Run scaffold implementation-plan through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Break deliverables into implementable tasks with dependencies, ordered by priority and dependencies
+Purpose: Breaks your user stories and architecture into concrete tasks — each scoped to ~150 lines of code and 3 files max, with clear acceptance criteria, no ambiguous decisions, and explicit dependencies.
+
+User request: scaffold implementation-plan
+"""

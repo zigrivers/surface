@@ -1,0 +1,9 @@
+description = "Run scaffold review-testing through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review testing strategy for coverage gaps and feasibility
+Purpose: Audits the testing strategy for coverage gaps by layer, verifies edge cases from domain invariants are tested, and checks that test environment assumptions match actual config.
+
+User request: scaffold review-testing
+"""

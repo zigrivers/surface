@@ -1,0 +1,9 @@
+description = "Run scaffold innovate-user-stories through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Discover UX-level enhancements and innovation opportunities in user stories
+Purpose: Identifies UX enhancement opportunities — progressive disclosure, smart defaults, accessibility improvements — and integrates approved changes into existing stories.
+
+User request: scaffold innovate-user-stories
+"""

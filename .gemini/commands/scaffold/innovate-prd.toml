@@ -1,0 +1,9 @@
+description = "Run scaffold innovate-prd through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Discover feature-level innovation opportunities in the PRD
+Purpose: Analyzes the PRD for feature-level gaps — competitive blind spots, UX enhancements, AI-native possibilities — and proposes additions for your approval.
+
+User request: scaffold innovate-prd
+"""

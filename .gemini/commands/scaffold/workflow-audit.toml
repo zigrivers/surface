@@ -1,0 +1,9 @@
+description = "Run scaffold workflow-audit through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Verify workflow consistency across all documentation files
+Purpose: Audits every document that mentions workflow (CLAUDE.md, git-workflow, coding-standards, dev-setup) and fixes any inconsistencies in commit format, branch naming, PR steps, or key commands.
+
+User request: scaffold workflow-audit
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold add-e2e-testing through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Configure end-to-end testing (Playwright for web, Maestro for mobile) based on detected project platform
+Purpose: Detects whether your project is web or mobile, then configures Playwright (web) or Maestro (mobile) with a working smoke test, baseline screenshots, and guidance on when to use E2E vs. unit tests.
+
+User request: scaffold add-e2e-testing
+"""

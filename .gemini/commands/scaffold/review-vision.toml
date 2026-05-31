@@ -1,0 +1,9 @@
+description = "Run scaffold review-vision through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Multi-pass review of the product vision for clarity, coherence, and downstream readiness
+Purpose: Stress-tests the vision across five dimensions — clarity, audience precision, competitive rigor, strategic coherence, and whether the PRD can be written from it without ambiguity — and fixes what it finds.
+
+User request: scaffold review-vision
+"""

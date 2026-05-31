@@ -1,0 +1,9 @@
+description = "Run scaffold implementation-plan-review through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review implementation tasks for coverage, feasibility, and multi-model validation
+Purpose: Verifies every feature has implementation tasks, no task is too large for one session, the dependency graph has no cycles, and every acceptance criterion maps to at least one task.
+
+User request: scaffold implementation-plan-review
+"""

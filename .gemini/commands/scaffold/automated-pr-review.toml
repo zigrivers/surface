@@ -1,0 +1,9 @@
+description = "Run scaffold automated-pr-review through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Agent-driven automated code review via MMR (Codex, Gemini, Claude CLIs + Superpowers as 4th channel in wrappers), for PRs and non-PR targets
+Purpose: Configures agent-driven automated code review: mandatory after `gh pr create` and also usable on any non-PR target. Direct `mmr review` runs three CLI channels (Codex, Gemini, Claude); `scaffold run review-pr` / `scaffold run review-code` add the Superpowers code-reviewer agent as a complementary 4th channel. An external GitHub App reviewer is supported as a fallback when CLIs are unavailable.
+
+User request: scaffold automated-pr-review
+"""

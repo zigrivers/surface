@@ -1,0 +1,9 @@
+description = "Run scaffold operations through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define deployment pipeline, deployment strategy, monitoring, alerting, and incident response
+Purpose: Designs your deployment pipeline (build, test, deploy, verify, rollback), defines monitoring metrics with alert thresholds, and writes incident response procedures with rollback instructions.
+
+User request: scaffold operations
+"""

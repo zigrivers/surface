@@ -1,0 +1,9 @@
+description = "Run scaffold platform-cert-prep through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Per-platform certification checklists for console, mobile, VR/AR, and PC storefronts
+Purpose: Prepares platform certification checklists — Sony TRC, Microsoft XR, Nintendo Lotcheck, App Store, Google Play, Steam Deck compatibility — covering sign-in/out, entitlements, achievements, parental controls, ratings, controller disconnect, suspend/resume, and error messages.
+
+User request: scaffold platform-cert-prep
+"""

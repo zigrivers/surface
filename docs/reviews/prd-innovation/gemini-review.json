@@ -1,0 +1,47 @@
+[
+  {
+    "category": "table-stakes",
+    "title": "Auth Session Injection",
+    "problem": "The SaaS dashboard overlay is a Must-Have, but dashboards live behind authentication. Without the ability to pass session state (cookies/localstorage/headers) into the capture backend, surface cannot evaluate the core routes for P1 (Agents) or P2 (Builders).",
+    "behaviorChange": "CLI and MCP expose an `--auth-state <file>` flag (Playwright state format) or environment variables to inject session credentials into the capture browser prior to evaluation.",
+    "cost": "moderate",
+    "impact": "high",
+    "recommendedDisposition": "gate"
+  },
+  {
+    "category": "defensive-gap",
+    "title": "Debt Baseline & 'Won't Fix' Registry",
+    "problem": "Running a strict quality gate on an existing application will yield hundreds of violations. Without a way to baseline existing debt or mark findings as 'won't fix', CI pipelines will permanently fail, leading to immediate abandonment by P3 (CI Maintainers).",
+    "behaviorChange": "Introduce a `surface baseline` command to snapshot existing findings into an ignore file, so `surface gate` only fails on net-new regressions. Finding statuses expand to support 'ignored'.",
+    "cost": "moderate",
+    "impact": "high",
+    "recommendedDisposition": "v1.x-committed"
+  },
+  {
+    "category": "differentiator",
+    "title": "Deterministic Fix Snippets",
+    "problem": "While surface gives P1 (AI Agents) executable tasks mapped to files, the agent still burns inference guessing the exact code fix. For measured/objective findings (e.g., contrast math, missing aria-labels), the tool already knows the mathematically correct fix.",
+    "behaviorChange": "The `findings.json` payload includes an optional `suggestedPatch` field for measured findings (e.g., compliant hex codes or HTML attributes), allowing agents to apply trivial fixes with near-zero hallucination risk.",
+    "cost": "moderate",
+    "impact": "high",
+    "recommendedDisposition": "v1.x-committed"
+  },
+  {
+    "category": "missing-expected",
+    "title": "Dual-Theme (Light/Dark) Evaluation",
+    "problem": "Modern web apps universally support light and dark modes, and contrast failures often hide in the non-default theme. Evaluating only the default system preference misses critical accessibility regressions for P2 (Builders) and their users.",
+    "behaviorChange": "The capture pipeline automatically toggles `prefers-color-scheme` to capture and audit both themes sequentially, mapping contrast and visual findings to their respective theme contexts.",
+    "cost": "trivial",
+    "impact": "medium",
+    "recommendedDisposition": "v1.x-committed"
+  },
+  {
+    "category": "ai-native",
+    "title": "Automated Interaction State Discovery",
+    "problem": "UI bugs cluster in hidden states (dropdowns, modals, hover states, validation errors). A static load-and-snapshot approach evaluates a fraction of the actual UI, leaving P1 (Agents) blind to interactive regressions.",
+    "behaviorChange": "The agent-browser backend utilizes an exploratory pass to click/tab through interactive elements and captures the resulting transient DOM states (popovers, error text) for evaluation alongside the initial load state.",
+    "cost": "significant",
+    "impact": "high",
+    "recommendedDisposition": "deferred"
+  }
+]

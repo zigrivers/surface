@@ -1,0 +1,9 @@
+description = "Run scaffold single-agent-start through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Start single-agent TDD execution loop
+Purpose: Claims the next task, writes a failing test, implements until it passes, refactors, runs quality gates, commits, and repeats — following the implementation playbook.
+
+User request: scaffold single-agent-start
+"""

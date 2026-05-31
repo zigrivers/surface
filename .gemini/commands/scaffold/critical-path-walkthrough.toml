@@ -1,0 +1,9 @@
+description = "Run scaffold critical-path-walkthrough through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Walk critical user journeys end-to-end across all specs
+Purpose: Walks the most important user journeys end-to-end across every spec layer — PRD to stories to UX to API to database to tasks — and flags any broken handoffs or missing layers.
+
+User request: scaffold critical-path-walkthrough
+"""

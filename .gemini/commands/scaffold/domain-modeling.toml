@@ -1,0 +1,9 @@
+description = "Run scaffold domain-modeling through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Deep domain modeling across all identified project domains
+Purpose: Analyzes your user stories to identify the core concepts in your project (entities, their relationships, the rules that must always hold true), and establishes a shared vocabulary that all docs and code will use.
+
+User request: scaffold domain-modeling
+"""

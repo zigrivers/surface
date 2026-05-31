@@ -1,0 +1,9 @@
+description = "Run scaffold create-vision through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Create a comprehensive product vision document from a project idea
+Purpose: Asks about your idea — who it's for, what problem it solves, what makes it different — and produces a vision document with elevator pitch, target audience, competitive positioning, guiding principles, and success criteria.
+
+User request: scaffold create-vision
+"""

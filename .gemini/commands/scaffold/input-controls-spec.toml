@@ -1,0 +1,9 @@
+description = "Run scaffold input-controls-spec through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Specify input bindings, rebinding, haptics, dead zones, and cross-play input fairness
+Purpose: Documents default bindings per device, input abstraction layer, rebinding system, dead zones, aim assist, haptics, controller disconnect behavior, and accessibility input requirements.
+
+User request: scaffold input-controls-spec
+"""

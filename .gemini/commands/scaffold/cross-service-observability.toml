@@ -1,0 +1,9 @@
+description = "Run scaffold cross-service-observability through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design distributed tracing, correlation IDs, and cross-service SLOs
+Purpose: Defines the observability strategy for multi-service systems: distributed tracing propagation, correlation ID standards, cross-service SLO definitions, and failure isolation alerting.
+
+User request: scaffold cross-service-observability
+"""

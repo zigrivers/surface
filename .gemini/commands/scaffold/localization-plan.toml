@@ -1,0 +1,9 @@
+description = "Run scaffold localization-plan through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Plan target languages, string management, font support (CJK/RTL), UI text expansion, VO localization, cultural adaptation, and LQA
+Purpose: Plans the localization strategy — target languages and tiers, string management pipeline, font support for CJK and RTL scripts, UI text expansion handling (~30% for German), voice-over localization approach, cultural adaptation guidelines, and linguistic QA process.
+
+User request: scaffold localization-plan
+"""

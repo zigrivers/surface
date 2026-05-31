@@ -1,0 +1,9 @@
+description = "Run scaffold innovate-vision through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Discover strategic innovation opportunities in the product vision
+Purpose: Explores untapped opportunities — adjacent markets, AI-native capabilities, ecosystem partnerships, and contrarian positioning — and proposes innovations for your approval.
+
+User request: scaffold innovate-vision
+"""

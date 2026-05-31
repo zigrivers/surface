@@ -1,0 +1,9 @@
+description = "Run scaffold quick-task through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Create a focused task for a bug fix, refactor, or small improvement
+Purpose: Takes a one-off request (bug fix, refactor, performance tweak) and creates a single well-scoped task with acceptance criteria and a test plan — for work outside the main implementation plan.
+
+User request: scaffold quick-task
+"""

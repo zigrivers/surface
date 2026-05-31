@@ -1,0 +1,9 @@
+description = "Run scaffold analytics-telemetry through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define event taxonomy, crash telemetry, KPI funnels, data pipeline, and privacy compliance for game analytics
+Purpose: Defines the game analytics layer — event taxonomy with schema versioning, crash telemetry for all games, expanded KPIs and funnels for live-service, data pipeline architecture, offline buffering, and privacy compliance (GDPR/COPPA).
+
+User request: scaffold analytics-telemetry
+"""

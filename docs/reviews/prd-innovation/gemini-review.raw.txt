@@ -1,0 +1,89 @@
+{
+  "session_id": "16fb7d11-e73b-453e-b72c-539dcbf0807e",
+  "response": "[\n  {\n    \"category\": \"table-stakes\",\n    \"title\": \"Auth Session Injection\",\n    \"problem\": \"The SaaS dashboard overlay is a Must-Have, but dashboards live behind authentication. Without the ability to pass session state (cookies/localstorage/headers) into the capture backend, surface cannot evaluate the core routes for P1 (Agents) or P2 (Builders).\",\n    \"behaviorChange\": \"CLI and MCP expose an `--auth-state <file>` flag (Playwright state format) or environment variables to inject session credentials into the capture browser prior to evaluation.\",\n    \"cost\": \"moderate\",\n    \"impact\": \"high\",\n    \"recommendedDisposition\": \"gate\"\n  },\n  {\n    \"category\": \"defensive-gap\",\n    \"title\": \"Debt Baseline & 'Won't Fix' Registry\",\n    \"problem\": \"Running a strict quality gate on an existing application will yield hundreds of violations. Without a way to baseline existing debt or mark findings as 'won't fix', CI pipelines will permanently fail, leading to immediate abandonment by P3 (CI Maintainers).\",\n    \"behaviorChange\": \"Introduce a `surface baseline` command to snapshot existing findings into an ignore file, so `surface gate` only fails on net-new regressions. Finding statuses expand to support 'ignored'.\",\n    \"cost\": \"moderate\",\n    \"impact\": \"high\",\n    \"recommendedDisposition\": \"v1.x-committed\"\n  },\n  {\n    \"category\": \"differentiator\",\n    \"title\": \"Deterministic Fix Snippets\",\n    \"problem\": \"While surface gives P1 (AI Agents) executable tasks mapped to files, the agent still burns inference guessing the exact code fix. For measured/objective findings (e.g., contrast math, missing aria-labels), the tool already knows the mathematically correct fix.\",\n    \"behaviorChange\": \"The `findings.json` payload includes an optional `suggestedPatch` field for measured findings (e.g., compliant hex codes or HTML attributes), allowing agents to apply trivial fixes with near-zero hallucination risk.\",\n    \"cost\": \"moderate\",\n    \"impact\": \"high\",\n    \"recommendedDisposition\": \"v1.x-committed\"\n  },\n  {\n    \"category\": \"missing-expected\",\n    \"title\": \"Dual-Theme (Light/Dark) Evaluation\",\n    \"problem\": \"Modern web apps universally support light and dark modes, and contrast failures often hide in the non-default theme. Evaluating only the default system preference misses critical accessibility regressions for P2 (Builders) and their users.\",\n    \"behaviorChange\": \"The capture pipeline automatically toggles `prefers-color-scheme` to capture and audit both themes sequentially, mapping contrast and visual findings to their respective theme contexts.\",\n    \"cost\": \"trivial\",\n    \"impact\": \"medium\",\n    \"recommendedDisposition\": \"v1.x-committed\"\n  },\n  {\n    \"category\": \"ai-native\",\n    \"title\": \"Automated Interaction State Discovery\",\n    \"problem\": \"UI bugs cluster in hidden states (dropdowns, modals, hover states, validation errors). A static load-and-snapshot approach evaluates a fraction of the actual UI, leaving P1 (Agents) blind to interactive regressions.\",\n    \"behaviorChange\": \"The agent-browser backend utilizes an exploratory pass to click/tab through interactive elements and captures the resulting transient DOM states (popovers, error text) for evaluation alongside the initial load state.\",\n    \"cost\": \"significant\",\n    \"impact\": \"high\",\n    \"recommendedDisposition\": \"deferred\"\n  }\n]",
+  "stats": {
+    "models": {
+      "gemini-3.1-flash-lite": {
+        "api": {
+          "totalRequests": 5,
+          "totalErrors": 0,
+          "totalLatencyMs": 30060
+        },
+        "tokens": {
+          "input": 63152,
+          "prompt": 148760,
+          "candidates": 130,
+          "total": 153805,
+          "cached": 85608,
+          "thoughts": 4915,
+          "tool": 0
+        },
+        "roles": {
+          "utility_router": {
+            "totalRequests": 5,
+            "totalErrors": 0,
+            "totalLatencyMs": 30060,
+            "tokens": {
+              "input": 63152,
+              "prompt": 148760,
+              "candidates": 130,
+              "total": 153805,
+              "cached": 85608,
+              "thoughts": 4915,
+              "tool": 0
+            }
+          }
+        }
+      },
+      "gemini-3.1-pro-preview": {
+        "api": {
+          "totalRequests": 1,
+          "totalErrors": 0,
+          "totalLatencyMs": 41825
+        },
+        "tokens": {
+          "input": 38347,
+          "prompt": 38347,
+          "candidates": 789,
+          "total": 42350,
+          "cached": 0,
+          "thoughts": 3214,
+          "tool": 0
+        },
+        "roles": {
+          "main": {
+            "totalRequests": 1,
+            "totalErrors": 0,
+            "totalLatencyMs": 41825,
+            "tokens": {
+              "input": 38347,
+              "prompt": 38347,
+              "candidates": 789,
+              "total": 42350,
+              "cached": 0,
+              "thoughts": 3214,
+              "tool": 0
+            }
+          }
+        }
+      }
+    },
+    "tools": {
+      "totalCalls": 0,
+      "totalSuccess": 0,
+      "totalFail": 0,
+      "totalDurationMs": 0,
+      "totalDecisions": {
+        "accept": 0,
+        "reject": 0,
+        "modify": 0,
+        "auto_accept": 0
+      },
+      "byName": {}
+    },
+    "files": {
+      "totalLinesAdded": 0,
+      "totalLinesRemoved": 0
+    }
+  }
+}

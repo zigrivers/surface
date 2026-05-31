@@ -1,0 +1,9 @@
+description = "Run scaffold update through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Check for and apply scaffold updates
+Purpose: Check for and apply updates to the scaffold prompt pipeline. Detects the
+
+User request: scaffold update
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold cross-phase-consistency through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Audit naming, assumptions, data flows, interface contracts across all phases
+Purpose: Traces every named concept (entities, fields, API endpoints) across all documents and flags any naming drift, terminology mismatches, or data shape inconsistencies.
+
+User request: scaffold cross-phase-consistency
+"""

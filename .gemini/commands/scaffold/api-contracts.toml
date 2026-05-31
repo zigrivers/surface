@@ -1,0 +1,9 @@
+description = "Run scaffold api-contracts through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Specify API contracts for all system interfaces
+Purpose: Specifies every API endpoint — request/response shapes, error codes with human-readable messages, auth requirements, pagination, and example payloads — so frontend and backend can be built in parallel.
+
+User request: scaffold api-contracts
+"""

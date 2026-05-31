@@ -1,0 +1,9 @@
+description = "Run scaffold game-design-document through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Create game design document with pillars, core loop, mechanics, progression, and world overview
+Purpose: Transforms PRD product requirements into a game design bible covering game pillars, core gameplay loop, mechanics catalog, progression systems, and game world overview. Review step validates pillar coherence and mechanic clarity.
+
+User request: scaffold game-design-document
+"""

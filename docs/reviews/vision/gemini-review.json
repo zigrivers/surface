@@ -1,0 +1,9 @@
+[
+  {
+    "severity": "P1",
+    "pass": "Vision Clarity",
+    "location": "1. Vision Statement",
+    "description": "The core vision statement ('Anyone who can build an interface can ship one... no design degree required') fails the swap test. It could equally describe a UI component library (like Tailwind UI), a website builder (like Squarespace), or an AI UI generator (like v0.dev). It describes the end result of 'shipping' but misses the product's unique mechanism: auditing and fixing an existing, post-MVP interface.",
+    "suggestion": "Revise the statement to anchor on the product's actual space (automated evaluation/repair). For example: 'Every built interface gets a tireless, objective design QA that turns invisible defects into executable fixes.'"
+  }
+]

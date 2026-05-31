@@ -1,0 +1,9 @@
+description = "Run scaffold database-schema through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design database schema from domain models
+Purpose: Translates your domain model into database tables with constraints that enforce business rules, indexes optimized for your API query patterns, and a reversible migration strategy.
+
+User request: scaffold database-schema
+"""

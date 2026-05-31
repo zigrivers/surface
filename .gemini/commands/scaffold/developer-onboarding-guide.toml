@@ -1,0 +1,9 @@
+description = "Run scaffold developer-onboarding-guide through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Create a guide for developers (human or AI) joining the project
+Purpose: Synthesizes all frozen docs into a single onboarding narrative — project purpose, architecture overview, top coding patterns, key commands, and a quick-start checklist — so anyone joining the project knows exactly where to begin.
+
+User request: scaffold developer-onboarding-guide
+"""

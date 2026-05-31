@@ -1,0 +1,9 @@
+description = "Run scaffold game-accessibility through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define accessibility features across visual, motor, cognitive, auditory, speech, and photosensitivity categories
+Purpose: Creates an accessibility plan organized by Xbox Accessibility Guidelines (XAG) categories with implementation priorities, platform requirements, and CVAA compliance for communication features.
+
+User request: scaffold game-accessibility
+"""

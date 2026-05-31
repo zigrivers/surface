@@ -1,0 +1,47 @@
+[
+  {
+    "category": "table-stakes",
+    "title": "PR annotations",
+    "problem": "CI/platform maintainers expect scanner results to appear where code review happens; GitHub Issues export alone creates a separate backlog instead of actionable PR feedback.",
+    "behaviorChange": "Add SARIF/GitHub Checks/PR annotation output so measured findings can appear inline or as check-run summaries, while keeping local artifacts as the source of truth.",
+    "cost": "moderate",
+    "impact": "high",
+    "recommendedDisposition": "v1.x-committed"
+  },
+  {
+    "category": "defensive-gap",
+    "title": "Baselines and waivers",
+    "problem": "CI/platform maintainers need a way to tolerate known debt without hiding new regressions; without explicit baselines, teams will disable noisy gates.",
+    "behaviorChange": "Add structured baseline, ignore, and waiver records with finding IDs, reason, owner, expiry, and audit visibility; gates fail on new or expired findings, not accepted debt.",
+    "cost": "moderate",
+    "impact": "high",
+    "recommendedDisposition": "v1.x-committed"
+  },
+  {
+    "category": "missing-expected",
+    "title": "Task-flow capture",
+    "problem": "AI agents and builders will audit real apps whose important UI states only appear after login, clicks, form input, or navigation; route-level capture misses menus, modals, validation, and post-action states.",
+    "behaviorChange": "Accept named task-flow recipes or recorded browser steps, capture each reachable state, and report unreachable or unaudited steps explicitly.",
+    "cost": "significant",
+    "impact": "high",
+    "recommendedDisposition": "v1.x-committed"
+  },
+  {
+    "category": "defensive-gap",
+    "title": "Sensitive data redaction",
+    "problem": "Builders and teams will hesitate to run audits on real apps if screenshots, DOM, source snippets, or exported issues may expose PII, secrets, customer data, or proprietary content.",
+    "behaviorChange": "Add configurable redaction for captures and exports, with clear markers showing redacted evidence and an option to retain full local evidence only.",
+    "cost": "moderate",
+    "impact": "high",
+    "recommendedDisposition": "v1.x-committed"
+  },
+  {
+    "category": "ai-native",
+    "title": "Human verdict loop",
+    "problem": "Non-designer builders and CI maintainers need a durable way to accept, reject, correct, or defer judged findings; otherwise surface cannot reliably learn from gated decisions or reduce repeated false positives.",
+    "behaviorChange": "Add structured adjudication commands and artifact fields for verdict, rationale, owner, and reuse policy, feeding self-grounding metrics and future prioritization.",
+    "cost": "moderate",
+    "impact": "medium",
+    "recommendedDisposition": "v1.x-committed"
+  }
+]

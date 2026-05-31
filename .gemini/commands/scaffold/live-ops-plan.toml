@@ -1,0 +1,9 @@
+description = "Run scaffold live-ops-plan through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Plan content cadence, event systems, hotfix deployment, maintenance windows, and content update pipeline
+Purpose: Plans the live operations strategy — content cadence aligned to player retention, event system design, hotfix deployment procedures, maintenance windows, and the content update pipeline from creation through certification to release.
+
+User request: scaffold live-ops-plan
+"""

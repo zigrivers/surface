@@ -1,0 +1,9 @@
+description = "Run scaffold tdd through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define testing conventions and TDD standards for the tech stack
+Purpose: Defines your testing approach — which types of tests to write at each layer, coverage targets, what to mock and what not to, test data patterns — so agents write the right tests from the start.
+
+User request: scaffold tdd
+"""

@@ -1,0 +1,9 @@
+description = "Run scaffold review-architecture through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review system architecture for completeness and downstream readiness
+Purpose: Verifies every domain concept lands in a component, every decision constraint is respected, no components are orphaned from data flows, and the module structure minimizes merge conflicts.
+
+User request: scaffold review-architecture
+"""

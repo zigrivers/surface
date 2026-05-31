@@ -1,0 +1,9 @@
+description = "Run scaffold review-api through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review API contracts for completeness and consistency
+Purpose: Checks that every domain operation has an endpoint, error responses include domain-specific codes, and auth requirements are specified for every route.
+
+User request: scaffold review-api
+"""

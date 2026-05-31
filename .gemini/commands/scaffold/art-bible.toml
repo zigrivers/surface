@@ -1,0 +1,9 @@
+description = "Run scaffold art-bible through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Define art style, per-type asset specifications, naming conventions, DCC pipeline, LOD strategy, and collision layers
+Purpose: Establishes the visual identity and technical art standards — art style pillars, per-type asset specs (3D models, 2D sprites, VFX, animation), naming conventions, DCC pipeline, LOD strategy, Git LFS mapping, and hitbox/collision layer definitions.
+
+User request: scaffold art-bible
+"""

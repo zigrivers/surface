@@ -1,0 +1,9 @@
+description = "Run scaffold user-stories through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Translate PRD features into user stories with acceptance criteria
+Purpose: Breaks every PRD feature into user stories organized by epic, each with testable acceptance criteria in Given/When/Then format.
+
+User request: scaffold user-stories
+"""

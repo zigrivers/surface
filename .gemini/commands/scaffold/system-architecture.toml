@@ -1,0 +1,9 @@
+description = "Run scaffold system-architecture through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design and document system architecture
+Purpose: Designs the system blueprint — which components exist, how data flows between them, where each module lives in the directory tree, and where extension points allow custom behavior.
+
+User request: scaffold system-architecture
+"""

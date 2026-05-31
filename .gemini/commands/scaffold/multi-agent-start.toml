@@ -1,0 +1,9 @@
+description = "Run scaffold multi-agent-start through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Start multi-agent execution loop in a worktree
+Purpose: Sets up a named agent in an isolated git worktree so multiple agents can implement tasks simultaneously without file conflicts, each following the same TDD loop.
+
+User request: scaffold multi-agent-start
+"""

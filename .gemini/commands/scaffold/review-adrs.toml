@@ -1,0 +1,9 @@
+description = "Run scaffold review-adrs through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Review ADRs for completeness, consistency, and decision quality
+Purpose: Checks for contradictions between decisions, missing decisions implied by the architecture, and whether every choice has honest trade-off analysis.
+
+User request: scaffold review-adrs
+"""

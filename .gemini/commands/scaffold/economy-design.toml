@@ -1,0 +1,9 @@
+description = "Run scaffold economy-design through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Design virtual currencies, faucet/sink balancing, loot tables, progression economy, and monetization with legal compliance
+Purpose: Defines the game economy separating progression economy (currencies, faucet/sink balance, loot tables, crafting costs) from monetization (store, pricing, ethical guidelines). Includes legal compliance per target market for loot boxes, probability disclosure, and spending limits.
+
+User request: scaffold economy-design
+"""

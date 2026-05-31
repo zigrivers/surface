@@ -1,0 +1,9 @@
+description = "Run scaffold ux-spec through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Specify user flows, interaction states, component architecture, accessibility, and responsive behavior
+Purpose: Maps out every user flow with all interaction states (loading, error, empty, populated), defines accessibility requirements (WCAG level, keyboard nav), and specifies responsive behavior at each breakpoint.
+
+User request: scaffold ux-spec
+"""

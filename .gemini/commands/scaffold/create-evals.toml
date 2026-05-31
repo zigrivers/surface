@@ -1,0 +1,9 @@
+description = "Run scaffold create-evals through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Generate project-specific eval checks from standards documentation
+Purpose: Generates automated checks that verify your code matches your documented standards — file placement, naming conventions, feature-to-test coverage, API contract alignment — using your project's own test framework.
+
+User request: scaffold create-evals
+"""

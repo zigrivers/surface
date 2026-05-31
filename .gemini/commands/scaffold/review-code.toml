@@ -1,0 +1,9 @@
+description = "Run scaffold review-code through the Scaffold runner workflow."
+prompt = """
+Use the Scaffold runner workflow already loaded from GEMINI.md.
+
+Step description: Run all configured code review channels on local code before commit or push
+Purpose: Review the current local delivery candidate with the four built-in MMR CLI channels (Codex CLI, Gemini CLI, Claude CLI, Grok CLI) plus the Superpowers code-reviewer agent as a complementary agent channel reconciled into the same MMR job, before committing or pushing. Supports staged changes, an explicit ref range, or the full local delivery candidate (committed branch diff + staged + unstaged); untracked files are not included.
+
+User request: scaffold review-code
+"""
