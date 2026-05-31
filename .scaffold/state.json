@@ -72,11 +72,16 @@
       ]
     },
     "adrs": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/adrs/"
-      ]
+      ],
+      "at": "2026-05-31T14:33:51.427Z",
+      "completed_at": "2026-05-31T14:33:51.427Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "review-adrs": {
       "status": "pending",
@@ -592,9 +597,9 @@
   "next_eligible": [
     "design-system",
     "git-workflow",
-    "adrs"
+    "review-adrs"
   ],
   "extra-steps": [],
-  "save_counter": 38,
+  "save_counter": 40,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
