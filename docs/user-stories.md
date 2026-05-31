@@ -214,6 +214,28 @@ NFR-PORT-1)
   question; **Given** a CLI is unavailable, **When** reconciliation runs, **Then** surface
   degrades to single-model and records which channels participated.
 
+## UX Enhancements (innovate-user-stories, 2026-05-30)
+
+Story-level UX polish, applied autonomously (low-risk, on-strategy — serves P2's "never
+overwhelm" need). Integrated as acceptance-criteria refinements on existing stories:
+
+<!-- enhancement: progressive-disclosure -->
+- **US-021/US-030 — Progressive disclosure:** default CLI output shows only the **top finding
+  + count of the rest**; `--all`/`--verbose` reveals the full backlog. (Serves "one thing to
+  fix next"; prevents the overwhelm failure mode, PRD R-3.)
+<!-- enhancement: smart-defaults -->
+- **US-001/US-013 — Smart defaults:** with no flags, surface auto-detects target (running
+  localhost → newest route), capture backend, and a sensible preset by app type — a new user
+  can run bare `surface` and get a useful audit. Every default is printed so it's never silent.
+<!-- enhancement: accessible-output -->
+- **US-031 — Accessible terminal output (dogfood NFR-OWNOUT-1):** never rely on color alone
+  (severity has a text label + symbol), degrade gracefully without ANSI/TTY, and keep
+  `--json` byte-identical regardless of terminal. surface holds its own output to the standard
+  it audits.
+<!-- enhancement: actionable-errors -->
+- **US-050 — Actionable errors:** every error states what failed, the likely cause, and the
+  next command to try (e.g., missing backend → "install Playwright: `npx playwright install`").
+
 ## Traceability & Coverage
 
 Every PRD §6 capability area and accepted innovation (I1–I8) maps to ≥1 story above; every
