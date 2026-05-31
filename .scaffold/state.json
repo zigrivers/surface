@@ -209,11 +209,16 @@
       "artifacts_verified": true
     },
     "implementation-playbook": {
-      "status": "pending",
+      "status": "completed",
       "source": "pipeline",
       "produces": [
         "docs/implementation-playbook.md"
-      ]
+      ],
+      "at": "2026-05-31T15:37:37.769Z",
+      "completed_at": "2026-05-31T15:37:37.769Z",
+      "completed_by": "scaffold-run",
+      "depth": 5,
+      "artifacts_verified": true
     },
     "beads": {
       "status": "completed",
@@ -760,9 +765,14 @@
     }
   },
   "next_eligible": [
-    "implementation-playbook"
+    "single-agent-start",
+    "single-agent-resume",
+    "multi-agent-start",
+    "multi-agent-resume",
+    "quick-task",
+    "new-enhancement"
   ],
   "extra-steps": [],
-  "save_counter": 105,
+  "save_counter": 107,
   "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
 }
