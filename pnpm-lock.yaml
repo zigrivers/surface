@@ -33,6 +33,9 @@ catalogs:
     vitest:
       specifier: ^4.0.14
       version: 4.1.7
+    zod:
+      specifier: ^4.1.13
+      version: 4.4.3
 
 importers:
 
@@ -67,6 +70,10 @@ importers:
         version: 4.1.7(vite@8.0.14(esbuild@0.27.7))
 
   packages/core:
+    dependencies:
+      zod:
+        specifier: 'catalog:'
+        version: 4.4.3
     devDependencies:
       eslint:
         specifier: 'catalog:'
@@ -1862,6 +1869,9 @@ packages:
     resolution: {integrity: sha512-rVksvsnNCdJ/ohGc6xgPwyN8eheCxsiLM8mxuE/t/mOVqJewPuO1miLpTHQiRgTKCLexL4MeAFVagts7HmNZ2Q==}
     engines: {node: '>=10'}
 
+  zod@4.4.3:
+    resolution: {integrity: sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==}
+
 snapshots:
 
   '@emnapi/core@1.10.0':
@@ -3644,3 +3654,5 @@ snapshots:
   word-wrap@1.2.5: {}
 
   yocto-queue@0.1.0: {}
+
+  zod@4.4.3: {}
