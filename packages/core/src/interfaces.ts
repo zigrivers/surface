@@ -66,9 +66,22 @@ export interface Capture {
   readonly status: CaptureStatus;
 }
 
+export interface CaptureNetworkPolicy {
+  readonly allowlist: readonly string[];
+  readonly targetHost: string;
+  readonly targetOrigin: string;
+  readonly resolvedAddresses: readonly string[];
+  readonly blockPrivateNetwork: boolean;
+  readonly enforceOnNavigation: true;
+  readonly enforceOnRedirects: true;
+  readonly enforceOnSubresources: true;
+}
+
 export interface CaptureOptions {
   readonly config: SurfaceConfig["capture"];
+  readonly artifactRoot?: string;
   readonly authStateRef?: string;
+  readonly networkPolicy?: CaptureNetworkPolicy;
 }
 
 export interface CaptureBackend {

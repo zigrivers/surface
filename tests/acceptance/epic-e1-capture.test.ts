@@ -1,13 +1,1216 @@
-// Acceptance skeletons — Epic E1: Capture & Inputs (US-001..005).
+// Acceptance skeletons - Epic E1: Capture & Inputs (US-001..005).
 // One pending test per acceptance criterion, tagged [story][AC]. Implement during TDD.
 // Layer hints in comments: unit | integration | e2e (see docs/story-tests-map.md).
-import { describe, it } from "vitest";
+import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  DEFAULT_SURFACE_CONFIG,
+  createSurfaceError,
+  createCaptureService,
+  createDefaultCaptureIdFactory,
+  err,
+  isErr,
+  isOk,
+  ok,
+  type Capture,
+  type CaptureBackend,
+  type CaptureArtifact,
+  type CaptureOptions,
+  type Target,
+} from "../../packages/core/src/index.js";
+
+const target = { kind: "url", ref: "https://example.com" } satisfies Target;
+const allowedCaptureConfig = {
+  ...DEFAULT_SURFACE_CONFIG.capture,
+  allowlist: ["https://example.com"],
+};
+const temporaryRoots: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(
+    temporaryRoots.splice(0).map((root) => rm(root, { force: true, recursive: true })),
+  );
+});
+
+async function createTempArtifactRoot(): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "surface-capture-"));
+  temporaryRoots.push(root);
+  return join(root, "captures");
+}
+
+async function captureFor(
+  backend: "playwright" | "agent-browser",
+  target: Target,
+  artifactRoot: string,
+): Promise<Capture> {
+  const captureId = `cap-${backend}`;
+  const captureRoot = join(artifactRoot, captureId);
+  const artifacts: CaptureArtifact[] = [
+    {
+      id: "screenshot",
+      path: join(captureRoot, "screenshot.png"),
+      redacted: false,
+      type: "screenshot",
+    },
+    {
+      id: "dom",
+      path: join(captureRoot, "dom.html"),
+      redacted: false,
+      type: "dom-snapshot",
+    },
+    {
+      id: "a11y",
+      path: join(captureRoot, "a11y.json"),
+      redacted: false,
+      type: "accessibility-tree",
+    },
+    {
+      id: "styles",
+      path: join(captureRoot, "styles.json"),
+      redacted: false,
+      type: "computed-styles",
+    },
+  ];
+
+  await mkdir(captureRoot, { recursive: true });
+  await Promise.all(
+    artifacts.map((artifact) => writeFile(artifact.path, `${backend}:${artifact.type}`)),
+  );
+
+  return {
+    artifacts,
+    backend,
+    capturedAt: "2026-05-31T18:00:00.000Z",
+    id: captureId,
+    status: "completed",
+    target,
+  };
+}
+
+function backend(
+  id: "playwright" | "agent-browser",
+  available: boolean,
+  artifactRoot: string,
+): CaptureBackend {
+  return {
+    id,
+    detect: () => available,
+    observe: async (observedTarget) => ok(await captureFor(id, observedTarget, artifactRoot)),
+  };
+}
+
+function customBackend(id: string, available: boolean, artifactRoot: string): CaptureBackend {
+  return {
+    id,
+    detect: () => available,
+    observe: async (observedTarget) => {
+      const captureId = `cap-${id}`;
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(screenshotPath, `${id}:screenshot`);
+
+      return ok({
+        artifacts: [
+          {
+            id: "screenshot",
+            path: screenshotPath,
+            redacted: false,
+            type: "screenshot",
+          },
+        ],
+        backend: id,
+        capturedAt: "2026-05-31T18:00:00.000Z",
+        id: captureId,
+        status: "completed",
+        target: observedTarget,
+      });
+    },
+  };
+}
+
+function staticFallbackBackend(
+  artifactRoot: string,
+  idFactory: () => string = () => "cap-static",
+): CaptureBackend {
+  return {
+    id: "static",
+    detect: () => true,
+    observe: async (observedTarget) => {
+      const captureId = idFactory();
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(screenshotPath, "static fallback screenshot fixture");
+
+      return ok({
+        artifacts: [
+          {
+            id: "screenshot",
+            path: screenshotPath,
+            redacted: false,
+            type: "screenshot",
+          },
+        ],
+        backend: "static",
+        capturedAt: "2026-05-31T18:00:00.000Z",
+        degradation: {
+          skippedArtifacts: ["dom-snapshot", "accessibility-tree", "computed-styles"],
+          skippedReason: "no browser backend installed",
+        },
+        id: captureId,
+        status: "degraded",
+        target: observedTarget,
+      });
+    },
+  };
+}
+
+function failingBackend(
+  id: "playwright" | "agent-browser",
+  code: "capture_failed" | "capture_unreachable",
+): CaptureBackend {
+  return {
+    id,
+    detect: () => true,
+    observe: async () => err(createSurfaceError(code, `${id} could not capture the target.`)),
+  };
+}
+
+function throwingBackend(id: "static" | "playwright"): CaptureBackend {
+  return {
+    id,
+    detect: () => true,
+    observe: async () => {
+      throw new Error(`${id} exploded`);
+    },
+  };
+}
+
+function throwingDetectBackend(): CaptureBackend {
+  return {
+    id: "playwright",
+    detect: () => {
+      throw new Error("playwright not installed");
+    },
+    observe: async (observedTarget) =>
+      ok({
+        artifacts: [
+          {
+            id: "screenshot",
+            path: ".surface/captures/unreachable/screenshot.png",
+            redacted: false,
+            type: "screenshot",
+          },
+        ],
+        backend: "playwright",
+        capturedAt: "2026-05-31T18:00:00.000Z",
+        id: "cap-unreachable",
+        status: "completed",
+        target: observedTarget,
+      }),
+  };
+}
+
+function invalidCompletedBackend(): CaptureBackend {
+  return {
+    id: "playwright",
+    detect: () => true,
+    observe: async (observedTarget) =>
+      ok({
+        artifacts: [],
+        backend: "playwright",
+        capturedAt: "2026-05-31T18:00:00.000Z",
+        id: "cap-invalid",
+        status: "completed",
+        target: observedTarget,
+      }),
+  };
+}
 
 describe("E1 Capture & Inputs", () => {
   describe("US-001 capture via auto-detected backend [gate]", () => {
-    it.skip("[US-001][AC1] reachable target → screenshot+DOM+a11y-tree+computed-styles under .surface/captures/<id> (integration)", () => {});
-    it.skip("[US-001][AC2] neither backend installed → static+screenshot fallback; skipped measured checks reported (integration)", () => {});
-    it.skip("[US-001][AC3] both backends installed → deterministic selection recorded in capture metadata (integration)", () => {});
+    it("[US-001][AC1] reachable target → screenshot+DOM+a11y-tree+computed-styles under .surface/captures/<id> (integration)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [backend("playwright", true, artifactRoot)],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      if (!result.ok) {
+        throw new Error("expected capture to succeed");
+      }
+
+      expect(result.value).toMatchObject({
+        backend: "playwright",
+        status: "completed",
+      });
+      expect(result.value.artifacts.map((artifact) => artifact.type).sort()).toEqual([
+        "accessibility-tree",
+        "computed-styles",
+        "dom-snapshot",
+        "screenshot",
+      ]);
+      expect(
+        result.value.artifacts.every((artifact) => artifact.path.startsWith(artifactRoot)),
+      ).toBe(true);
+      await Promise.all(
+        result.value.artifacts.map((artifact) =>
+          expect(access(artifact.path)).resolves.toBeUndefined(),
+        ),
+      );
+    });
+
+    it("[US-001][AC1] live captures pass an enforcement policy to browser backends (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let receivedOptions: CaptureOptions | undefined;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget, captureOptions) => {
+              receivedOptions = captureOptions;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(receivedOptions?.networkPolicy).toMatchObject({
+        allowlist: ["https://example.com"],
+        blockPrivateNetwork: true,
+        enforceOnNavigation: true,
+        enforceOnRedirects: true,
+        enforceOnSubresources: true,
+        targetHost: "example.com",
+        targetOrigin: "https://example.com",
+      });
+      expect(receivedOptions?.networkPolicy?.resolvedAddresses.length).toBeGreaterThan(0);
+    });
+
+    it("[US-001][AC1] empty allowlist permits public requested targets by default (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      });
+
+      expect(isOk(result)).toBe(true);
+      expect(observed).toBe(true);
+    });
+
+    it("[US-001][AC1] disallowed live targets are rejected before backend observe (unit)", async () => {
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, ".surface/captures"));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(await createTempArtifactRoot()),
+      });
+
+      const result = await service.capture(target, {
+        config: {
+          ...DEFAULT_SURFACE_CONFIG.capture,
+          allowlist: ["https://allowed.example.com"],
+        },
+      });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            targetOrigin: "https://example.com",
+          },
+        },
+      });
+      expect(observed).toBe(false);
+    });
+
+    it("[US-001][AC1] localhost target kind rejects private-network refs (unit)", async () => {
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, ".surface/captures"));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(await createTempArtifactRoot()),
+      });
+
+      const result = await service.capture(
+        { kind: "localhost", ref: "10.0.0.5:3000" },
+        {
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://10.0.0.5:3000"],
+          },
+        },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(observed).toBe(false);
+    });
+
+    it("[US-001][AC1] localhost target kind allows loopback refs (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(
+        { kind: "localhost", ref: "127.0.0.1:3000" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://127.0.0.1:3000"],
+          },
+        },
+      );
+
+      expect(isOk(result)).toBe(true);
+      expect(observed).toBe(true);
+    });
+
+    it("[US-001][AC1] URL target kind rejects alternate loopback hosts (unit)", async () => {
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, ".surface/captures"));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(await createTempArtifactRoot()),
+      });
+
+      const result = await service.capture(
+        { kind: "url", ref: "http://127.0.0.2:3000" },
+        {
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://127.0.0.2:3000"],
+          },
+        },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(observed).toBe(false);
+    });
+
+    it("[US-001][AC1] URL target kind rejects IPv4-compatible IPv6 loopback hosts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(
+        { kind: "url", ref: "http://[::7f00:1]:3000" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://[::7f00:1]:3000"],
+          },
+        },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(observed).toBe(false);
+    });
+
+    it("[US-001][AC1] URL target kind allows non-reserved public IPv4 refs (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const publicTarget = { kind: "url", ref: "http://203.0.5.1:3000" } satisfies Target;
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(publicTarget, {
+        artifactRoot,
+        config: {
+          ...DEFAULT_SURFACE_CONFIG.capture,
+          allowlist: [publicTarget.ref],
+        },
+      });
+
+      expect(isOk(result)).toBe(true);
+      expect(observed).toBe(true);
+    });
+
+    it("[US-001][AC1] route target kind rejects protocol-relative network refs (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(
+        { kind: "route", ref: "//169.254.169.254/latest/meta-data" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["*"],
+          },
+        },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          message: "Route capture target must be a path-only route.",
+        },
+      });
+      expect(observed).toBe(false);
+    });
+
+    it("[US-001][AC1] route target kind rejects traversal segments (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let observed = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observed = true;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(
+        { kind: "route", ref: "/admin/../metadata" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["*"],
+          },
+        },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(observed).toBe(false);
+    });
+
+    it("[US-001][AC2] neither backend installed → static+screenshot fallback; skipped measured checks reported (integration)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [
+          customBackend("playwright", false, artifactRoot),
+          customBackend("agent-browser", false, artifactRoot),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot, () => "cap-static"),
+      });
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      if (!result.ok) {
+        throw new Error("expected capture to succeed");
+      }
+
+      expect(result.value).toMatchObject({
+        backend: "static",
+        degradation: {
+          skippedArtifacts: ["dom-snapshot", "accessibility-tree", "computed-styles"],
+          skippedReason: "no browser backend installed",
+        },
+        status: "degraded",
+      });
+      expect(result.value.artifacts).toEqual([
+        {
+          id: "screenshot",
+          path: join(artifactRoot, "cap-static", "screenshot.png"),
+          redacted: false,
+          type: "screenshot",
+        },
+      ]);
+      await expect(
+        access(join(artifactRoot, "cap-static", "screenshot.png")),
+      ).resolves.toBeUndefined();
+    });
+
+    it("[US-001][AC2] registered static backend is only used as fallback (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let selectedStaticObserved = false;
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "static",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              selectedStaticObserved = true;
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot, () => "cap-static-only-fallback"),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          backend: "static",
+          id: "cap-static-only-fallback",
+          status: "degraded",
+        },
+      });
+      expect(selectedStaticObserved).toBe(false);
+    });
+
+    it("[US-001][AC3] both backends installed → deterministic selection recorded in capture metadata (integration)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [
+          backend("playwright", true, artifactRoot),
+          backend("agent-browser", true, artifactRoot),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+      const first = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+      const second = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(first)).toBe(true);
+      expect(isOk(second)).toBe(true);
+      expect(first).toMatchObject({ value: { backend: "agent-browser" } });
+      expect(second).toMatchObject({ value: { backend: "agent-browser" } });
+    });
+
+    it("[US-001][AC3] custom capture backends are selected deterministically before built-ins (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [
+          backend("agent-browser", true, artifactRoot),
+          customBackend("fixture-custom", true, artifactRoot),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({ value: { backend: "fixture-custom" } });
+    });
+
+    it("[US-001][AC3] default capture IDs are slugged, per-service, and collision resistant (unit)", () => {
+      const idFactory = createDefaultCaptureIdFactory({
+        clock: () => "2026-05-31T18:00:00.000Z",
+        randomHex: () => "abc123",
+      });
+
+      const first = idFactory(target);
+      const second = idFactory(target);
+
+      expect(first).toMatch(/^cap-url-example-com-/);
+      expect(first).toContain("-abc123");
+      expect(second).toMatch(/^cap-url-example-com-/);
+      expect(first).not.toEqual(second);
+    });
+
+    it("[US-001][AC3] default URL capture IDs do not expose path, query, fragment, or userinfo (unit)", () => {
+      const idFactory = createDefaultCaptureIdFactory({
+        clock: () => "2026-05-31T18:00:00.000Z",
+        randomHex: () => "abc123",
+      });
+
+      const id = idFactory({
+        kind: "url",
+        ref: "https://user:password@example.com/secret/checkout?token=abc123#billing",
+      });
+
+      expect(id).toMatch(/^cap-url-example-com-/);
+      expect(id).not.toContain("user");
+      expect(id).not.toContain("password");
+      expect(id).not.toContain("secret");
+      expect(id).not.toContain("checkout");
+      expect(id).not.toContain("token");
+      expect(id).not.toContain("billing");
+    });
+
+    it("[US-001][AC3] localhost capture IDs retain non-sensitive port context (unit)", () => {
+      const idFactory = createDefaultCaptureIdFactory({
+        clock: () => "2026-05-31T18:00:00.000Z",
+        randomHex: () => "abc123",
+      });
+
+      const id = idFactory({
+        kind: "localhost",
+        ref: "localhost:3000/admin?token=abc123",
+      });
+
+      expect(id).toMatch(/^cap-localhost-localhost-3000-/);
+      expect(id).not.toContain("admin");
+      expect(id).not.toContain("token");
+    });
+
+    it("[US-001][AC2] browser capture failures degrade to static fallback evidence (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let fallbackObserved = false;
+      const service = createCaptureService({
+        backends: [failingBackend("playwright", "capture_unreachable")],
+        staticFallback: {
+          ...staticFallbackBackend(artifactRoot, () => "cap-static-after-failure"),
+          observe: async (observedTarget, captureOptions) => {
+            fallbackObserved = true;
+            return staticFallbackBackend(artifactRoot, () => "cap-static-after-failure").observe(
+              observedTarget,
+              captureOptions,
+            );
+          },
+        },
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          backend: "static",
+          degradation: {
+            skippedReason:
+              "no browser backend installed. browser backend playwright failed with capture_unreachable",
+          },
+          id: "cap-static-after-failure",
+          status: "degraded",
+        },
+      });
+      expect(fallbackObserved).toBe(true);
+    });
+
+    it("[US-001][AC2] thrown backend exceptions are returned as capture errors (unit)", async () => {
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: throwingBackend("static"),
+      });
+
+      const result = await service.capture(target, { config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: { backendId: "static" },
+        },
+      });
+    });
+
+    it("[US-001][AC2] failed static fallback preserves the primary backend error (unit)", async () => {
+      const service = createCaptureService({
+        backends: [failingBackend("playwright", "capture_unreachable")],
+        staticFallback: throwingBackend("static"),
+      });
+
+      const result = await service.capture(target, { config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_unreachable",
+        },
+      });
+    });
+
+    it("[US-001][AC2] throwing backend detection falls through to static fallback (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [throwingDetectBackend()],
+        staticFallback: staticFallbackBackend(artifactRoot, () => "cap-static-after-detect"),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          backend: "static",
+          id: "cap-static-after-detect",
+          status: "degraded",
+        },
+      });
+    });
+
+    it("[US-001][AC3] invalid backend capture metadata is returned as capture_failed (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [invalidCompletedBackend()],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            captureId: "cap-invalid",
+            reason: "completed and degraded captures need artifacts",
+          },
+        },
+      });
+    });
+
+    it("[US-001][AC3] invalid backend capture timestamp is rejected (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const captureId = "cap-invalid-time";
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(screenshotPath, "screenshot");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: screenshotPath,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "not a timestamp",
+                id: captureId,
+                status: "completed",
+                target: observedTarget,
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            captureId,
+            reason: "capturedAt must be a valid ISO timestamp",
+          },
+        },
+      });
+    });
+
+    it("[US-001][AC3] calendar-invalid ISO-looking capture timestamps are rejected (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const captureId = "cap-invalid-calendar";
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(screenshotPath, "screenshot");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: screenshotPath,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "2026-02-30T00:00:00Z",
+                id: captureId,
+                status: "completed",
+                target: observedTarget,
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            captureId,
+            reason: "capturedAt must be a valid ISO timestamp",
+          },
+        },
+      });
+    });
+
+    it("[US-001][AC3] valid ISO capture timestamps with offsets are accepted (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const captureId = "cap-offset-time";
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(screenshotPath, "screenshot");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: screenshotPath,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "2026-05-31T12:00:00-06:00",
+                id: captureId,
+                status: "completed",
+                target: observedTarget,
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+    });
+
+    it("[US-001][AC3] backend captures for a different target are rejected (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const captureId = "cap-wrong-target";
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(screenshotPath, "screenshot");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async () =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: screenshotPath,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "2026-05-31T18:00:00.000Z",
+                id: captureId,
+                status: "completed",
+                target: { kind: "url", ref: "https://other.example.com" },
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            captureId,
+            reason: "capture target must match requested target",
+          },
+        },
+      });
+    });
+
+    it("[US-001][AC3] unsafe backend capture IDs are rejected (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const captureId = "cap;unsafe";
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(screenshotPath, "screenshot");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: screenshotPath,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "2026-05-31T18:00:00.000Z",
+                id: captureId,
+                status: "completed",
+                target: observedTarget,
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            captureId,
+            reason: "capture id must be a path-safe non-empty string",
+          },
+        },
+      });
+    });
+
+    it("[US-001][AC3] backend artifacts outside capture root are rejected (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const outsideRoot = await mkdtemp(join(tmpdir(), "surface-capture-outside-"));
+      const outsideArtifact = join(outsideRoot, "screenshot.png");
+      temporaryRoots.push(outsideRoot);
+      await mkdir(join(artifactRoot, "cap-outside"), { recursive: true });
+      await writeFile(outsideArtifact, "outside artifact");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: outsideArtifact,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "2026-05-31T18:00:00.000Z",
+                id: "cap-outside",
+                status: "completed",
+                target: observedTarget,
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            captureId: "cap-outside",
+            reason: "capture artifacts must exist under capture root",
+          },
+        },
+      });
+    });
+
+    it("[US-001][AC3] backend artifacts may be relative to artifact root (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const captureId = "cap-relative-artifact";
+      const captureRoot = join(artifactRoot, captureId);
+      const relativeArtifactPath = join(captureId, "screenshot.png");
+      await mkdir(captureRoot, { recursive: true });
+      await writeFile(join(captureRoot, "screenshot.png"), "relative artifact");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: relativeArtifactPath,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "2026-05-31T18:00:00.000Z",
+                id: captureId,
+                status: "completed",
+                target: observedTarget,
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+    });
+
+    it("[US-001][AC3] symlinked capture roots outside artifact root are rejected (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const outsideRoot = await mkdtemp(join(tmpdir(), "surface-capture-link-target-"));
+      temporaryRoots.push(outsideRoot);
+      const captureId = "cap-linked";
+      const linkedCaptureRoot = join(artifactRoot, captureId);
+      const linkedArtifact = join(linkedCaptureRoot, "screenshot.png");
+      await mkdir(artifactRoot, { recursive: true });
+      await symlink(outsideRoot, linkedCaptureRoot, "dir");
+      await writeFile(join(outsideRoot, "screenshot.png"), "linked artifact");
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) =>
+              ok({
+                artifacts: [
+                  {
+                    id: "screenshot",
+                    path: linkedArtifact,
+                    redacted: false,
+                    type: "screenshot",
+                  },
+                ],
+                backend: "playwright",
+                capturedAt: "2026-05-31T18:00:00.000Z",
+                id: captureId,
+                status: "completed",
+                target: observedTarget,
+              }),
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            captureId,
+            reason: "capture artifacts must exist under capture root",
+          },
+        },
+      });
+    });
   });
   describe("US-002 capture behind auth [gate]", () => {
     it.skip("[US-002][AC1] valid --auth-state → session injected before navigation; authenticated DOM captured (integration)", () => {});
