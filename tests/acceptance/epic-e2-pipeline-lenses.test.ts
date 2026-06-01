@@ -21,6 +21,7 @@ import {
   selectLensExecutionPlan,
   synthesizeMeasuredWinsDecision,
 } from "../../packages/core/src/index.js";
+import { createAxeGroundingTool } from "../../packages/grounding/src/index.js";
 
 describe("E2 Evaluation Pipeline & Lenses", () => {
   describe("US-010 classify app type [gate]", () => {
@@ -77,7 +78,53 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
   });
   describe("US-011 measured accessibility audit [gate]", () => {
     it.skip("[US-011][AC1] each a11y violation produced/confirmed by Axe/Lighthouse, method:measured, with selector + measured value (integration)", () => {});
-    it.skip("[US-011][AC2] contrast violation includes measured ratio + WCAG 2.2 AA threshold (unit)", () => {});
+    it("[US-011][AC2] contrast violation includes measured ratio + WCAG 2.2 AA threshold (unit)", async () => {
+      const tool = createAxeGroundingTool({
+        runAxe: () =>
+          Promise.resolve({
+            violations: [
+              {
+                id: "color-contrast",
+                tags: ["wcag2aa", "wcag143"],
+                nodes: [
+                  {
+                    target: [".cta"],
+                    failureSummary:
+                      "Element has insufficient color contrast of 3.1. Expected contrast ratio of 4.5:1",
+                  },
+                ],
+              },
+            ],
+          }),
+      });
+
+      const result = await tool.run({
+        id: "cap_axe",
+        target: { kind: "url", ref: "http://localhost:3000" },
+        backend: "playwright",
+        artifacts: [],
+        capturedAt: "2026-05-31T18:00:00.000Z",
+        status: "completed",
+      });
+
+      expect(result).toEqual({
+        ok: true,
+        value: [
+          {
+            tool: "axe",
+            evidence: [
+              {
+                kind: "tool-result",
+                tool: "axe",
+                rule: "color-contrast",
+                measuredValue: ".cta: 3.1:1",
+                threshold: "4.5:1 (WCAG 2.2 AA)",
+              },
+            ],
+          },
+        ],
+      });
+    });
   });
   describe("US-012 judged usability/visual/content lenses [gate]", () => {
     it.skip("[US-012][AC1] configured model → each judged finding cites a heuristic, carries evidence, method:judged (integration)", () => {});
