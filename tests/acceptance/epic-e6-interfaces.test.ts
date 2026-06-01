@@ -5,12 +5,63 @@ import {
   assertMcpToolSchemaCompatibility,
   createSurfaceMcpToolRegistry,
 } from "../../packages/mcp/src/index.js";
+import { runSurfaceCli } from "../../packages/cli/src/index.js";
+import { createSurfaceComposition, ok } from "../../packages/core/src/index.js";
 
 describe("E6 Interfaces", () => {
   describe("US-050 POSIX-conformant CLI [gate]", () => {
-    it.skip("[US-050][AC1] any command --json → machine-readable; exit 0 success / 1 error / 2 usage (e2e)", () => {});
-    it.skip("[US-050][AC2] unknown subcommand → exit 2 usage error (e2e)", () => {});
-    it.skip("[US-050][AC3] every error states what failed, likely cause, next command (US-050 actionable errors) (unit)", () => {});
+    it("[US-050][AC1] any command --json → machine-readable; exit 0 success / 1 error / 2 usage (e2e)", async () => {
+      const stdout: string[] = [];
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "status"],
+        composition: createSurfaceComposition({
+          stateStore: {
+            readState: () => ok({ version: "1.0" }),
+            writeArtifact: () =>
+              Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+            writeState: (state) => ok(state),
+          },
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        command: "status",
+        ok: true,
+        schemaVersion: "1.0",
+      });
+    });
+
+    it("[US-050][AC2] unknown subcommand → exit 2 usage error (e2e)", async () => {
+      const stderr: string[] = [];
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "unknown-command"],
+        io: { stderr: (chunk) => stderr.push(chunk) },
+      });
+
+      expect(exitCode).toBe(2);
+      expect(JSON.parse(stderr.at(-1) ?? "")).toMatchObject({
+        error: { code: "unknown_step", exitCode: 2 },
+        ok: false,
+      });
+    });
+
+    it("[US-050][AC3] every error states what failed, likely cause, next command (US-050 actionable errors) (unit)", async () => {
+      const stderr: string[] = [];
+      await runSurfaceCli({
+        argv: ["node", "surface", "--json", "unknown-command"],
+        io: { stderr: (chunk) => stderr.push(chunk) },
+      });
+
+      expect(JSON.parse(stderr.at(-1) ?? "")).toMatchObject({
+        error: {
+          likelyCause: expect.any(String),
+          nextCommand: "surface --help",
+          whatFailed: expect.stringContaining("unknown_step"),
+        },
+      });
+    });
   });
   describe("US-051 MCP server for native agent embedding [gate]", () => {
     it("[US-051][AC1] list tools → surface capabilities appear with versioned schemas (integration)", () => {
