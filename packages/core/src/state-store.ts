@@ -19,13 +19,27 @@ import { TrackedFindingSchema } from "./tracked-findings.js";
 export const SURFACE_STATE_DIR = ".surface";
 /** Aggregate JSON file name inside the Surface state directory. */
 export const SURFACE_STATE_FILE = "state.json";
-/** Current persisted state schema version. */
+/** Current persisted state schema version.
+ *
+ * Optional pipeline metadata is additive and parsed with passthrough semantics,
+ * so existing 1.0 readers remain compatible.
+ */
 export const SURFACE_STATE_VERSION = "1.0";
+
+const ProjectStatePipelineSchema = z
+  .object({
+    lastCompletedStage: z.string().min(1).optional(),
+    nextEventSequence: z.number().int().nonnegative().optional(),
+    runId: z.string().trim().min(1),
+    stageIds: z.array(z.string().min(1)),
+  })
+  .passthrough();
 
 const ProjectStateSnapshotSchema = z
   .object({
     version: z.string().min(1),
     currentStage: z.string().min(1).optional(),
+    pipeline: ProjectStatePipelineSchema.optional(),
     trackedFindings: z.array(TrackedFindingSchema).optional(),
   })
   .passthrough();
@@ -35,6 +49,7 @@ const LegacyProjectStateSnapshotSchema = z
     schemaVersion: z.string().min(1).optional(),
     version: z.string().min(1).optional(),
     currentStage: z.string().min(1).optional(),
+    pipeline: ProjectStatePipelineSchema.optional(),
     trackedFindings: z.array(z.unknown()).optional(),
   })
   .passthrough();
@@ -478,7 +493,8 @@ function migrateProjectState(
   // trackedFindings currently migrate with the project state version. Add explicit per-item
   // migration here before changing required tracked finding fields or history invariants.
   const legacy = LegacyProjectStateSnapshotSchema.parse(value);
-  const { currentStage, schemaVersion, trackedFindings, version, ...passthrough } = legacy;
+  const { currentStage, pipeline, schemaVersion, trackedFindings, version, ...passthrough } =
+    legacy;
   const migratedTrackedFindings =
     trackedFindings === undefined
       ? undefined
@@ -491,6 +507,7 @@ function migrateProjectState(
     ...passthrough,
     version: migratedVersion,
     ...(currentStage !== undefined ? { currentStage } : {}),
+    ...(pipeline !== undefined ? { pipeline } : {}),
     ...(migratedTrackedFindings !== undefined ? { trackedFindings: migratedTrackedFindings } : {}),
   };
 
