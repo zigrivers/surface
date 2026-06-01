@@ -1,4 +1,4 @@
-import type { AppType, SurfaceConfig } from "./config.js";
+import type { SurfaceConfig, AppType } from "./config.js";
 import type { Result, SurfaceError } from "./errors.js";
 import type {
   Backlog as FindingsBacklog,
@@ -321,6 +321,7 @@ export interface ProjectStateSnapshot {
   // survive passthrough reads and writes.
   readonly pipeline?: {
     readonly [key: string]: unknown;
+    readonly activeConfig?: SurfaceConfig;
     readonly lastCompletedStage?: string | undefined;
     readonly nextEventSequence?: number | undefined;
     readonly runId: string;

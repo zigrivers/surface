@@ -60,6 +60,7 @@ export type PipelineStageId = z.infer<typeof PipelineStageIdSchema>;
 
 const PipelineStateMetadataSchema = z
   .object({
+    activeConfig: SurfaceConfigSchema.optional(),
     lastCompletedStage: ExecutablePipelineStageIdSchema.optional(),
     nextEventSequence: z.number().int().nonnegative().optional(),
     runId: nonEmptyStringSchema,
@@ -259,8 +260,18 @@ async function runPipeline(
   const sequence = new PipelineSequenceTracker(
     initialEventSequenceFor(initialState.value, parsedRunId.data),
   );
-  const resumeIndex = resumeIndexFor(initialState.value, parsedRunId.data, plan.stages);
-  const freshRun = !hasMatchingPipelineMetadata(initialState.value, parsedRunId.data, plan.stages);
+  const resumeIndex = resumeIndexFor(
+    initialState.value,
+    parsedRunId.data,
+    plan.stages,
+    parsedConfig.data,
+  );
+  const freshRun = !hasMatchingPipelineMetadata(
+    initialState.value,
+    parsedRunId.data,
+    plan.stages,
+    parsedConfig.data,
+  );
 
   if (!resumeIndex.ok) {
     return err(withEventDetails(resumeIndex.error, events));
@@ -352,6 +363,7 @@ async function runPipeline(
         parsedRunId.data,
         plan.stages,
         sequence.nextAfterFailureSlot(),
+        parsedConfig.data,
       ),
     );
 
@@ -434,6 +446,7 @@ async function runPipeline(
         parsedRunId.data,
         plan.stages,
         sequence.current,
+        parsedConfig.data,
       ),
     );
 
@@ -478,6 +491,7 @@ async function runPipeline(
         parsedRunId.data,
         plan.stages,
         sequence.nextAfterCurrent(),
+        parsedConfig.data,
       ),
     );
 
@@ -504,6 +518,7 @@ async function runPipeline(
       parsedRunId.data,
       plan.stages,
       sequence.nextAfterCurrent(),
+      parsedConfig.data,
     ),
   );
 
@@ -578,13 +593,16 @@ function resumeIndexFor(
   state: ProjectStateSnapshot,
   runId: string,
   stages: readonly PipelineStageDefinition[],
+  config: SurfaceConfig,
 ): Result<number | "already-completed" | "pending-completion", SurfaceError> {
   const currentStage = state.currentStage;
   const stateMetadata = pipelineStateMetadataFor(state);
   const planStageIds = stages.map((stage) => stage.id);
   const statePlanChanged =
     stateMetadata !== undefined &&
-    (stateMetadata.runId !== runId || !sameStagePlan(stateMetadata.stageIds, planStageIds));
+    (stateMetadata.runId !== runId ||
+      !sameStagePlan(stateMetadata.stageIds, planStageIds) ||
+      !sameActiveConfig(stateMetadata.activeConfig, config));
 
   if (currentStage === undefined || stateMetadata === undefined || statePlanChanged) {
     return ok(0);
@@ -654,12 +672,14 @@ function hasMatchingPipelineMetadata(
   state: ProjectStateSnapshot,
   runId: string,
   stages: readonly PipelineStageDefinition[],
+  config: SurfaceConfig,
 ): boolean {
   const stateMetadata = pipelineStateMetadataFor(state);
 
   return (
     stateMetadata !== undefined &&
     stateMetadata.runId === runId &&
+    sameActiveConfig(stateMetadata.activeConfig, config) &&
     sameStagePlan(
       stateMetadata.stageIds,
       stages.map((stage) => stage.id),
@@ -673,6 +693,7 @@ function stateWithPipelineMetadata(
   runId: string,
   stages: readonly PipelineStageDefinition[],
   nextEventSequence: number,
+  config: SurfaceConfig,
 ): ProjectStateSnapshot & { readonly pipeline: PipelineStateMetadata } {
   const pipeline = pipelineWithoutCompletionMarker(state);
 
@@ -681,6 +702,7 @@ function stateWithPipelineMetadata(
     currentStage,
     pipeline: {
       ...pipeline,
+      activeConfig: config,
       nextEventSequence,
       runId,
       stageIds: stages.map((stage) => stage.id),
@@ -694,8 +716,16 @@ function stateWithCompletedStageMetadata(
   runId: string,
   stages: readonly PipelineStageDefinition[],
   nextEventSequence: number,
+  config: SurfaceConfig,
 ): ProjectStateSnapshot & { readonly pipeline: PipelineStateMetadata } {
-  const base = stateWithPipelineMetadata(state, completedStage, runId, stages, nextEventSequence);
+  const base = stateWithPipelineMetadata(
+    state,
+    completedStage,
+    runId,
+    stages,
+    nextEventSequence,
+    config,
+  );
 
   return {
     ...base,
@@ -790,6 +820,17 @@ function sameStagePlan(
   right: readonly ExecutablePipelineStageId[],
 ): boolean {
   return left.length === right.length && left.every((stageId, index) => stageId === right[index]);
+}
+
+function sameActiveConfig(
+  storedConfig: SurfaceConfig | undefined,
+  activeConfig: SurfaceConfig,
+): boolean {
+  if (storedConfig === undefined) {
+    return true;
+  }
+
+  return JSON.stringify(storedConfig) === JSON.stringify(activeConfig);
 }
 
 function nextActiveStageIndexAfter(

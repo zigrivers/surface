@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { DEFAULT_SURFACE_CONFIG } from "./config.js";
+import { DEFAULT_SURFACE_CONFIG, type SurfaceConfig } from "./config.js";
 import { createSurfaceError, err, isOk, ok } from "./errors.js";
 import type { ProjectStateSnapshot, StateStore } from "./interfaces.js";
 import {
@@ -105,6 +105,7 @@ function stateWithPipelinePlan(
     currentStage,
     version: "1.0",
     pipeline: {
+      activeConfig: config,
       ...(nextEventSequence === undefined ? {} : { nextEventSequence }),
       runId,
       stageIds: selectPipelineStages(config).map((stage) => stage.id),
@@ -246,11 +247,57 @@ describe("PipelineOrchestrator", () => {
     ]);
   });
 
+  it("restarts same-run metadata when active config changes without changing the stage plan", async () => {
+    const changedConfig = {
+      ...DEFAULT_SURFACE_CONFIG,
+      evaluation: {
+        ...DEFAULT_SURFACE_CONFIG.evaluation,
+        appType: "marketing",
+      },
+    } satisfies SurfaceConfig;
+    const stateStore = new MemoryStateStore(
+      stateWithPipelinePlan("capture", "run_config_changed", DEFAULT_SURFACE_CONFIG),
+    );
+    const executed: ExecutablePipelineStageId[] = [];
+    const orchestrator = createPipelineOrchestrator({
+      handlers: createNoopPipelineHandlers({
+        discovery: ({ stage }) => {
+          executed.push(stage.id);
+          return ok(null);
+        },
+        capture: ({ stage }) => {
+          executed.push(stage.id);
+          return ok(null);
+        },
+      }),
+      stateStore,
+    });
+
+    const result = await orchestrator.run({
+      config: changedConfig,
+      runId: "run_config_changed",
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(executed[0]).toBe("discovery");
+    expect(stateStore.writes[0]).toMatchObject({
+      currentStage: "discovery",
+      pipeline: {
+        activeConfig: {
+          evaluation: {
+            appType: "marketing",
+          },
+        },
+      },
+    });
+  });
+
   it("resumes after a durably completed stage without rerunning its handler", async () => {
     const stateStore = new MemoryStateStore({
       currentStage: "capture",
       version: "1.0",
       pipeline: {
+        activeConfig: DEFAULT_SURFACE_CONFIG,
         lastCompletedStage: "capture",
         nextEventSequence: 4,
         runId: "run_stage_completion_resume",
@@ -286,12 +333,54 @@ describe("PipelineOrchestrator", () => {
     expect(result.ok && result.value.newlyCompletedStages[0]).toBe("heuristic");
   });
 
+  it("preserves legacy resume behavior when active config metadata is absent", async () => {
+    const stateStore = new MemoryStateStore({
+      currentStage: "capture",
+      version: "1.0",
+      pipeline: {
+        lastCompletedStage: "capture",
+        nextEventSequence: 4,
+        runId: "run_legacy_active_config",
+        stageIds: selectPipelineStages(DEFAULT_SURFACE_CONFIG).map((stage) => stage.id),
+      },
+    });
+    const executed: ExecutablePipelineStageId[] = [];
+    const orchestrator = createPipelineOrchestrator({
+      handlers: createNoopPipelineHandlers({
+        discovery: ({ stage }) => {
+          executed.push(stage.id);
+          return ok(null);
+        },
+        heuristic: ({ stage }) => {
+          executed.push(stage.id);
+          return ok(null);
+        },
+      }),
+      stateStore,
+    });
+
+    const result = await orchestrator.run({
+      config: DEFAULT_SURFACE_CONFIG,
+      runId: "run_legacy_active_config",
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(executed).toEqual(["heuristic"]);
+    expect(stateStore.writes[0]).toMatchObject({
+      currentStage: "heuristic",
+      pipeline: {
+        activeConfig: DEFAULT_SURFACE_CONFIG,
+      },
+    });
+  });
+
   it("returns the completed fast path for matching completed metadata", async () => {
     const executed: ExecutablePipelineStageId[] = [];
     const stateStore = new MemoryStateStore({
       currentStage: "completed",
       version: "1.0",
       pipeline: {
+        activeConfig: DEFAULT_SURFACE_CONFIG,
         nextEventSequence: 12,
         runId: "run_already_completed",
         stageIds: selectPipelineStages(DEFAULT_SURFACE_CONFIG).map((stage) => stage.id),
@@ -732,6 +821,7 @@ describe("PipelineOrchestrator", () => {
         currentStage: "not-a-stage",
         version: "1.0",
         pipeline: {
+          activeConfig: DEFAULT_SURFACE_CONFIG,
           runId: "run_invalid_resume",
           stageIds: selectPipelineStages(DEFAULT_SURFACE_CONFIG).map((stage) => stage.id),
         },
@@ -765,6 +855,7 @@ describe("PipelineOrchestrator", () => {
         currentStage: "cognitive-walkthrough",
         version: "1.0",
         pipeline: {
+          activeConfig: DEFAULT_SURFACE_CONFIG,
           runId: "run_skipped_stored_stage",
           stageIds: selectPipelineStages(DEFAULT_SURFACE_CONFIG).map((stage) => stage.id),
         },

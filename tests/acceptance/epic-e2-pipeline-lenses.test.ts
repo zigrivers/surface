@@ -8,6 +8,8 @@ import { describe, expect, it } from "vitest";
 import {
   COMMITTED_WEB_APP_TYPE_OVERLAYS,
   JUDGED_COVERAGE_UNAVAILABLE_MESSAGE,
+  createNoopPipelineHandlers,
+  createPipelineOrchestrator,
   createFileStateStore,
   getAppTypeOverlay,
   isOk,
@@ -16,6 +18,8 @@ import {
   resolveModelProviderConfig,
   resolveSurfaceConfig,
   runDiscovery,
+  selectLensExecutionPlan,
+  synthesizeMeasuredWinsDecision,
 } from "../../packages/core/src/index.js";
 
 describe("E2 Evaluation Pipeline & Lenses", () => {
@@ -110,7 +114,93 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
       );
     });
 
-    it.skip("[US-013][AC1] preset accessibility-first @depth4 → lens set + thresholds match preset/overlay; active config recorded (integration)", () => {});
+    it("[US-013][AC1] preset accessibility-first @depth4 selects the preset/overlay lens plan and records active config (integration)", async () => {
+      const projectRoot = await mkdtemp(path.join(os.tmpdir(), "surface-lenses-"));
+      const config = resolveSurfaceConfig({
+        cli: {
+          evaluation: {
+            appType: "generic",
+            depth: 4,
+            preset: "accessibility-first",
+          },
+        },
+      });
+
+      try {
+        const plan = selectLensExecutionPlan({
+          capture: {
+            id: "cap_acceptance_live",
+            target: { kind: "url", ref: "https://example.com" },
+            backend: "playwright",
+            artifacts: [
+              {
+                id: "dom",
+                type: "dom-snapshot",
+                path: ".surface/captures/dom.html",
+                redacted: false,
+              },
+            ],
+            capturedAt: "2026-05-31T00:00:00.000Z",
+            status: "completed",
+          },
+          config,
+          modelAvailability: {
+            available: false,
+            reason: "no-model-configured",
+            message: "No model configured.",
+          },
+        });
+        const decision = synthesizeMeasuredWinsDecision({
+          factKey: "contrast:.btn-primary",
+          judgedSource: "visual-hierarchy",
+          judgedValue: "acceptable",
+          measuredSource: "axe",
+          measuredValue: "3.1:1",
+        });
+        const orchestrator = createPipelineOrchestrator({
+          handlers: createNoopPipelineHandlers(),
+          stateStore: createFileStateStore({ projectRoot }),
+        });
+        const pipelineResult = await orchestrator.run({
+          config,
+          runId: "run_acceptance_lenses",
+        });
+        const persisted = JSON.parse(
+          await readFile(path.join(projectRoot, ".surface", "state.json"), "utf8"),
+        ) as Record<string, unknown>;
+
+        expect(plan.overlay.appType).toBe("generic");
+        expect(plan.preset).toBe("accessibility-first");
+        expect(plan.selected.map((lens) => lens.id)).toEqual(["accessibility"]);
+        expect(plan.skipped).toEqual([
+          {
+            lensId: "visual-hierarchy",
+            reason: "model_unavailable",
+            message: "No model configured.",
+          },
+        ]);
+        expect(decision).toMatchObject({
+          factKey: "contrast:.btn-primary",
+          sourceOfTruth: "measured",
+          measuredSource: "axe",
+          judgedSource: "visual-hierarchy",
+        });
+        expect(isOk(pipelineResult)).toBe(true);
+        expect(persisted).toMatchObject({
+          currentStage: "completed",
+          pipeline: {
+            activeConfig: {
+              evaluation: config.evaluation,
+              findings: { severityCutoffs: config.findings.severityCutoffs },
+              reporting: { gatePolicy: config.reporting.gatePolicy },
+            },
+            runId: "run_acceptance_lenses",
+          },
+        });
+      } finally {
+        await rm(projectRoot, { force: true, recursive: true });
+      }
+    });
   });
   describe("US-014 cognitive walkthrough & conversion audit [should]", () => {
     it.skip("[US-014][AC1] task/persona + flow → each step evaluated as first-time user; friction emitted citing heuristic (integration)", () => {});
