@@ -9,6 +9,7 @@
     "@surface/adapters-agnostic#lint": { "dependsOn": ["^build"] },
     "@surface/adapters-react#lint": { "dependsOn": ["^build"] },
     "@surface/grounding#lint": { "dependsOn": ["^build"] },
+    "@surface/mcp#lint": { "dependsOn": ["^build"] },
     "typecheck": { "dependsOn": ["^build"] },
     "clean": { "cache": false }
   }
