@@ -152,6 +152,7 @@ describe("published plugin interfaces", () => {
     };
     const stateStore: StateStore = {
       readState: () => ok({ version: "1.0" }),
+      updateState: (updater) => ok(updater({ version: "1.0" })),
       writeState: (state) => ok(state),
       writeArtifact: () => ok({ path: ".surface/findings/findings.json", sha256: "abc123" }),
     };

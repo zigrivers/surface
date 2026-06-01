@@ -1,4 +1,4 @@
-import type { SurfaceConfig } from "./config.js";
+import type { AppType, SurfaceConfig } from "./config.js";
 import type { Result, SurfaceError } from "./errors.js";
 import type {
   Backlog as FindingsBacklog,
@@ -216,6 +216,42 @@ export interface PersistedArtifactRef {
 export interface ProjectStateSnapshot {
   readonly version: string;
   readonly currentStage?: string;
+  readonly discovery?: {
+    readonly [key: string]: unknown;
+    readonly appType?: AppType;
+    readonly classification?: {
+      readonly [key: string]: unknown;
+      readonly appType: AppType;
+      readonly matchedSignals: readonly string[];
+      readonly source: "config" | "route-inventory" | "target-ref" | "generic-fallback";
+    };
+    readonly events?: readonly {
+      readonly [key: string]: unknown;
+      readonly type: string;
+    }[];
+    readonly overlayId?: AppType;
+    readonly personaTask?: {
+      readonly [key: string]: unknown;
+      readonly persona: string;
+      readonly task: string;
+    };
+    readonly routeInventory?: {
+      readonly [key: string]: unknown;
+      readonly cap: number;
+      readonly routes: readonly {
+        readonly [key: string]: unknown;
+        readonly path: string;
+        readonly source: "target" | "candidate";
+      }[];
+      readonly skipped: readonly {
+        readonly [key: string]: unknown;
+        readonly path: string;
+        readonly reason: "route_cap_exceeded";
+        readonly source: "target" | "candidate";
+      }[];
+    };
+    readonly runId?: string;
+  };
   // Runtime and persistence schemas validate trimmed run ids and known stage ids.
   // The interface remains structurally open so additive pipeline metadata can
   // survive passthrough reads and writes.
@@ -232,6 +268,16 @@ export interface ProjectStateSnapshot {
 export interface StateStore {
   readState(): MaybePromise<Result<ProjectStateSnapshot, SurfaceError>>;
   writeState(state: ProjectStateSnapshot): MaybePromise<Result<ProjectStateSnapshot, SurfaceError>>;
+  /**
+   * Apply a read-modify-write update under the store's native atomicity
+   * boundary. File-backed stores should hold a file lock; transactional stores
+   * should run the updater inside a transaction. Production stores should
+   * implement this method when callers need race-free state updates; callers may
+   * keep readState/writeState fallback paths only for backward compatibility.
+   */
+  updateState?(
+    updater: (state: ProjectStateSnapshot) => ProjectStateSnapshot,
+  ): MaybePromise<Result<ProjectStateSnapshot, SurfaceError>>;
   writeArtifact(
     intent: PersistArtifactIntent,
   ): MaybePromise<Result<PersistedArtifactRef, SurfaceError>>;

@@ -179,6 +179,38 @@ class FileStateStore implements StateStore {
     });
   }
 
+  async updateState(
+    updater: (state: ProjectStateSnapshot) => ProjectStateSnapshot,
+  ): Promise<Result<ProjectStateSnapshot, SurfaceError>> {
+    return this.#withStateLock("state_write_failed", async () => {
+      let current: ProjectStateSnapshot;
+
+      try {
+        const bytes = await readFile(this.#stateFile, "utf8");
+        current = migrateProjectState(JSON.parse(bytes) as unknown, this.#stateVersion).state;
+      } catch (error) {
+        if (isNodeErrorWithCode(error, "ENOENT")) {
+          current = { version: this.#stateVersion };
+        } else if (error instanceof SyntaxError || error instanceof z.ZodError) {
+          throw new SurfaceOperationError(
+            createSurfaceError("state_corrupt", "Surface state is corrupt or unsupported.", {
+              cause: error,
+              details: { path: this.#stateFile },
+            }),
+          );
+        } else {
+          throw error;
+        }
+      }
+
+      const { state: migrated } = migrateProjectState(updater(current), this.#stateVersion, {
+        forceVersion: true,
+      });
+      await writeJsonFileAtomic(this.#stateFile, migrated);
+      return migrated;
+    });
+  }
+
   /** Persist artifact bytes below the configured state directory and return a project-relative ref. */
   async writeArtifact(
     intent: PersistArtifactIntent,

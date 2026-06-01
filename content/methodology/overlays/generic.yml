@@ -1,5 +1,8 @@
 # Generated from packages/core/src/app-type-overlays.ts. Do not edit by hand.
 appType: generic
+defaultPersona: first-time web user
+defaultTask: complete the primary task without prior product knowledge
+discoverySignals: []
 label: Generic web
 releaseTier: gate
 routeHints:

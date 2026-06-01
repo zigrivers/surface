@@ -2,13 +2,7 @@ import { z } from "zod";
 import { stringify as stringifyYaml } from "yaml";
 
 import { AppTypeSchema, type AppType } from "./config.js";
-
-const nonEmptyStringSchema = z
-  .string()
-  .min(1)
-  .refine((value) => value.trim().length > 0, {
-    message: "must not be empty or whitespace",
-  });
+import { nonEmptyStringSchema } from "./schemas.js";
 
 export const OverlayReleaseTierSchema = z.enum(["gate", "committed", "should"]);
 export type OverlayReleaseTier = z.infer<typeof OverlayReleaseTierSchema>;
@@ -25,6 +19,9 @@ export type OverlayAcceptanceCriteria = z.infer<typeof OverlayAcceptanceCriteria
 export const AppTypeOverlaySchema = z
   .object({
     appType: AppTypeSchema,
+    defaultPersona: nonEmptyStringSchema,
+    defaultTask: nonEmptyStringSchema,
+    discoverySignals: z.array(nonEmptyStringSchema),
     label: nonEmptyStringSchema,
     releaseTier: OverlayReleaseTierSchema,
     routeHints: z.array(nonEmptyStringSchema).min(1),
@@ -78,6 +75,9 @@ function deepFreeze<T extends object>(value: T): Readonly<T> {
 const rawAppTypeOverlays = {
   generic: {
     appType: "generic",
+    defaultPersona: "first-time web user",
+    defaultTask: "complete the primary task without prior product knowledge",
+    discoverySignals: [],
     label: "Generic web",
     releaseTier: "gate",
     routeHints: ["home", "primary navigation", "primary task", "supporting content"],
@@ -118,6 +118,9 @@ const rawAppTypeOverlays = {
   },
   "saas-dashboard": {
     appType: "saas-dashboard",
+    defaultPersona: "recurring product operator",
+    defaultTask: "monitor state and complete an operational workflow",
+    discoverySignals: ["dashboard", "analytics", "workspace", "settings", "billing", "team"],
     label: "SaaS dashboard",
     releaseTier: "committed",
     routeHints: ["dashboard", "settings", "detail view", "empty state", "error state"],
@@ -158,6 +161,19 @@ const rawAppTypeOverlays = {
   },
   "e-commerce": {
     appType: "e-commerce",
+    defaultPersona: "shopper",
+    defaultTask: "evaluate a product and complete a purchase path",
+    discoverySignals: [
+      "cart",
+      "checkout",
+      "product",
+      "products",
+      "shop",
+      "store",
+      "order",
+      "orders",
+      "shipping",
+    ],
     label: "E-commerce storefront",
     releaseTier: "committed",
     routeHints: ["product listing", "product detail", "cart", "checkout", "order confirmation"],
@@ -202,6 +218,9 @@ const rawAppTypeOverlays = {
   },
   marketing: {
     appType: "marketing",
+    defaultPersona: "prospective customer",
+    defaultTask: "understand the offer and choose the next step",
+    discoverySignals: ["landing", "pricing", "signup", "demo", "contact", "features", "case-study"],
     label: "Marketing landing",
     releaseTier: "committed",
     routeHints: ["landing page", "pricing", "signup", "contact", "case study"],
