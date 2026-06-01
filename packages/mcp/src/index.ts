@@ -1,16 +1,26 @@
 import { pathToFileURL } from "node:url";
 
 import {
+  DEFAULT_SURFACE_CONFIG,
   createSurfaceComposition,
   createSurfaceError,
   err,
+  instantiateLensExecutionPlan,
+  isOk,
   ok,
+  scoreFinding,
+  selectLensExecutionPlan,
+  synthesizeBacklog,
   toMcpError,
+  type Evidence,
+  type Finding,
   type Result,
+  type SurfaceConfig,
   type SurfaceComposition,
   type SurfaceCompositionOptions,
   type SurfaceError,
 } from "@surface/core";
+import type { Backlog, Capture, IssueExport, Target } from "@surface/core/interfaces";
 import { z } from "zod";
 
 export const SURFACE_MCP_SERVER_NAME = "surface";
@@ -61,6 +71,10 @@ export type SurfaceMcpToolRegistry = {
 export type SurfaceMcpServer = {
   readonly composition: SurfaceComposition;
   readonly registry: SurfaceMcpToolRegistry;
+  callTool<TName extends SurfaceMcpToolName>(
+    name: TName,
+    input: unknown,
+  ): Promise<Result<SurfaceMcpToolOutputMap[TName]>>;
   listTools(): readonly SurfaceMcpToolDefinition[];
 };
 
@@ -72,6 +86,58 @@ export type McpToolSchemaCompatibilityInput = {
   readonly current: Pick<SurfaceMcpToolDefinition, "inputSchema" | "name" | "schemaVersion">;
   readonly next: Pick<SurfaceMcpToolDefinition, "inputSchema" | "name" | "schemaVersion">;
 };
+
+export type SurfaceMcpAuditOutput = {
+  readonly runId: string;
+  readonly backlog: Backlog;
+  readonly capture: Capture;
+  readonly findings: readonly Finding[];
+  readonly skippedLenses: readonly {
+    readonly lensId: string;
+    readonly message: string;
+    readonly reason: string;
+  }[];
+};
+
+export type SurfaceMcpExplainOutput = {
+  readonly finding: Finding;
+  readonly rationale: string;
+  readonly evidence: readonly Evidence[];
+};
+
+export type SurfaceMcpStatusOutput = {
+  readonly currentStage: string;
+  readonly progress: {
+    readonly completedRuns: number;
+    readonly failedRuns: number;
+    readonly findings: number;
+  };
+  readonly runHistory: readonly {
+    readonly runId: string;
+    readonly status: "completed" | "failed";
+    readonly target?: Target;
+    readonly findings: number;
+  }[];
+};
+
+export type SurfaceMcpToolOutputMap = {
+  readonly surface_capture: Capture;
+  readonly surface_audit: SurfaceMcpAuditOutput;
+  readonly surface_explain: SurfaceMcpExplainOutput;
+  readonly surface_backlog: Backlog | IssueExport;
+  readonly surface_status: SurfaceMcpStatusOutput;
+  readonly surface_gate: never;
+  readonly surface_validate: never;
+  readonly surface_baseline: never;
+  readonly surface_verdict: never;
+  readonly surface_diff: never;
+  readonly surface_alternatives: never;
+  readonly surface_trace: never;
+  readonly surface_run: never;
+  readonly surface_next: never;
+};
+
+export type SurfaceMcpToolOutput = SurfaceMcpToolOutputMap[SurfaceMcpToolName];
 
 const TargetSchema = z
   .object({
@@ -248,9 +314,17 @@ export function createSurfaceMcpToolRegistry(): SurfaceMcpToolRegistry {
 export function createSurfaceMcpServer(options: SurfaceMcpServerOptions = {}): SurfaceMcpServer {
   const registry = createSurfaceMcpToolRegistry();
   const composition = options.composition ?? createSurfaceComposition(options);
+  const session = createSurfaceMcpSessionState();
 
   return {
     composition,
+    callTool: async (name, input) =>
+      (await callSurfaceMcpTool({
+        composition,
+        input,
+        name,
+        session,
+      })) as Result<SurfaceMcpToolOutputMap[typeof name]>,
     registry,
     listTools: () => registry.listTools(),
   };
@@ -293,10 +367,443 @@ export function assertMcpToolSchemaCompatibility(
   return ok(true);
 }
 
+type SurfaceMcpSessionState = {
+  readonly runs: Map<string, SurfaceMcpRunRecord>;
+  readonly runOrder: string[];
+  nextRunSequence: number;
+};
+
+type SurfaceMcpRunRecord = {
+  readonly runId: string;
+  readonly status: "completed" | "failed";
+  readonly backlog: Backlog;
+  readonly capture: Capture;
+  readonly findings: readonly Finding[];
+  readonly skippedLenses: SurfaceMcpAuditOutput["skippedLenses"];
+};
+
+type CallSurfaceMcpToolInput = {
+  readonly composition: SurfaceComposition;
+  readonly input: unknown;
+  readonly name: SurfaceMcpToolName;
+  readonly session: SurfaceMcpSessionState;
+};
+
+function createSurfaceMcpSessionState(): SurfaceMcpSessionState {
+  return {
+    runs: new Map(),
+    runOrder: [],
+    nextRunSequence: 1,
+  };
+}
+
+async function callSurfaceMcpTool(
+  input: CallSurfaceMcpToolInput,
+): Promise<Result<SurfaceMcpToolOutput>> {
+  switch (input.name) {
+    case "surface_capture":
+      return await callSurfaceCapture(input.composition, input.input);
+    case "surface_audit":
+      return await callSurfaceAudit(input.composition, input.session, input.input);
+    case "surface_explain":
+      return callSurfaceExplain(input.session, input.input);
+    case "surface_backlog":
+      return await callSurfaceBacklog(input.composition, input.session, input.input);
+    case "surface_status":
+      return callSurfaceStatus(input.session);
+    case "surface_gate":
+    case "surface_validate":
+    case "surface_baseline":
+    case "surface_verdict":
+    case "surface_diff":
+    case "surface_alternatives":
+    case "surface_trace":
+    case "surface_run":
+    case "surface_next":
+      return err(
+        createSurfaceError("unknown_step", "MCP tool handler is not implemented yet.", {
+          details: { tool: input.name },
+        }),
+      );
+  }
+}
+
+async function callSurfaceCapture(
+  composition: SurfaceComposition,
+  rawInput: unknown,
+): Promise<Result<Capture>> {
+  const parsed = parseToolInput("surface_capture", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  return await composition.captureService.capture(
+    targetForCore(parsed.value.target),
+    captureOptionsFor(DEFAULT_SURFACE_CONFIG, parsed.value.authState),
+  );
+}
+
+async function callSurfaceAudit(
+  composition: SurfaceComposition,
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Promise<Result<SurfaceMcpAuditOutput>> {
+  const parsed = parseToolInput("surface_audit", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const config = configForAuditInput(parsed.value);
+  const capture = await composition.captureService.capture(
+    targetForCore(parsed.value.target),
+    captureOptionsFor(config, parsed.value.authState),
+  );
+
+  if (!capture.ok) {
+    return capture;
+  }
+
+  const evidence = await groundingEvidenceFor(composition, capture.value);
+
+  if (!evidence.ok) {
+    return evidence;
+  }
+
+  const plan = selectLensExecutionPlan({
+    capture: capture.value,
+    config,
+    modelAvailability: {
+      available: false,
+      message: "No MCP model provider is configured.",
+      reason: "no-model-configured",
+    },
+    registry: composition.lensRegistry,
+  });
+  const findings = await findingsForPlan(composition, config, capture.value, evidence.value, plan);
+
+  if (!findings.ok) {
+    return findings;
+  }
+
+  const runId = nextRunId(session);
+  const backlog = synthesizeBacklog(runId, findings.value);
+
+  if (!backlog.ok) {
+    return backlog;
+  }
+
+  const record: SurfaceMcpRunRecord = {
+    backlog: backlog.value,
+    capture: capture.value,
+    findings: findings.value,
+    runId,
+    skippedLenses: plan.skipped,
+    status: "completed",
+  };
+  session.runs.set(runId, record);
+  session.runOrder.push(runId);
+
+  return ok({
+    backlog: record.backlog,
+    capture: record.capture,
+    findings: record.findings,
+    runId: record.runId,
+    skippedLenses: record.skippedLenses,
+  });
+}
+
+function callSurfaceExplain(
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Result<SurfaceMcpExplainOutput> {
+  const parsed = parseToolInput("surface_explain", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const finding = findStoredFinding(session, parsed.value.findingId);
+
+  if (finding === undefined) {
+    return err(
+      createSurfaceError("finding_not_found", "No stored MCP finding matched the requested id.", {
+        details: { findingId: parsed.value.findingId },
+      }),
+    );
+  }
+
+  if (finding.evidence.length === 0) {
+    return err(
+      createSurfaceError("evidence_missing", "Stored MCP finding has no evidence to explain.", {
+        details: { findingId: finding.id },
+      }),
+    );
+  }
+
+  return ok({
+    evidence: finding.evidence,
+    finding,
+    rationale: finding.rationale,
+  });
+}
+
+async function callSurfaceBacklog(
+  composition: SurfaceComposition,
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Promise<Result<Backlog | IssueExport>> {
+  const parsed = parseToolInput("surface_backlog", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const record = runRecordFor(session, parsed.value.runId);
+
+  if (record === undefined) {
+    return err(
+      createSurfaceError("run_not_found", "No stored MCP run matched the requested backlog.", {
+        details: { runId: parsed.value.runId ?? null },
+      }),
+    );
+  }
+
+  if (parsed.value.exportTarget === undefined) {
+    return ok(record.backlog);
+  }
+
+  const exporter = composition.issueExporters.find(
+    (candidate) => candidate.target === parsed.value.exportTarget,
+  );
+
+  if (exporter === undefined) {
+    return err(
+      createSurfaceError(
+        "unknown_export_target",
+        "No issue exporter matched the MCP backlog target.",
+        {
+          details: { exportTarget: parsed.value.exportTarget },
+        },
+      ),
+    );
+  }
+
+  const artifact = await composition.stateStore.writeArtifact({
+    bytes: new TextEncoder().encode(JSON.stringify(record.backlog, null, 2)),
+    kind: "report",
+    relativePath: `reports/${record.runId}/backlog.json`,
+  });
+
+  if (!artifact.ok) {
+    return artifact;
+  }
+
+  const exported = await exporter.export({
+    backlogId: record.backlog.id,
+    path: artifact.value.path,
+  });
+
+  if (!exported.ok) {
+    return exported;
+  }
+
+  if (exported.value.status === "partial") {
+    return err(
+      createSurfaceError("export_partial", "MCP backlog export completed partially.", {
+        details: { exportId: exported.value.id, target: exported.value.target },
+      }),
+    );
+  }
+
+  return ok(exported.value);
+}
+
+function callSurfaceStatus(session: SurfaceMcpSessionState): Result<SurfaceMcpStatusOutput> {
+  const runHistory = session.runOrder
+    .map((runId) => session.runs.get(runId))
+    .filter((record): record is SurfaceMcpRunRecord => record !== undefined)
+    .map((record) => ({
+      findings: record.findings.length,
+      runId: record.runId,
+      status: record.status,
+      target: record.capture.target,
+    }));
+  const completedRuns = runHistory.filter((entry) => entry.status === "completed").length;
+  const failedRuns = runHistory.filter((entry) => entry.status === "failed").length;
+
+  return ok({
+    currentStage: runHistory.at(-1)?.status === "completed" ? "completed" : "pending",
+    progress: {
+      completedRuns,
+      failedRuns,
+      findings: runHistory.reduce((total, entry) => total + entry.findings, 0),
+    },
+    runHistory,
+  });
+}
+
+async function groundingEvidenceFor(
+  composition: SurfaceComposition,
+  capture: Capture,
+): Promise<Result<readonly Evidence[]>> {
+  const evidence: Evidence[] = [];
+
+  for (const tool of composition.groundingTools) {
+    const result = await tool.run(capture);
+
+    if (!result.ok) {
+      return result;
+    }
+
+    for (const toolResult of result.value) {
+      evidence.push(...toolResult.evidence);
+    }
+  }
+
+  return ok(evidence);
+}
+
+async function findingsForPlan(
+  composition: SurfaceComposition,
+  config: SurfaceConfig,
+  capture: Capture,
+  evidence: readonly Evidence[],
+  plan: ReturnType<typeof selectLensExecutionPlan>,
+): Promise<Result<readonly Finding[]>> {
+  const findings: Finding[] = [];
+  const lenses = instantiateLensExecutionPlan(plan, composition.lensFactoryOptions);
+
+  for (const { lens } of lenses) {
+    const drafts = await lens.evaluate({
+      capture,
+      config,
+      evidence: [...evidence],
+      knowledge: composition.knowledgeSource,
+    });
+
+    if (!drafts.ok) {
+      return drafts;
+    }
+
+    for (const draft of drafts.value) {
+      const scored = scoreFinding(draft, config.findings);
+
+      if (!scored.ok) {
+        return scored;
+      }
+
+      findings.push(scored.value);
+    }
+  }
+
+  return ok(findings);
+}
+
+function configForAuditInput(
+  input: z.infer<(typeof TOOL_INPUT_SCHEMAS)["surface_audit"]>,
+): SurfaceConfig {
+  return {
+    ...DEFAULT_SURFACE_CONFIG,
+    capture: { ...DEFAULT_SURFACE_CONFIG.capture },
+    evaluation: {
+      ...DEFAULT_SURFACE_CONFIG.evaluation,
+      ...(input.depth === undefined ? {} : { depth: input.depth }),
+      ...(input.preset === undefined
+        ? {}
+        : { preset: input.preset as SurfaceConfig["evaluation"]["preset"] }),
+    },
+    findings: { ...DEFAULT_SURFACE_CONFIG.findings },
+    reporting: { ...DEFAULT_SURFACE_CONFIG.reporting },
+  };
+}
+
+function captureOptionsFor(
+  config: SurfaceConfig,
+  authStateRef: string | undefined,
+): { readonly authStateRef?: string; readonly config: SurfaceConfig["capture"] } {
+  return {
+    config: config.capture,
+    ...(authStateRef === undefined ? {} : { authStateRef }),
+  };
+}
+
+function targetForCore(input: z.infer<typeof TargetSchema>): Target {
+  return {
+    kind: input.kind,
+    ref: input.ref,
+    ...(input.theme === undefined ? {} : { theme: input.theme }),
+    ...(input.viewport === undefined
+      ? {}
+      : {
+          viewport: {
+            height: input.viewport.height,
+            label: input.viewport.label,
+            width: input.viewport.width,
+          },
+        }),
+  };
+}
+
+function parseToolInput<TName extends SurfaceMcpToolName>(
+  name: TName,
+  input: unknown,
+): Result<z.infer<(typeof TOOL_INPUT_SCHEMAS)[TName]>> {
+  const parsed = TOOL_INPUT_SCHEMAS[name].safeParse(input);
+
+  if (!parsed.success) {
+    return err(
+      createSurfaceError("config_invalid", "MCP tool input did not match the registered schema.", {
+        cause: parsed.error,
+        details: { tool: name },
+      }),
+    );
+  }
+
+  return ok(parsed.data as z.infer<(typeof TOOL_INPUT_SCHEMAS)[TName]>);
+}
+
+function nextRunId(session: SurfaceMcpSessionState): string {
+  const runId = `run_mcp_${session.nextRunSequence.toString().padStart(4, "0")}`;
+  session.nextRunSequence += 1;
+
+  return runId;
+}
+
+function runRecordFor(
+  session: SurfaceMcpSessionState,
+  runId: string | undefined,
+): SurfaceMcpRunRecord | undefined {
+  if (runId !== undefined) {
+    return session.runs.get(runId);
+  }
+
+  const latestRunId = session.runOrder.at(-1);
+
+  return latestRunId === undefined ? undefined : session.runs.get(latestRunId);
+}
+
+function findStoredFinding(
+  session: SurfaceMcpSessionState,
+  findingId: string,
+): Finding | undefined {
+  for (const runId of session.runOrder) {
+    const record = session.runs.get(runId);
+    const finding = record?.findings.find((candidate) => candidate.id === findingId);
+
+    if (finding !== undefined) {
+      return finding;
+    }
+  }
+
+  return undefined;
+}
+
 export async function createSurfaceSdkMcpServer(
   options: SurfaceMcpServerOptions = {},
 ): Promise<unknown> {
-  createSurfaceMcpServer(options);
+  const surfaceServer = createSurfaceMcpServer(options);
 
   const [{ McpServer }] = await Promise.all([import("@modelcontextprotocol/sdk/server/mcp.js")]);
   const server = new McpServer({
@@ -312,20 +819,7 @@ export async function createSurfaceSdkMcpServer(
         inputSchema: tool.inputZodSchema,
         title: tool.title,
       },
-      () => ({
-        content: [
-          {
-            text: `${tool.name} handler is provided by follow-up Surface MCP tool packages.`,
-            type: "text",
-          },
-        ],
-        isError: true,
-        structuredContent: toMcpError(
-          createSurfaceError("unknown_step", "MCP tool handler is not implemented yet.", {
-            details: { tool: tool.name },
-          }),
-        ),
-      }),
+      async (input) => mcpToolCallResult(await surfaceServer.callTool(tool.name, input)),
     );
   }
 
@@ -352,9 +846,28 @@ type SdkMcpServer = {
       readonly inputSchema: unknown;
       readonly title: string;
     },
-    handler: () => unknown,
+    handler: (input: unknown) => unknown,
   ): void;
 };
+
+function mcpToolCallResult(result: Result<SurfaceMcpToolOutput>): {
+  readonly content: readonly { readonly text: string; readonly type: "text" }[];
+  readonly isError?: true;
+  readonly structuredContent: unknown;
+} {
+  if (isOk(result)) {
+    return {
+      content: [{ text: JSON.stringify(result.value, null, 2), type: "text" }],
+      structuredContent: result.value,
+    };
+  }
+
+  return {
+    content: [{ text: result.error.message, type: "text" }],
+    isError: true,
+    structuredContent: toMcpError(result.error),
+  };
+}
 
 function publicToolDefinition(tool: InternalSurfaceMcpToolDefinition): SurfaceMcpToolDefinition {
   return {
