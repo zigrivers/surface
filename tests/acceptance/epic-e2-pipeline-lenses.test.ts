@@ -1,5 +1,11 @@
 // Acceptance skeletons — Epic E2: Evaluation Pipeline & Lenses (US-010..015).
-import { describe, it } from "vitest";
+import { describe, expect, it } from "vitest";
+
+import {
+  JUDGED_COVERAGE_UNAVAILABLE_MESSAGE,
+  modelSkipForLens,
+  resolveModelProviderConfig,
+} from "../../packages/core/src/index.js";
 
 describe("E2 Evaluation Pipeline & Lenses", () => {
   describe("US-010 classify app type [gate]", () => {
@@ -11,6 +17,24 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
   });
   describe("US-012 judged usability/visual/content lenses [gate]", () => {
     it.skip("[US-012][AC1] configured model → each judged finding cites a heuristic, carries evidence, method:judged (integration)", () => {});
+    it("[US-012][AC2] no model skips judged lenses and preserves measured coverage (unit)", () => {
+      const resolution = resolveModelProviderConfig({ env: {} });
+
+      if (resolution.configured) {
+        throw new Error("expected no model configuration");
+      }
+
+      expect(
+        modelSkipForLens({ id: "visual-hierarchy", requiresModel: true }, resolution.availability),
+      ).toEqual({
+        lensId: "visual-hierarchy",
+        reason: "model_unavailable",
+        message: JUDGED_COVERAGE_UNAVAILABLE_MESSAGE,
+      });
+      expect(
+        modelSkipForLens({ id: "axe", requiresModel: false }, resolution.availability),
+      ).toBeUndefined();
+    });
     it.skip("[US-012][AC2] no model → judged lenses skipped + 'judged coverage unavailable' reported; measured still produced (integration)", () => {});
   });
   describe("US-013 lenses flex by overlay & preset [gate]", () => {

@@ -8,8 +8,10 @@ import type {
   FindingDraft,
   ToolResultEvidence,
 } from "./findings.js";
+import type { ModelProvider } from "./model-provider.js";
 import type { TrackedFinding } from "./tracked-findings.js";
 export type { Backlog, BacklogEntry } from "./findings.js";
+export type { ModelProvider } from "./model-provider.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -111,6 +113,7 @@ export interface LensContext {
   readonly config: SurfaceConfig;
   readonly evidence: Evidence[];
   readonly knowledge: KnowledgeSource;
+  readonly model?: ModelProvider;
 }
 
 export interface Lens {

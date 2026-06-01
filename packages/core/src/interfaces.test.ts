@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from "vitest";
 
-import { DEFAULT_SURFACE_CONFIG, createSurfaceError, err, ok } from "./index.js";
+import { DEFAULT_SURFACE_CONFIG, createSurfaceError, err, isOk, ok } from "./index.js";
 import type {
   Backlog,
   Capture,
@@ -11,6 +11,7 @@ import type {
   IssueExporter,
   KnowledgeSource,
   Lens,
+  ModelProvider,
   ReportRenderer,
   StateStore,
   Target,
@@ -38,6 +39,7 @@ describe("published plugin interfaces", () => {
     expectTypeOf<FrameworkAdapter>().toHaveProperty("introspect");
     expectTypeOf<GroundingTool>().toHaveProperty("run");
     expectTypeOf<Lens>().toHaveProperty("evaluate");
+    expectTypeOf<ModelProvider>().toHaveProperty("complete");
     expectTypeOf<ReportRenderer>().toHaveProperty("render");
     expectTypeOf<GateEvaluator>().toHaveProperty("evaluate");
     expectTypeOf<IssueExporter>().toHaveProperty("export");
@@ -89,7 +91,29 @@ describe("published plugin interfaces", () => {
       method: "judged",
       requiresModel: true,
       requiresLiveDom: false,
-      evaluate: () => ok([]),
+      evaluate: async (context) => {
+        if (context.model === undefined) {
+          return err(createSurfaceError("model_unavailable", "No model provider is configured."));
+        }
+
+        const completion = await context.model.complete({
+          prompt: {
+            instructions: "Find empty-state issues.",
+            input: { captureId: context.capture.id },
+          },
+        });
+
+        if (!isOk(completion)) {
+          return err(completion.error);
+        }
+
+        return ok([]);
+      },
+    };
+    const model: ModelProvider = {
+      id: "openai",
+      availability: () => ok({ available: true, provider: "openai", model: "quality-model" }),
+      complete: () => ok({ provider: "openai", model: "quality-model", text: "[]" }),
     };
 
     expect(backend.detect()).toBe(true);
@@ -100,8 +124,15 @@ describe("published plugin interfaces", () => {
     expect((await grounding.run(capture)).ok).toBe(true);
     expect((await knowledge.resolve("kb_empty_state")).ok).toBe(true);
     expect(
-      (await lens.evaluate({ capture, config: DEFAULT_SURFACE_CONFIG, evidence: [], knowledge }))
-        .ok,
+      (
+        await lens.evaluate({
+          capture,
+          config: DEFAULT_SURFACE_CONFIG,
+          evidence: [],
+          knowledge,
+          model,
+        })
+      ).ok,
     ).toBe(true);
   });
 
