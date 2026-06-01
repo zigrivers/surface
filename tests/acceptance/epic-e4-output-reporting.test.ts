@@ -7,13 +7,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   createFileStateStore,
+  createExplainJsonRenderer,
+  createExplainMarkdownRenderer,
   createFindingsJsonRenderer,
   createFindingsMarkdownRenderer,
   FindingsEnvelopeSchema,
   isOk,
+  ok,
   renderAndWriteReportArtifacts,
   type Backlog,
   type Finding,
+  type KnowledgeSource,
 } from "../../packages/core/src/index.js";
 
 const finding = {
@@ -59,6 +63,31 @@ const backlog = {
   runId: "run_acceptance",
   entries: [{ findingId: finding.id, priority: 0.7, rank: 1 }],
 } satisfies Backlog;
+
+const knowledge = {
+  query: () => ok([]),
+  resolve: (id) =>
+    ok({
+      id,
+      title: "WCAG contrast minimum",
+      category: "accessibility",
+      summary: "Text contrast must keep content readable.",
+      deepGuidance: "Use WCAG 2.2 AA contrast thresholds for normal and large text.",
+      citation: {
+        source: "WCAG 2.2 Success Criterion 1.4.3",
+        url: "https://www.w3.org/TR/WCAG22/#contrast-minimum",
+        retrievedAt: "2026-05-31T00:00:00.000Z",
+      },
+      freshness: {
+        volatility: "stable",
+        lastReviewed: "2026-05-31T00:00:00.000Z",
+      },
+      appliesToAppTypes: ["generic"],
+      appliesToLenses: ["accessibility"],
+      steps: ["evaluate"],
+      tags: ["contrast"],
+    }),
+} satisfies KnowledgeSource;
 
 describe("E4 Output & Reporting", () => {
   describe("US-030 human + machine artifacts [gate]", () => {
@@ -187,8 +216,69 @@ describe("E4 Output & Reporting", () => {
     });
   });
   describe("US-031 explain a finding to a non-designer [gate]", () => {
-    it.skip("[US-031][AC1] `explain <id>` → plain-language rationale + cited heuristic + verifiable evidence (integration)", () => {});
-    it.skip("[US-031][AC2] terminal output: no color-only meaning; ANSI-degradable; --json byte-stable (NFR-OWNOUT-1) (unit)", () => {});
+    it("[US-031][AC1] `explain <id>` → plain-language rationale + cited heuristic + verifiable evidence (integration)", async () => {
+      const rendered = await createExplainMarkdownRenderer({
+        findingId: finding.id,
+        knowledge,
+      }).render([finding], backlog);
+
+      expect(isOk(rendered)).toBe(true);
+
+      if (!isOk(rendered)) {
+        return;
+      }
+
+      const text = new TextDecoder().decode(rendered.value.bytes);
+
+      expect(text).toContain("Why it matters:");
+      expect(text).toContain("The primary button text is hard to read");
+      expect(text).toContain("WCAG contrast minimum");
+      expect(text).toContain("tool `axe`; rule `color-contrast`");
+      expect(text).toContain("Location:");
+      expect(text).toContain("selector `.btn-primary`");
+    });
+
+    it("[US-031][AC2] terminal output: no color-only meaning; ANSI-degradable; --json byte-stable (NFR-OWNOUT-1) (unit)", async () => {
+      const markdownFirst = await createExplainMarkdownRenderer({
+        findingId: finding.id,
+        knowledge,
+      }).render([finding], backlog);
+      const markdownSecond = await createExplainMarkdownRenderer({
+        findingId: finding.id,
+        knowledge,
+      }).render([finding], backlog);
+      const jsonFirst = await createExplainJsonRenderer({
+        findingId: finding.id,
+        knowledge,
+      }).render([finding], backlog);
+      const jsonSecond = await createExplainJsonRenderer({
+        findingId: finding.id,
+        knowledge,
+      }).render([finding], backlog);
+
+      expect(isOk(markdownFirst)).toBe(true);
+      expect(isOk(markdownSecond)).toBe(true);
+      expect(isOk(jsonFirst)).toBe(true);
+      expect(isOk(jsonSecond)).toBe(true);
+
+      if (!isOk(markdownFirst) || !isOk(markdownSecond) || !isOk(jsonFirst) || !isOk(jsonSecond)) {
+        return;
+      }
+
+      const markdown = new TextDecoder().decode(markdownFirst.value.bytes);
+      const json = JSON.parse(new TextDecoder().decode(jsonFirst.value.bytes));
+
+      expect(markdownFirst.value.bytes).toEqual(markdownSecond.value.bytes);
+      expect(jsonFirst.value.bytes).toEqual(jsonSecond.value.bytes);
+      expect(markdown).not.toContain(`${String.fromCharCode(27)}[`);
+      expect(markdown).toContain("Severity: P1");
+      expect(markdown).toContain("Method: measured");
+      expect(json).toMatchObject({
+        schemaVersion: "1.0",
+        finding: { id: "f_accessibility_contrast" },
+        evidence: [{ kind: "tool-result" }],
+      });
+    });
   });
   describe("US-032 CI-native reporters: SARIF + PR annotations [committed]", () => {
     it.skip("[US-032][AC1] `--export sarif` → valid SARIF v2.1.0 (unit)", () => {});

@@ -146,6 +146,8 @@ export type BuiltInReportFormat =
   | "backlog"
   | "agent-plan"
   | "validation-report"
+  | "explain-md"
+  | "explain-json"
   | "sarif"
   | "alternatives";
 
