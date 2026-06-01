@@ -11,6 +11,7 @@ import {
   createFindingsMarkdownRenderer,
   FindingsEnvelopeSchema,
   isOk,
+  renderAndWriteReportArtifacts,
   type Backlog,
   type Finding,
 } from "../../packages/core/src/index.js";
@@ -112,6 +113,74 @@ describe("E4 Output & Reporting", () => {
         expect(markdownText).toContain("tool `axe`; rule `color-contrast`");
         expect(parsedJson.findings.map(({ id }) => id)).toEqual(["f_accessibility_contrast"]);
         expect(jsonText).not.toMatch(/overallScore|vanityScore|score/i);
+      } finally {
+        await rm(projectRoot, { force: true, recursive: true });
+      }
+    });
+  });
+  describe("FR-OUT-1 backlog, agent plan, and validation report artifacts [gate]", () => {
+    it("[FR-OUT-1][FR-PIPE-13] audit complete → backlog.md, agent-plan.md, validation-report.md are StateStore-written and byte-stable", async () => {
+      const projectRoot = await mkdtemp(path.join(tmpdir(), "surface-reporting-extra-"));
+
+      try {
+        const stateStore = createFileStateStore({ projectRoot });
+        const written = await renderAndWriteReportArtifacts({
+          stateStore,
+          findings: [finding],
+          backlog,
+        });
+
+        expect(isOk(written)).toBe(true);
+
+        if (!isOk(written)) {
+          return;
+        }
+
+        const backlogArtifact = written.value.find(
+          (entry) => entry.report.format === "backlog",
+        )?.artifact;
+        const agentPlanArtifact = written.value.find(
+          (entry) => entry.report.format === "agent-plan",
+        )?.artifact;
+        const validationArtifact = written.value.find(
+          (entry) => entry.report.format === "validation-report",
+        )?.artifact;
+
+        expect(backlogArtifact).toBeDefined();
+        expect(agentPlanArtifact).toBeDefined();
+        expect(validationArtifact).toBeDefined();
+
+        if (
+          backlogArtifact === undefined ||
+          agentPlanArtifact === undefined ||
+          validationArtifact === undefined
+        ) {
+          return;
+        }
+
+        const backlogText = await readFile(path.join(projectRoot, backlogArtifact.path), "utf8");
+        const agentPlanText = await readFile(
+          path.join(projectRoot, agentPlanArtifact.path),
+          "utf8",
+        );
+        const validationText = await readFile(
+          path.join(projectRoot, validationArtifact.path),
+          "utf8",
+        );
+
+        expect(written.value.map((entry) => entry.report)).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({ format: "backlog", byteStable: true }),
+            expect.objectContaining({ format: "agent-plan", byteStable: true }),
+            expect.objectContaining({ format: "validation-report", byteStable: true }),
+          ]),
+        );
+        expect(backlogArtifact.path).toBe(".surface/reports/backlog.md");
+        expect(agentPlanArtifact.path).toBe(".surface/reports/agent-plan.md");
+        expect(validationArtifact.path).toBe(".surface/reports/validation-report.md");
+        expect(backlogText).toContain("Primary button contrast is below AA");
+        expect(agentPlanText).toContain("agent-executable");
+        expect(validationText).toContain("Status: not run");
       } finally {
         await rm(projectRoot, { force: true, recursive: true });
       }
