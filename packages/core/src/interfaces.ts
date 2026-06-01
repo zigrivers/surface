@@ -81,6 +81,9 @@ export interface CaptureOptions {
   readonly config: SurfaceConfig["capture"];
   readonly artifactRoot?: string;
   readonly authStateRef?: string;
+  readonly computedStyleLimit?: number;
+  readonly navigationTimeoutMs?: number;
+  readonly navigationWaitUntil?: "domcontentloaded" | "load";
   readonly networkPolicy?: CaptureNetworkPolicy;
 }
 
