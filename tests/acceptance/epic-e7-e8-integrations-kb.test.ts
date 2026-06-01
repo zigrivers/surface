@@ -188,12 +188,18 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
         return;
       }
 
-      expect(activeResult.value.map((entry) => entry.id).sort()).toEqual([
+      const expectedActiveIds = [
         "kb_content_plain_language_readability",
         "kb_responsiveness_reflow",
         "kb_states_recovery_actions",
+        "kb_usability_nielsen_heuristics",
         "kb_visual_hierarchy_type_scale",
-      ]);
+      ];
+
+      expect(activeResult.value.map((entry) => entry.id)).toEqual(
+        expect.arrayContaining(expectedActiveIds),
+      );
+      expect(activeResult.value).toHaveLength(expectedActiveIds.length);
       expect(activeResult.value.every((entry) => entry.draft !== true)).toBe(true);
 
       const todoEntries = result.value.filter(

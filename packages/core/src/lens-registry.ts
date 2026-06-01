@@ -1,15 +1,22 @@
 import type { SurfaceConfig } from "./config.js";
 import { getAppTypeOverlay, type AppTypeOverlay } from "./app-type-overlays.js";
-import type { Capture, CaptureArtifactType } from "./interfaces.js";
+import type { Capture, CaptureArtifactType, Lens } from "./interfaces.js";
 import type { ModelAvailability } from "./model-provider.js";
+import { createUsabilityHeuristicLens } from "./usability-heuristic-lens.js";
+
+export type LensFactoryOptions = {
+  readonly maxDomChars?: number;
+  readonly projectRoot?: string;
+};
 
 export type LensRegistration = {
   readonly id: string;
   readonly method: "measured" | "judged";
-  readonly requiredArtifacts?: readonly CaptureArtifactType[];
   readonly requiresModel: boolean;
   readonly requiresLiveDom: boolean;
+  readonly requiredArtifacts?: readonly CaptureArtifactType[];
   readonly presets: readonly SurfaceConfig["evaluation"]["preset"][];
+  readonly create?: (options?: LensFactoryOptions) => Lens;
 };
 
 export type LensSkipReason = "model_unavailable" | "live_dom_unavailable";
@@ -25,6 +32,11 @@ export type LensExecutionPlan = {
   readonly preset: SurfaceConfig["evaluation"]["preset"];
   readonly selected: readonly LensRegistration[];
   readonly skipped: readonly LensExecutionSkip[];
+};
+
+export type InstantiatedLens = {
+  readonly lens: Lens;
+  readonly registration: LensRegistration;
 };
 
 export type SelectLensExecutionPlanInput = {
@@ -64,8 +76,10 @@ export const BUILT_IN_LENS_REGISTRY = [
     id: "usability",
     method: "judged",
     requiresModel: true,
-    requiresLiveDom: false,
+    requiredArtifacts: ["dom-snapshot"],
+    requiresLiveDom: true,
     presets: ["quick", "mvp", "standard", "deep", "agent-ready"],
+    create: (options) => createUsabilityHeuristicLens(options),
   },
   {
     id: "visual-hierarchy",
@@ -156,6 +170,15 @@ export function selectLensExecutionPlan(input: SelectLensExecutionPlanInput): Le
   }
 
   return { overlay, preset, selected, skipped };
+}
+
+export function instantiateLensExecutionPlan(
+  plan: LensExecutionPlan,
+  options: LensFactoryOptions = {},
+): readonly InstantiatedLens[] {
+  return plan.selected.flatMap((registration) =>
+    registration.create === undefined ? [] : [{ lens: registration.create(options), registration }],
+  );
 }
 
 export function synthesizeMeasuredWinsDecision(
