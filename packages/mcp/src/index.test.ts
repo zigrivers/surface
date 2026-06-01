@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  createSurfaceComposition,
+  ok,
+  type FindingDraft,
+  type LensRegistration,
+  type SurfaceComposition,
+} from "@surface/core";
+import type { Capture } from "@surface/core/interfaces";
+
+import {
   SURFACE_MCP_SERVER_NAME,
   SURFACE_MCP_SERVER_VERSION,
   assertMcpToolSchemaCompatibility,
@@ -164,4 +173,182 @@ describe("@surface/mcp bootstrap", () => {
       }),
     ).toEqual({ ok: true, value: true });
   });
+
+  it("runs surface_capture through the shared capture service", async () => {
+    const capture = captureFixture();
+    const server = createSurfaceMcpServer({
+      composition: compositionFixture({ capture }),
+    });
+
+    const result = await server.callTool("surface_capture", {
+      authState: "playwright/.auth/user.json",
+      target: capture.target,
+    });
+
+    expect(result).toEqual({ ok: true, value: capture });
+  });
+
+  it("runs surface_audit and stores findings/backlog for follow-up analytical tools", async () => {
+    const capture = captureFixture();
+    const findingDraft = findingDraftFixture();
+    const server = createSurfaceMcpServer({
+      composition: compositionFixture({
+        capture,
+        lensRegistry: [lensRegistrationFixture(findingDraft)],
+      }),
+    });
+
+    const audit = await server.callTool("surface_audit", {
+      depth: 3,
+      target: capture.target,
+    });
+
+    expect(audit).toMatchObject({
+      ok: true,
+      value: {
+        backlog: { entries: [{ findingId: findingDraft.draftId, rank: 1 }] },
+        findings: [{ id: findingDraft.draftId, title: findingDraft.title }],
+      },
+    });
+
+    if (!audit.ok) {
+      throw new Error(audit.error.message);
+    }
+
+    const runId = audit.value.runId;
+    await expect(server.callTool("surface_backlog", { runId })).resolves.toMatchObject({
+      ok: true,
+      value: { runId, entries: [{ findingId: findingDraft.draftId }] },
+    });
+    await expect(
+      server.callTool("surface_explain", { findingId: findingDraft.draftId }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        evidence: findingDraft.evidence,
+        finding: { id: findingDraft.draftId },
+        rationale: findingDraft.rationale,
+      },
+    });
+    await expect(server.callTool("surface_status", {})).resolves.toMatchObject({
+      ok: true,
+      value: {
+        currentStage: "completed",
+        progress: { completedRuns: 1, findings: 1 },
+        runHistory: [{ runId, status: "completed" }],
+      },
+    });
+  });
+
+  it("returns structured domain errors for missing analytical state", async () => {
+    const server = createSurfaceMcpServer({
+      composition: createSurfaceComposition({
+        captureBackends: [captureBackendFixture(captureFixture())],
+        staticFallback: captureBackendFixture(captureFixture()),
+      }),
+    });
+
+    await expect(server.callTool("surface_backlog", { runId: "missing" })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "run_not_found", kind: "RuntimeError" },
+    });
+    await expect(
+      server.callTool("surface_explain", { findingId: "missing" }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "finding_not_found", kind: "StateError" },
+    });
+  });
 });
+
+function captureFixture(): Capture {
+  return {
+    id: "cap_1",
+    target: { kind: "dom", ref: '<button class="primary">Buy</button>' },
+    backend: "test",
+    artifacts: [
+      {
+        id: "dom_1",
+        type: "dom-snapshot",
+        path: ".surface/captures/cap_1/dom.html",
+        redacted: true,
+      },
+    ],
+    capturedAt: "2026-06-01T00:00:00.000Z",
+    status: "completed",
+  };
+}
+
+function captureBackendFixture(capture: Capture) {
+  return {
+    id: "test",
+    detect: () => true,
+    observe: () => ok(capture),
+  };
+}
+
+function compositionFixture(input: {
+  readonly capture: Capture;
+  readonly lensRegistry?: readonly LensRegistration[];
+}): SurfaceComposition {
+  const base = createSurfaceComposition({
+    captureBackends: [captureBackendFixture(input.capture)],
+    lensRegistry: input.lensRegistry ?? [],
+    staticFallback: captureBackendFixture(input.capture),
+  });
+
+  return {
+    ...base,
+    captureService: {
+      capture: () => Promise.resolve(ok(input.capture)),
+    },
+  };
+}
+
+function findingDraftFixture(): FindingDraft {
+  return {
+    draftId: "f_accessibility_1",
+    lens: "accessibility",
+    issueType: "contrast-insufficient",
+    method: "measured",
+    title: "Button contrast is too low",
+    rationale: "The primary button text does not meet the configured contrast threshold.",
+    citedHeuristics: [],
+    evidence: [
+      {
+        kind: "tool-result",
+        tool: "axe",
+        rule: "color-contrast",
+        measuredValue: "3.1:1",
+        threshold: "4.5:1",
+      },
+    ],
+    rawDimensions: {
+      agentImplementability: 0.9,
+      businessImpact: 0.4,
+      confidence: 1,
+      effort: 0.2,
+      evidenceQuality: 1,
+      severity: 0.8,
+      userImpact: 0.7,
+    },
+    location: { selector: ".primary" },
+  };
+}
+
+function lensRegistrationFixture(findingDraft: FindingDraft): LensRegistration {
+  return {
+    id: "accessibility",
+    method: "measured",
+    requiresModel: false,
+    requiresLiveDom: true,
+    presets: ["standard"],
+    create: () => ({
+      id: "accessibility",
+      method: "measured",
+      requiresModel: false,
+      requiresLiveDom: true,
+      evaluate: () => ok([findingDraft]),
+    }),
+  } as const;
+}
