@@ -1,0 +1,38 @@
+# Generated from packages/core/src/app-type-overlays.ts. Do not edit by hand.
+appType: e-commerce
+label: E-commerce storefront
+releaseTier: committed
+routeHints:
+  - product listing
+  - product detail
+  - cart
+  - checkout
+  - order confirmation
+lensCriteria:
+  conversion:
+    summary: Purchase paths preserve confidence and momentum.
+    checks:
+      - Product value, price, availability, shipping, and return information are visible before checkout.
+      - Checkout steps expose progress, errors, total cost, and recovery paths.
+    riskSignals:
+      - Unexpected fees
+      - Unavailable product discovered late
+      - Checkout errors without field-level recovery
+  trust-and-credibility:
+    summary: The storefront makes risk, fulfillment, and support expectations explicit.
+    checks:
+      - Policies, trust signals, and support options are accessible near purchase decisions.
+      - Payment and account flows clearly identify secure handoffs and required data.
+    riskSignals:
+      - Missing return policy
+      - Ambiguous payment state
+      - Unsupported discount or promo feedback
+  responsiveness:
+    summary: Shopping and checkout remain usable on mobile-width viewports.
+    checks:
+      - Filters, variants, sticky actions, and cart summaries fit configured mobile viewports.
+      - Tap targets and form controls remain reachable without occluding price or error details.
+    riskSignals:
+      - Variant selector clipped on mobile
+      - Checkout footer covers form errors
+      - Filter state hidden after selection

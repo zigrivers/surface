@@ -1,0 +1,38 @@
+# Generated from packages/core/src/app-type-overlays.ts. Do not edit by hand.
+appType: marketing
+label: Marketing landing
+releaseTier: committed
+routeHints:
+  - landing page
+  - pricing
+  - signup
+  - contact
+  - case study
+lensCriteria:
+  message-clarity:
+    summary: The page communicates the offer, audience, and next step quickly.
+    checks:
+      - The first viewport identifies the product or offer and a concrete user benefit.
+      - Supporting proof and feature detail reinforce the primary call to action.
+    riskSignals:
+      - Vague hero claim
+      - CTA appears before value is clear
+      - Proof points lack context
+  conversion:
+    summary: Conversion paths are focused and friction is intentional.
+    checks:
+      - Primary and secondary calls to action are visually distinct and route to expected destinations.
+      - Forms ask only for information needed at that stage and expose validation feedback.
+    riskSignals:
+      - Competing CTA hierarchy
+      - Form asks for unexplained data
+      - Pricing or signup path is hard to find
+  visual-hierarchy:
+    summary: Narrative flow supports scanning from promise to proof to action.
+    checks:
+      - Sections are ordered so claims are supported before deep detail or commitment.
+      - Media, animation, and decoration do not obscure product, offer, or action clarity.
+    riskSignals:
+      - Decorative media hides the product
+      - Proof appears disconnected from claim
+      - Important CTA pushed below unrelated content

@@ -23,6 +23,7 @@
     "pino": "catalog:",
     "proper-lockfile": "catalog:",
     "write-file-atomic": "catalog:",
+    "yaml": "catalog:",
     "zod": "catalog:"
   },
   "scripts": {
