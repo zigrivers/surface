@@ -67,6 +67,9 @@ describe("app-type overlays", () => {
   it("quotes yaml-sensitive criteria strings safely", () => {
     const overlay = AppTypeOverlaySchema.parse({
       appType: "generic",
+      defaultPersona: "tester",
+      defaultTask: "exercise yaml serialization",
+      discoverySignals: ["risk:signals"],
       label: "Generic: web # baseline",
       releaseTier: "gate",
       routeHints: ["- leading dash", "route: checkout"],

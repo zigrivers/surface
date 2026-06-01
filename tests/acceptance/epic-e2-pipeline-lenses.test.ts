@@ -1,18 +1,54 @@
 // Acceptance skeletons — Epic E2: Evaluation Pipeline & Lenses (US-010..015).
+import { mkdtemp, readFile, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   COMMITTED_WEB_APP_TYPE_OVERLAYS,
   JUDGED_COVERAGE_UNAVAILABLE_MESSAGE,
+  createFileStateStore,
   getAppTypeOverlay,
+  isOk,
   listAppTypeOverlays,
   modelSkipForLens,
   resolveModelProviderConfig,
   resolveSurfaceConfig,
+  runDiscovery,
 } from "../../packages/core/src/index.js";
 
 describe("E2 Evaluation Pipeline & Lenses", () => {
   describe("US-010 classify app type [gate]", () => {
+    it("[US-010][AC1] discovery assigns app type and records the chosen overlay in state.json (integration)", async () => {
+      const projectRoot = await mkdtemp(path.join(os.tmpdir(), "surface-discovery-"));
+
+      try {
+        const result = await runDiscovery(
+          {
+            routeCandidates: ["/products", "/cart", "/checkout"],
+            runId: "run_acceptance_discovery",
+            target: { kind: "url", ref: "https://shop.example.com/products/widget" },
+          },
+          { stateStore: createFileStateStore({ projectRoot }) },
+        );
+        const persisted = JSON.parse(
+          await readFile(path.join(projectRoot, ".surface", "state.json"), "utf8"),
+        ) as Record<string, unknown>;
+
+        expect(isOk(result)).toBe(true);
+        expect(persisted).toMatchObject({
+          discovery: {
+            appType: "e-commerce",
+            overlayId: "e-commerce",
+            runId: "run_acceptance_discovery",
+          },
+        });
+      } finally {
+        await rm(projectRoot, { force: true, recursive: true });
+      }
+    });
+
     it("[US-010][AC1] generic overlay is the app-type fallback and committed overlays are selectable (unit)", () => {
       const resolved = resolveSurfaceConfig({
         cli: { evaluation: { appType: "e-commerce" } },

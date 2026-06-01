@@ -26,6 +26,10 @@ class MemoryStateStore implements StateStore {
     return ok(state);
   }
 
+  updateState(updater: (state: ProjectStateSnapshot) => ProjectStateSnapshot) {
+    return this.writeState(updater(this.state));
+  }
+
   writeArtifact() {
     return ok({ path: ".surface/reports/findings.json", sha256: "abc123" });
   }

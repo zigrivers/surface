@@ -1,5 +1,15 @@
 # Generated from packages/core/src/app-type-overlays.ts. Do not edit by hand.
 appType: marketing
+defaultPersona: prospective customer
+defaultTask: understand the offer and choose the next step
+discoverySignals:
+  - landing
+  - pricing
+  - signup
+  - demo
+  - contact
+  - features
+  - case-study
 label: Marketing landing
 releaseTier: committed
 routeHints:
