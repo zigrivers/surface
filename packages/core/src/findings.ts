@@ -41,7 +41,7 @@ export type Rect = z.infer<typeof RectSchema>;
 export const ToolResultEvidenceSchema = z
   .object({
     kind: z.literal("tool-result"),
-    tool: z.enum(["axe", "lighthouse", "eslint-jsx-a11y", "backend"]),
+    tool: z.enum(["axe", "lighthouse", "eslint-jsx-a11y", "backend", "context-ingestor"]),
     rule: nonEmptyStringSchema,
     measuredValue: nonEmptyStringSchema,
     threshold: nonEmptyStringSchema.optional(),

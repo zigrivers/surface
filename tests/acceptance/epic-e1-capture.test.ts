@@ -12,6 +12,7 @@ import {
   createSurfaceError,
   createCaptureService,
   createDefaultCaptureIdFactory,
+  createContextIngestor,
   createPlaywrightCaptureBackend,
   createStaticCaptureBackend,
   err,
@@ -2060,8 +2061,160 @@ describe("E1 Capture & Inputs", () => {
     it.skip("[US-002][AC2] invalid/expired auth-state → auth-injection failure, non-zero exit; never captures login page as target (e2e)", () => {});
   });
   describe("US-003 ingest static & context inputs [gate]", () => {
-    it.skip("[US-003][AC1] --component/tokens/--scaffold-docs used as context; recorded which inputs were present (integration)", () => {});
-    it.skip("[US-003][AC2] built UI contradicting a design-token → emitted as a finding, not ignored (integration)", () => {});
+    it("[US-003][AC1] --component/tokens/--scaffold-docs used as context; recorded which inputs were present (integration)", async () => {
+      const projectRoot = await mkdtemp(join(tmpdir(), "surface-context-ac1-"));
+      temporaryRoots.push(projectRoot);
+      const ingestor = createContextIngestor({
+        clock: () => "2026-05-31T18:00:00.000Z",
+        projectRoot,
+      });
+      const source = {
+        contents: '<button data-component="PrimaryButton">Buy now</button>',
+        path: "src/PrimaryButton.html",
+      };
+
+      const result = await ingestor.ingest({
+        component: "PrimaryButton",
+        designTokens: [{ name: "color.primary", value: "#0055ff" }],
+        scaffoldDocs: [
+          { contents: "Primary actions use the primary color token.", path: "docs/design.md" },
+        ],
+        source,
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!result.ok) {
+        return;
+      }
+
+      expect(result.value.target.kind).toBe("component");
+      expect(result.value.target.ref).toMatch(
+        /\.surface\/context-inputs\/source-[a-f0-9]{12}\.html$/,
+      );
+      expect(result.value.componentMap.entries).toEqual([
+        {
+          component: "PrimaryButton",
+          file: "src/PrimaryButton.html",
+          selectors: ['[data-component="PrimaryButton"]'],
+        },
+      ]);
+      expect(result.value.provenance.map((entry) => entry.kind)).toEqual([
+        "component",
+        "source",
+        "design-tokens",
+        "scaffold-docs",
+      ]);
+      expect(result.value.context.designTokens).toEqual([
+        { name: "color.primary", value: "#0055ff" },
+      ]);
+      expect(result.value.context.scaffoldDocs).toEqual([
+        {
+          contents: "Primary actions use the primary color token.",
+          path: "docs/design.md",
+        },
+      ]);
+
+      const capture = await createStaticCaptureBackend({
+        clock: () => "2026-05-31T18:00:00.000Z",
+        idFactory: () => "cap-static-source-context",
+      }).observe(result.value.target, {
+        artifactRoot: join(projectRoot, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      });
+
+      expect(isOk(capture)).toBe(true);
+
+      if (!capture.ok) {
+        return;
+      }
+
+      expect(capture.value).toMatchObject({
+        artifacts: [
+          {
+            id: "dom",
+            path: join(projectRoot, "captures", "cap-static-source-context", "dom.html"),
+            redacted: false,
+            type: "dom-snapshot",
+          },
+        ],
+        degradation: {
+          skippedArtifacts: ["screenshot", "accessibility-tree", "computed-styles"],
+          skippedReason: "static context input; screenshot and live browser artifacts unavailable",
+        },
+        status: "degraded",
+      });
+    });
+
+    it("[US-003][AC2] built UI contradicting a design-token → emitted as a finding, not ignored (integration)", async () => {
+      const projectRoot = await mkdtemp(join(tmpdir(), "surface-context-ac2-"));
+      temporaryRoots.push(projectRoot);
+      const ingestor = createContextIngestor({
+        clock: () => "2026-05-31T18:00:00.000Z",
+        projectRoot,
+      });
+
+      const result = await ingestor.ingest({
+        designTokens: [{ name: "color.primary", value: "#0055ff" }],
+        dom: {
+          contents:
+            '<main><style>:root { --color-primary: #ff0000; }</style><button class="primary">Buy now</button></main>',
+          path: "capture/dom.html",
+        },
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!result.ok) {
+        return;
+      }
+
+      expect(result.value.target.kind).toBe("dom");
+      expect(result.value.target.ref).toMatch(/\.surface\/context-inputs\/dom-[a-f0-9]{12}\.html$/);
+      expect(result.value.findings).toMatchObject([
+        {
+          evidence: [
+            {
+              kind: "tool-result",
+              measuredValue: "#ff0000",
+              rule: "css-custom-property-contradiction",
+              threshold: "#0055ff",
+              tool: "context-ingestor",
+            },
+            {
+              elementRef: "CSS custom property --color-primary",
+              kind: "dom",
+              selector: ":root",
+            },
+          ],
+          issueType: "design-token-contradiction",
+          lens: "context-ingestor",
+          location: {
+            elementRef: "CSS custom property --color-primary",
+          },
+          method: "measured",
+          title: "Built UI contradicts color.primary design token",
+        },
+      ]);
+
+      const capture = await createStaticCaptureBackend({
+        clock: () => "2026-05-31T18:00:00.000Z",
+        idFactory: () => "cap-static-dom-context",
+      }).observe(result.value.target, {
+        artifactRoot: join(projectRoot, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      });
+
+      expect(isOk(capture)).toBe(true);
+
+      if (!capture.ok) {
+        return;
+      }
+
+      await expect(
+        readFile(join(projectRoot, "captures", "cap-static-dom-context", "dom.html"), "utf8"),
+      ).resolves.toContain("--color-primary: #ff0000");
+    });
   });
   describe("US-004 multi-state & dual-theme capture [should]", () => {
     it.skip("[US-004][AC1] task-flow recipe → each reachable state captured; unreachable step reported (integration)", () => {});
