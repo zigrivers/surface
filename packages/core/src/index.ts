@@ -8,6 +8,7 @@ export * from "./identity.js";
 export * from "./logging.js";
 export * from "./model-provider.js";
 export * from "./pipeline-orchestrator.js";
+export * from "./report-renderers.js";
 export * from "./state-store.js";
 export { createTrackedFinding, transitionTrackedFinding } from "./tracked-findings.js";
 export type {
