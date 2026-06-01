@@ -1,7 +1,7 @@
 // Acceptance skeletons - Epic E1: Capture & Inputs (US-001..005).
 // One pending test per acceptance criterion, tagged [story][AC]. Implement during TDD.
 // Layer hints in comments: unit | integration | e2e (see docs/story-tests-map.md).
-import { access, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { access, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -12,6 +12,7 @@ import {
   createSurfaceError,
   createCaptureService,
   createDefaultCaptureIdFactory,
+  createPlaywrightCaptureBackend,
   err,
   isErr,
   isOk,
@@ -234,6 +235,113 @@ function invalidCompletedBackend(): CaptureBackend {
   };
 }
 
+function fakePlaywrightModule(
+  options: {
+    readonly cdpError?: Error;
+    readonly requestUrl?: string;
+    readonly webSocketUrl?: string;
+    readonly defaultRequestUrl?: string;
+    readonly onAbort?: () => void;
+    readonly onContinue?: () => void;
+    readonly onGoto?: (options: { readonly timeout: number; readonly waitUntil: string }) => void;
+    readonly onNewContext?: (options: { readonly serviceWorkers?: string }) => void;
+    readonly onWebSocketClose?: () => void;
+    readonly onWebSocketConnect?: () => void;
+  } = {},
+): unknown {
+  return {
+    chromium: {
+      launch: async () => ({
+        close: async () => {},
+        newContext: async (contextOptions: { readonly serviceWorkers?: string }) => {
+          options.onNewContext?.(contextOptions);
+
+          return {
+            close: async () => {},
+            newCDPSession: async () => ({
+              detach: async () => {},
+              send: async () => {
+                if (options.cdpError !== undefined) {
+                  throw options.cdpError;
+                }
+
+                return { nodes: [{ role: { value: "WebArea" } }] };
+              },
+            }),
+            newPage: async () => ({
+              close: async () => {},
+              content: async () => "<html><body><button>Buy</button></body></html>",
+              evaluate: async () => [
+                {
+                  color: "rgb(0, 0, 0)",
+                  display: "block",
+                  selector: "body:nth-of-type(1)",
+                },
+              ],
+              goto: async (
+                _url: string,
+                gotoOptions: { readonly timeout: number; readonly waitUntil: string },
+              ) => {
+                options.onGoto?.(gotoOptions);
+
+                return null;
+              },
+              screenshot: async (options: { readonly path: string }) => {
+                await writeFile(options.path, "png");
+              },
+            }),
+            route: async (
+              _pattern: string,
+              handler: (route: {
+                abort(errorCode: "blockedbyclient"): Promise<void>;
+                continue(): Promise<void>;
+                request(): { url(): string };
+              }) => Promise<void>,
+            ) => {
+              await handler({
+                abort: async () => {
+                  options.onAbort?.();
+                },
+                continue: async () => {
+                  options.onContinue?.();
+                },
+                request: () => ({
+                  url: () =>
+                    options.requestUrl ?? options.defaultRequestUrl ?? "https://example.com",
+                }),
+              });
+            },
+            routeWebSocket: async (
+              _pattern: string,
+              handler: (route: {
+                close(): Promise<void>;
+                connectToServer(): Promise<void>;
+                url(): string;
+              }) => Promise<void>,
+            ) => {
+              const webSocketUrl = options.webSocketUrl;
+
+              if (webSocketUrl === undefined) {
+                return;
+              }
+
+              await handler({
+                close: async () => {
+                  options.onWebSocketClose?.();
+                },
+                connectToServer: async () => {
+                  options.onWebSocketConnect?.();
+                },
+                url: () => webSocketUrl,
+              });
+            },
+          };
+        },
+      }),
+    },
+  };
+}
+
 describe("E1 Capture & Inputs", () => {
   describe("US-001 capture via auto-detected backend [gate]", () => {
     it("[US-001][AC1] reachable target → screenshot+DOM+a11y-tree+computed-styles under .surface/captures/<id> (integration)", async () => {
@@ -267,6 +375,313 @@ describe("E1 Capture & Inputs", () => {
           expect(access(artifact.path)).resolves.toBeUndefined(),
         ),
       );
+    });
+
+    it("[US-001][AC1] Playwright backend captures screenshot, DOM, accessibility, and computed styles (integration)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let gotoOptions: { readonly timeout: number; readonly waitUntil: string } | undefined;
+      let contextOptions: { readonly serviceWorkers?: string } | undefined;
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-playwright-fixture",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                onGoto: (options) => {
+                  gotoOptions = options;
+                },
+                onNewContext: (options) => {
+                  contextOptions = options;
+                },
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        config: allowedCaptureConfig,
+        navigationTimeoutMs: 1_234,
+        navigationWaitUntil: "domcontentloaded",
+      });
+
+      expect(isOk(result)).toBe(true);
+      if (!result.ok) {
+        throw new Error("expected capture to succeed");
+      }
+
+      expect(result.value).toMatchObject({
+        backend: "playwright",
+        id: "cap-playwright-fixture",
+        status: "completed",
+      });
+      expect(result.value.artifacts.map((artifact) => artifact.type).sort()).toEqual([
+        "accessibility-tree",
+        "computed-styles",
+        "dom-snapshot",
+        "screenshot",
+      ]);
+      await Promise.all(
+        result.value.artifacts.map((artifact) =>
+          expect(access(artifact.path)).resolves.toBeUndefined(),
+        ),
+      );
+      await expect(
+        readFile(join(artifactRoot, "cap-playwright-fixture", "dom.html"), "utf8"),
+      ).resolves.toContain("<button>Buy</button>");
+      await expect(
+        readFile(join(artifactRoot, "cap-playwright-fixture", "accessibility-tree.json"), "utf8"),
+      ).resolves.toContain("WebArea");
+      expect(gotoOptions).toEqual({ timeout: 1_234, waitUntil: "domcontentloaded" });
+      expect(contextOptions).toMatchObject({ serviceWorkers: "block" });
+    });
+
+    it("[US-001][AC1] Playwright backend allows allowlisted public subresources from localhost captures (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let subresourceContinued = false;
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-playwright-localhost",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                onContinue: () => {
+                  subresourceContinued = true;
+                },
+                requestUrl: "https://example.com/app.css",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(
+        { kind: "localhost", ref: "127.0.0.1:3000" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://127.0.0.1:3000", "https://example.com"],
+          },
+        },
+      );
+
+      expect(isOk(result)).toBe(true);
+      expect(subresourceContinued).toBe(true);
+    });
+
+    it("[US-001][AC1] Playwright backend allows allowlisted websocket subresources (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let webSocketConnected = false;
+      let webSocketClosed = false;
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-playwright-wss",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                onWebSocketClose: () => {
+                  webSocketClosed = true;
+                },
+                onWebSocketConnect: () => {
+                  webSocketConnected = true;
+                },
+                webSocketUrl: "wss://example.com/socket",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(webSocketConnected).toBe(true);
+      expect(webSocketClosed).toBe(false);
+    });
+
+    it("[US-001][AC1] Playwright backend blocks unsupported protocol subresources (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let subresourceAborted = false;
+      let subresourceContinued = false;
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-playwright-blocked-protocol",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                onAbort: () => {
+                  subresourceAborted = true;
+                },
+                onContinue: () => {
+                  subresourceContinued = true;
+                },
+                requestUrl: "file:///etc/passwd",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot, () => "cap-static-blocked-protocol"),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          backend: "playwright",
+          id: "cap-playwright-blocked-protocol",
+          status: "completed",
+        },
+      });
+      expect(subresourceAborted).toBe(true);
+      expect(subresourceContinued).toBe(false);
+    });
+
+    it("[US-001][AC1] Playwright backend blocks default cross-origin subresources with auth state (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let subresourceAborted = false;
+      let subresourceContinued = false;
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-playwright-default-egress",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                onAbort: () => {
+                  subresourceAborted = true;
+                },
+                onContinue: () => {
+                  subresourceContinued = true;
+                },
+                requestUrl: "https://example.org/exfil",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        authStateRef: "state.json",
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      });
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          backend: "playwright",
+          id: "cap-playwright-default-egress",
+          status: "completed",
+        },
+      });
+      expect(subresourceAborted).toBe(true);
+      expect(subresourceContinued).toBe(false);
+    });
+
+    it("[US-001][AC1] Playwright backend blocks default cross-origin websocket subresources (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let webSocketConnected = false;
+      let webSocketClosed = false;
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-playwright-default-wss",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                onWebSocketClose: () => {
+                  webSocketClosed = true;
+                },
+                onWebSocketConnect: () => {
+                  webSocketConnected = true;
+                },
+                webSocketUrl: "wss://example.org/socket",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      });
+
+      expect(isOk(result)).toBe(true);
+      expect(webSocketClosed).toBe(true);
+      expect(webSocketConnected).toBe(false);
+    });
+
+    it("[US-001][AC1] unsupported Playwright target kinds fall back to static capture (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            idFactory: () => "cap-playwright-unsupported",
+            loadPlaywright: async () => fakePlaywrightModule(),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot, () => "cap-static-unsupported"),
+      });
+
+      const result = await service.capture(
+        { kind: "component", ref: "CheckoutButton" },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          backend: "static",
+          id: "cap-static-unsupported",
+          status: "degraded",
+        },
+      });
+    });
+
+    it("[US-001][AC1] Playwright capture failures classify evidence errors and clean partial artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const captureId = "cap-playwright-a11y-error";
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            idFactory: () => captureId,
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                cdpError: new Error("Accessibility.getFullAXTree failed"),
+              }),
+          }),
+        ],
+        staticFallback: throwingBackend("static"),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "playwright",
+            reason: "accessibility-capture-failed",
+          },
+        },
+      });
+      await expect(access(join(artifactRoot, captureId))).rejects.toThrow();
     });
 
     it("[US-001][AC1] live captures pass an enforcement policy to browser backends (unit)", async () => {
