@@ -4,6 +4,7 @@ export { createAccessibilityLens } from "./accessibility-lens.js";
 export * from "./app-type-overlays.js";
 export * from "./capture.js";
 export * from "./config.js";
+export * from "./context-ingestor.js";
 export * from "./content-lens.js";
 export * from "./discovery.js";
 export * from "./errors.js";

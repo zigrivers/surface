@@ -47,10 +47,19 @@ const STATIC_CAPTURE_SKIPPED_ARTIFACTS = [
   "accessibility-tree",
   "computed-styles",
 ] as const satisfies readonly CaptureArtifactType[];
+const STATIC_TEXT_CAPTURE_SKIPPED_ARTIFACTS = [
+  "screenshot",
+  "accessibility-tree",
+  "computed-styles",
+] as const satisfies readonly CaptureArtifactType[];
+const STATIC_FALLBACK_ARTIFACT_TYPES = new Set<CaptureArtifactType>(["screenshot", "dom-snapshot"]);
 const STATIC_SCREENSHOT_EXTENSIONS = new Set([".png"]);
 const STATIC_CAPTURE_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/;
 const STATIC_MAX_SCREENSHOT_BYTES = 100 * 1024 * 1024;
+const STATIC_MAX_TEXT_BYTES = 2 * 1024 * 1024;
 const STATIC_SCREENSHOT_SKIPPED_REASON = "static screenshot input; live DOM artifacts unavailable";
+const STATIC_TEXT_SKIPPED_REASON =
+  "static context input; screenshot and live browser artifacts unavailable";
 const WINDOWS_RESERVED_CAPTURE_IDS = new Set([
   "AUX",
   "CON",
@@ -102,8 +111,8 @@ export interface PlaywrightCaptureBackendOptions {
 
 export interface StaticCaptureBackendOptions {
   /**
-   * Optional trusted source roots for screenshot target refs. When omitted,
-   * screenshot refs are treated as trusted local file inputs and may point to
+   * Optional trusted source roots for static target refs. When omitted,
+   * target refs are treated as trusted local file inputs and may point to
    * any readable image file on disk.
    */
   readonly allowedSourceRoots?: readonly string[];
@@ -330,9 +339,9 @@ export function createPlaywrightCaptureBackend(
 }
 
 /**
- * Creates the degraded static fallback backend. Screenshot target refs are
- * trusted local file inputs unless allowedSourceRoots is configured. Do not
- * pass attacker-controlled refs without constraining source roots.
+ * Creates the degraded static fallback backend. Static target refs are trusted
+ * local file inputs unless allowedSourceRoots is configured. Do not pass
+ * attacker-controlled refs without constraining source roots.
  */
 export function createStaticCaptureBackend(
   options: StaticCaptureBackendOptions = {},
@@ -348,9 +357,10 @@ export function createStaticCaptureBackend(
       const captureId = idFactory(target);
       const artifactRoot = captureOptions.artifactRoot ?? ".surface/captures";
       const captureRoot = join(artifactRoot, captureId);
-      const sourcePath = target.kind === "screenshot" ? resolve(target.ref) : undefined;
+      const sourcePath = isStaticFileTarget(target) ? resolve(target.ref) : undefined;
       const extension = sourcePath === undefined ? undefined : extname(sourcePath).toLowerCase();
       const screenshotPath = join(captureRoot, `screenshot${extension ?? ".png"}`);
+      const domPath = join(captureRoot, "dom.html");
       let captureRootCreated = false;
 
       if (!isStaticCaptureIdSafe(captureId)) {
@@ -367,6 +377,20 @@ export function createStaticCaptureBackend(
               targetKind: target.kind,
             },
           }),
+        );
+      }
+
+      if (target.kind === "dom" || target.kind === "component") {
+        return captureStaticTextTarget(
+          target,
+          captureOptions,
+          sourcePath,
+          captureId,
+          artifactRoot,
+          captureRoot,
+          domPath,
+          allowedSourceRoots,
+          clock,
         );
       }
 
@@ -503,6 +527,118 @@ export function createStaticCaptureBackend(
       }
     },
   };
+}
+
+function isStaticFileTarget(target: Target): boolean {
+  return target.kind === "screenshot" || target.kind === "dom" || target.kind === "component";
+}
+
+async function captureStaticTextTarget(
+  target: Target,
+  captureOptions: CaptureOptions,
+  sourcePath: string,
+  captureId: string,
+  artifactRoot: string,
+  captureRoot: string,
+  domPath: string,
+  allowedSourceRoots: readonly string[] | undefined,
+  clock: CaptureClock,
+): Promise<Result<Capture, SurfaceError>> {
+  let captureRootCreated = false;
+
+  try {
+    const source = await stat(sourcePath).catch(() => undefined);
+
+    if (source === undefined || !source.isFile()) {
+      return err(
+        createSurfaceError(
+          "capture_failed",
+          "Static backend context source must be a readable file.",
+          {
+            details: {
+              backendId: "static",
+              captureId,
+              reason: "context-source-unavailable",
+              targetKind: target.kind,
+            },
+          },
+        ),
+      );
+    }
+
+    if (source.size > STATIC_MAX_TEXT_BYTES) {
+      return err(
+        createSurfaceError("capture_failed", "Static backend context source is too large.", {
+          details: {
+            backendId: "static",
+            captureId,
+            maxBytes: STATIC_MAX_TEXT_BYTES,
+            reason: "context-source-too-large",
+            size: source.size,
+            targetKind: target.kind,
+          },
+        }),
+      );
+    }
+
+    const sourceContainment = await validateStaticSourceRoot(
+      sourcePath,
+      allowedSourceRoots,
+      captureId,
+      target,
+    );
+
+    if (!sourceContainment.ok) {
+      return err(sourceContainment.error);
+    }
+
+    const sourceText = await readFile(sourceContainment.value, "utf8");
+
+    await mkdir(artifactRoot, { recursive: true });
+    try {
+      await mkdir(captureRoot);
+    } catch (cause) {
+      if (isFileSystemError(cause, "EEXIST")) {
+        return err(staticCaptureRootExistsError(captureId, target));
+      }
+
+      throw cause;
+    }
+    captureRootCreated = true;
+
+    await writeFile(domPath, sourceText);
+
+    return ok({
+      artifacts: [
+        {
+          id: "dom",
+          path: domPath,
+          redacted: false,
+          type: "dom-snapshot",
+        },
+      ],
+      backend: "static",
+      capturedAt: clock(),
+      degradation: {
+        skippedArtifacts: [...STATIC_TEXT_CAPTURE_SKIPPED_ARTIFACTS],
+        skippedReason: STATIC_TEXT_SKIPPED_REASON,
+      },
+      id: captureId,
+      status: "degraded",
+      target,
+    });
+  } catch (cause) {
+    if (captureRootCreated) {
+      await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
+    }
+
+    return err(
+      createSurfaceError("capture_failed", "Static backend could not capture the context source.", {
+        cause,
+        details: { backendId: "static", captureId, targetKind: target.kind },
+      }),
+    );
+  }
 }
 
 function isStaticCaptureIdSafe(captureId: string): boolean {
@@ -1727,12 +1863,12 @@ async function validateCapture(
   if (
     backendId === "static" &&
     role === "fallback" &&
-    artifacts.some((artifact) => artifact.type !== "screenshot")
+    artifacts.some((artifact) => !STATIC_FALLBACK_ARTIFACT_TYPES.has(artifact.type))
   ) {
     return invalidCapture(
       candidate,
       backendId,
-      "static fallback captures may only emit screenshots",
+      "static fallback captures may only emit screenshots or DOM snapshots",
     );
   }
 

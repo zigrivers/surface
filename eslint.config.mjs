@@ -10,7 +10,7 @@ import prettier from "eslint-config-prettier";
 const disableTypeChecked = tseslint.configs.disableTypeChecked;
 
 export default tseslint.config(
-  { ignores: ["**/dist/**", "**/node_modules/**", ".surface/**", "docs/**"] },
+  { ignores: ["**/dist/**", "**/node_modules/**", "**/.surface/**", "docs/**"] },
   js.configs.recommended,
   ...tseslint.configs.recommendedTypeChecked,
   {
