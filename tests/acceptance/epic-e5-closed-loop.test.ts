@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   assignFindingIdentities,
   createNoopPipelineHandlers,
+  createGateEvaluator,
   createPipelineOrchestrator,
   createTrackedFinding,
   deriveFindingIdentity,
@@ -11,6 +12,7 @@ import {
   selectPipelineStages,
   transitionTrackedFinding,
   DEFAULT_SURFACE_CONFIG,
+  isOk,
   ok,
   type Finding,
   type ProjectStateSnapshot,
@@ -300,6 +302,33 @@ describe("E5 Closed Loop, State & Baselines", () => {
     });
   });
   describe("US-042 baseline & waivers [committed]", () => {
+    it("[US-042][AC0] default gate fails measured findings at or above threshold and never judged/gatedForHuman (unit)", async () => {
+      const evaluator = createGateEvaluator();
+      const result = await evaluator.evaluate(
+        [
+          findingWith({ id: "f_measured_p1", severityBand: "P1" }),
+          findingWith({ id: "f_measured_p2", severityBand: "P2" }),
+          findingWith({
+            id: "f_judged_p0",
+            method: "judged",
+            severityBand: "P0",
+            evidence: [{ kind: "cited-heuristic", knowledgeEntryId: "kb_nielsen_visibility" }],
+          }),
+          findingWith({ id: "f_gated_p0", gatedForHuman: true, severityBand: "P0" }),
+        ],
+        DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
+      );
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          exitCode: 1,
+          failingFindingIds: ["f_measured_p1"],
+          passed: false,
+        },
+      });
+    });
+
     it.skip("[US-042][AC1] `surface baseline` → snapshot; `gate` thereafter fails only on net-new/expired findings (integration)", () => {});
     it.skip("[US-042][AC2] waiver with expiry → on expiry the finding re-activates; gateDisposition returns to active (unit)", () => {});
   });
