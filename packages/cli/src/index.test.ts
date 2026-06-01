@@ -19,6 +19,13 @@ type ParsedErrorEnvelope = {
 type TestProjectStateSnapshot = {
   readonly version: string;
   readonly currentStage?: string;
+  readonly backlog?: {
+    readonly id: string;
+    readonly runId: string;
+    readonly entries: readonly unknown[];
+  };
+  readonly findings?: readonly TestFinding[];
+  readonly trackedFindings?: readonly TestTrackedFinding[];
 };
 type TestTarget = {
   readonly kind: "url" | "localhost" | "route" | "screenshot" | "component" | "dom";
@@ -31,6 +38,39 @@ type TestCapture = {
   readonly id: string;
   readonly status: "requested";
   readonly target: TestTarget;
+};
+type TestFinding = {
+  readonly id: string;
+  readonly citedHeuristics: readonly string[];
+  readonly evidence: readonly unknown[];
+  readonly gatedForHuman: boolean;
+  readonly method: "measured" | "judged";
+  readonly rationale: string;
+  readonly severityBand: "P0" | "P1" | "P2" | "P3";
+  readonly title: string;
+};
+type TestTrackedFinding = {
+  readonly identityKey: string;
+  readonly currentFindingId?: string | undefined;
+  readonly firstSeenRunId: string;
+  readonly gateDisposition: "active" | "ignored-by-waiver";
+  readonly history: {
+    readonly runId: string;
+    readonly status: "new" | "still-failing" | "resolved" | "regressed" | "identity-broken";
+  }[];
+  readonly identity: {
+    readonly anchorKind: "component" | "selector" | "file" | "element-ref";
+    readonly identityKey: string;
+    readonly issueType: string;
+    readonly lens: string;
+    readonly locationAnchor: string;
+  };
+  readonly lastSeenRunId: string;
+  readonly status: "new" | "still-failing" | "resolved" | "regressed" | "identity-broken";
+  readonly validation: {
+    readonly expectation: string;
+    readonly kind: "measured-rule" | "re-evaluate-lens";
+  };
 };
 
 describe("@surface/cli bootstrap", () => {
@@ -210,6 +250,144 @@ describe("@surface/cli core verbs", () => {
   });
 });
 
+describe("@surface/cli findings and loop verbs", () => {
+  it("explains a stored finding with rationale and evidence", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "explain", "finding_button_contrast"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          findings: [testFinding()],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "explain",
+      data: {
+        citedHeuristics: ["wcag-1.4.3"],
+        finding: { id: "finding_button_contrast" },
+        rationale: "Button text fails AA contrast.",
+      },
+      ok: true,
+    });
+  });
+
+  it("returns the stored backlog entries", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "backlog"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          backlog: {
+            entries: [{ findingId: "finding_button_contrast", rank: 1 }],
+            id: "backlog_run_eval",
+            runId: "run_eval",
+          },
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "backlog",
+      data: {
+        backlog: [{ findingId: "finding_button_contrast", rank: 1 }],
+        backlogId: "backlog_run_eval",
+        runId: "run_eval",
+      },
+      ok: true,
+    });
+  });
+
+  it("validates tracked findings for a run", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "validate", "--run", "run_eval"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          trackedFindings: [testTrackedFinding()],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "validate",
+      data: {
+        checks: [
+          {
+            findingId: "finding_button_contrast",
+            id: "identity_button_contrast",
+            passed: true,
+          },
+        ],
+      },
+      ok: true,
+    });
+  });
+
+  it("exits 1 when gate finds measured findings above policy threshold", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "gate", "--ci"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          findings: [testFinding()],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "gate",
+      data: {
+        gateResult: {
+          exitCode: 1,
+          failingFindingIds: ["finding_button_contrast"],
+          passed: false,
+        },
+      },
+      ok: true,
+    });
+  });
+
+  it("traces a tracked finding by current finding id", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "trace", "finding_button_contrast"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          trackedFindings: [testTrackedFinding()],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "trace",
+      data: {
+        trackedFinding: {
+          currentFindingId: "finding_button_contrast",
+          identityKey: "identity_button_contrast",
+        },
+      },
+      ok: true,
+    });
+  });
+});
+
 class MemoryStateStore {
   state: TestProjectStateSnapshot;
 
@@ -247,6 +425,49 @@ function createTestCaptureBackend(capturedTargets: TestTarget[] = []) {
         status: "requested",
         target,
       } satisfies TestCapture);
+    },
+  };
+}
+
+function testFinding(): TestFinding {
+  return {
+    citedHeuristics: ["wcag-1.4.3"],
+    evidence: [
+      {
+        kind: "tool-result",
+        measuredValue: "3.1:1",
+        threshold: "4.5:1",
+        tool: "axe",
+      },
+    ],
+    gatedForHuman: false,
+    id: "finding_button_contrast",
+    method: "measured",
+    rationale: "Button text fails AA contrast.",
+    severityBand: "P1",
+    title: "Button text fails AA contrast",
+  };
+}
+
+function testTrackedFinding(): TestTrackedFinding {
+  return {
+    currentFindingId: "finding_button_contrast",
+    firstSeenRunId: "run_eval",
+    gateDisposition: "active",
+    history: [{ runId: "run_eval", status: "still-failing" }],
+    identity: {
+      anchorKind: "selector",
+      identityKey: "identity_button_contrast",
+      issueType: "contrast-insufficient",
+      lens: "accessibility",
+      locationAnchor: ".button",
+    },
+    identityKey: "identity_button_contrast",
+    lastSeenRunId: "run_eval",
+    status: "still-failing",
+    validation: {
+      expectation: "axe color-contrast passes",
+      kind: "measured-rule",
     },
   };
 }

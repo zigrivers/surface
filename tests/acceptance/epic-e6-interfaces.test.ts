@@ -99,6 +99,44 @@ describe("E6 Interfaces", () => {
         schemaVersion: "1.0",
       });
     });
+
+    it("[US-050][AC5] findings loop verbs preserve JSON envelopes (e2e)", async () => {
+      const stdout: string[] = [];
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "explain", "finding_acceptance"],
+        composition: createSurfaceComposition({
+          stateStore: {
+            readState: () =>
+              ok({
+                findings: [
+                  {
+                    citedHeuristics: ["wcag-1.4.3"],
+                    evidence: [{ kind: "tool-result", tool: "axe" }],
+                    id: "finding_acceptance",
+                    rationale: "Acceptance finding rationale.",
+                  },
+                ],
+                version: "1.0",
+              }),
+            writeArtifact: () =>
+              Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+            writeState: (state) => ok(state),
+          },
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        command: "explain",
+        data: {
+          finding: { id: "finding_acceptance" },
+          rationale: "Acceptance finding rationale.",
+        },
+        ok: true,
+        schemaVersion: "1.0",
+      });
+    });
   });
   describe("US-051 MCP server for native agent embedding [gate]", () => {
     it("[US-051][AC1] list tools → surface capabilities appear with versioned schemas (integration)", () => {
