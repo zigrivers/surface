@@ -2,13 +2,37 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  COMMITTED_WEB_APP_TYPE_OVERLAYS,
   JUDGED_COVERAGE_UNAVAILABLE_MESSAGE,
+  getAppTypeOverlay,
+  listAppTypeOverlays,
   modelSkipForLens,
   resolveModelProviderConfig,
+  resolveSurfaceConfig,
 } from "../../packages/core/src/index.js";
 
 describe("E2 Evaluation Pipeline & Lenses", () => {
   describe("US-010 classify app type [gate]", () => {
+    it("[US-010][AC1] generic overlay is the app-type fallback and committed overlays are selectable (unit)", () => {
+      const resolved = resolveSurfaceConfig({
+        cli: { evaluation: { appType: "e-commerce" } },
+      });
+
+      expect(getAppTypeOverlay().appType).toBe("generic");
+      expect(getAppTypeOverlay(resolved.evaluation.appType).appType).toBe("e-commerce");
+      expect(listAppTypeOverlays().map((overlay) => overlay.appType)).toEqual([
+        "generic",
+        "saas-dashboard",
+        "e-commerce",
+        "marketing",
+      ]);
+      expect(COMMITTED_WEB_APP_TYPE_OVERLAYS).toEqual([
+        "saas-dashboard",
+        "e-commerce",
+        "marketing",
+      ]);
+    });
+
     it.skip("[US-010][AC1] discovery assigns an app type (or `generic`); chosen overlay recorded in .surface/state.json (integration)", () => {});
   });
   describe("US-011 measured accessibility audit [gate]", () => {
@@ -38,6 +62,18 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
     it.skip("[US-012][AC2] no model → judged lenses skipped + 'judged coverage unavailable' reported; measured still produced (integration)", () => {});
   });
   describe("US-013 lenses flex by overlay & preset [gate]", () => {
+    it("[US-013][AC1] committed overlays carry lens acceptance criteria for preset composition (unit)", () => {
+      const marketingOverlay = getAppTypeOverlay("marketing");
+      const ecommerceOverlay = getAppTypeOverlay("e-commerce");
+
+      expect(marketingOverlay.lensCriteria["message-clarity"]).toMatchObject({
+        summary: expect.stringContaining("offer"),
+      });
+      expect(ecommerceOverlay.lensCriteria.conversion?.checks).toEqual(
+        expect.arrayContaining([expect.stringContaining("Checkout steps")]),
+      );
+    });
+
     it.skip("[US-013][AC1] preset accessibility-first @depth4 → lens set + thresholds match preset/overlay; active config recorded (integration)", () => {});
   });
   describe("US-014 cognitive walkthrough & conversion audit [should]", () => {

@@ -1,5 +1,6 @@
 export const CORE_PACKAGE_NAME = "@surface/core";
 
+export * from "./app-type-overlays.js";
 export * from "./config.js";
 export * from "./errors.js";
 export * from "./findings.js";

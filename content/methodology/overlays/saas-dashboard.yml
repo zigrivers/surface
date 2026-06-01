@@ -1,0 +1,38 @@
+# Generated from packages/core/src/app-type-overlays.ts. Do not edit by hand.
+appType: saas-dashboard
+label: SaaS dashboard
+releaseTier: committed
+routeHints:
+  - dashboard
+  - settings
+  - detail view
+  - empty state
+  - error state
+lensCriteria:
+  task-completion:
+    summary: Repeated operational workflows are efficient and stateful.
+    checks:
+      - High-frequency actions are reachable without navigating away from working context.
+      - Saved views, filters, and statuses make return visits predictable.
+    riskSignals:
+      - Hidden bulk actions
+      - Unclear saved state
+      - Filters with no visible effect
+  data-density:
+    summary: Dense information remains comparable and legible.
+    checks:
+      - Tables, charts, and summaries align labels, values, units, and time ranges.
+      - Loading, empty, and stale data states are distinguishable.
+    riskSignals:
+      - Unlabeled metrics
+      - Ambiguous date ranges
+      - Inconsistent number formats
+  trust-and-control:
+    summary: Users can understand impact before committing operational changes.
+    checks:
+      - Destructive or broad-scope actions show scope, consequences, and recovery options.
+      - Permission, sync, and integration errors identify the affected account or resource.
+    riskSignals:
+      - Silent permission failure
+      - No undo path
+      - Destructive action lacks scope preview

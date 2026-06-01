@@ -23,4 +23,5 @@ catalog:
   typescript-eslint: ^8.48.0
   vitest: ^4.0.14
   write-file-atomic: ^6.0.0
+  yaml: ^2.4.2
   zod: ^4.1.13
