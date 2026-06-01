@@ -18,6 +18,7 @@
     "dist"
   ],
   "dependencies": {
+    "@noble/hashes": "catalog:",
     "pino": "catalog:",
     "proper-lockfile": "catalog:",
     "write-file-atomic": "catalog:",

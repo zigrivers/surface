@@ -9,6 +9,9 @@ catalogs:
     '@eslint/js':
       specifier: ^9.39.4
       version: 9.39.4
+    '@noble/hashes':
+      specifier: ^2.2.0
+      version: 2.2.0
     '@types/node':
       specifier: ^22.13.0
       version: 22.19.19
@@ -89,6 +92,9 @@ importers:
 
   packages/core:
     dependencies:
+      '@noble/hashes':
+        specifier: 'catalog:'
+        version: 2.2.0
       pino:
         specifier: 'catalog:'
         version: 10.3.1
@@ -367,6 +373,10 @@ packages:
     peerDependencies:
       '@emnapi/core': ^1.7.1
       '@emnapi/runtime': ^1.7.1
+
+  '@noble/hashes@2.2.0':
+    resolution: {integrity: sha512-IYqDGiTXab6FniAgnSdZwgWbomxpy9FtYvLKs7wCUs2a8RkITG+DFGO1DM9cr+E3/RgADRpFjrKVaJ1z6sjtEg==}
+    engines: {node: '>= 20.19.0'}
 
   '@oxc-project/types@0.132.0':
     resolution: {integrity: sha512-FESMOxil5Se014ui/Eq8fT5uHJo6nIRwH0PfJrZJXs6Gek3ZVFOrpUv3YIZT20m+extU98Hg1Ym72U58rlsxUQ==}
@@ -2171,6 +2181,8 @@ snapshots:
       '@emnapi/runtime': 1.10.0
       '@tybys/wasm-util': 0.10.2
     optional: true
+
+  '@noble/hashes@2.2.0': {}
 
   '@oxc-project/types@0.132.0': {}
 
