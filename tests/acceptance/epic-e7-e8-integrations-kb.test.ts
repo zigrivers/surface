@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   createFileSystemKnowledgeSource,
   createGitHubIssueExporter,
+  loadKnowledgeEntries,
   isOk,
   type Backlog,
 } from "../../packages/core/src/index.js";
@@ -169,6 +170,54 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
           lastReviewed: "2026-05-31T00:00:00.000Z",
         },
       });
+    });
+
+    it("[US-070][AC2] shipped KB scaffold has one valid cited TODO entry per gate category (structure)", async () => {
+      const result = await loadKnowledgeEntries({
+        rootDir: path.join(process.cwd(), "content", "knowledge"),
+        includeDrafts: true,
+      });
+      const activeResult = await loadKnowledgeEntries({
+        rootDir: path.join(process.cwd(), "content", "knowledge"),
+      });
+
+      expect(isOk(result)).toBe(true);
+      expect(isOk(activeResult)).toBe(true);
+
+      if (!isOk(result) || !isOk(activeResult)) {
+        return;
+      }
+
+      expect(activeResult.value).toHaveLength(0);
+
+      const todoEntries = result.value.filter(
+        (entry) => entry.tags?.includes("todo") === true && entry.sourcePath?.endsWith("todo.md"),
+      );
+      const requiredCategories = [
+        "accessibility",
+        "agent-implementation",
+        "conversion",
+        "core-heuristics",
+        "design-systems",
+        "forms",
+        "navigation",
+        "platform-web",
+        "states",
+        "visual-content",
+      ];
+      const categories = new Set(todoEntries.map((entry) => entry.category));
+
+      expect(todoEntries).toHaveLength(requiredCategories.length);
+      expect(categories).toEqual(new Set(requiredCategories));
+
+      for (const entry of todoEntries) {
+        expect(entry.citation?.source).toMatch(/^TODO:/);
+        expect(entry.freshness?.volatility).toBe("evolving");
+        expect(entry.summary).toContain("TODO:");
+        expect(entry.deepGuidance).toContain("TODO:");
+        expect(entry.appliesToLenses?.length).toBeGreaterThan(0);
+        expect(entry.draft).toBe(true);
+      }
     });
   });
   describe("US-071 multi-model reconciliation [should]", () => {

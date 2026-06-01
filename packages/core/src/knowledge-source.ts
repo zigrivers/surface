@@ -87,6 +87,7 @@ const rawKnowledgeFrontmatterSchema = z
     lenses: stringListSchema.optional(),
     steps: optionalStringListSchema,
     tags: optionalStringListSchema,
+    draft: z.boolean().optional().default(false),
     citation: CitationSchema,
     freshness: FreshnessSchema,
   })
@@ -96,6 +97,7 @@ type RawKnowledgeFrontmatter = z.infer<typeof rawKnowledgeFrontmatterSchema>;
 
 export type FileSystemKnowledgeSourceOptions = {
   readonly rootDir: string;
+  readonly includeDrafts?: boolean;
 };
 
 type LoadedCatalog = {
@@ -112,6 +114,7 @@ type LoadedKnowledgeEntry = KnowledgeEntry & {
   readonly appliesToLenses: readonly string[];
   readonly steps: readonly string[];
   readonly tags: readonly string[];
+  readonly draft: boolean;
 };
 
 type SectionExtractionResult =
@@ -127,7 +130,7 @@ export function createFileSystemKnowledgeSource(
   let catalogPromise: Promise<Result<LoadedCatalog, SurfaceError>> | undefined;
 
   const catalog = (): Promise<Result<LoadedCatalog, SurfaceError>> => {
-    catalogPromise ??= loadKnowledgeCatalog(options.rootDir);
+    catalogPromise ??= loadKnowledgeCatalog(options);
     return catalogPromise.then((loaded) => {
       if (!isOk(loaded)) {
         catalogPromise = undefined;
@@ -172,7 +175,7 @@ export function createFileSystemKnowledgeSource(
 export async function loadKnowledgeEntries(
   options: FileSystemKnowledgeSourceOptions,
 ): Promise<Result<readonly KnowledgeEntry[], SurfaceError>> {
-  const catalog = await loadKnowledgeCatalog(options.rootDir);
+  const catalog = await loadKnowledgeCatalog(options);
 
   if (!isOk(catalog)) {
     return err(catalog.error);
@@ -192,7 +195,10 @@ export function queryKnowledgeEntries(
     .map((scored) => scored.entry);
 }
 
-async function loadKnowledgeCatalog(rootDir: string): Promise<Result<LoadedCatalog, SurfaceError>> {
+async function loadKnowledgeCatalog(
+  options: FileSystemKnowledgeSourceOptions,
+): Promise<Result<LoadedCatalog, SurfaceError>> {
+  const { rootDir, includeDrafts = false } = options;
   const files = await listMarkdownFiles(rootDir);
 
   if (!isOk(files)) {
@@ -226,9 +232,17 @@ async function loadKnowledgeCatalog(rootDir: string): Promise<Result<LoadedCatal
     );
   }
 
-  const entries: LoadedKnowledgeEntry[] = loadedEntries.flatMap(({ result }) =>
-    isOk(result) ? [result.value] : [],
-  );
+  const entries: LoadedKnowledgeEntry[] = loadedEntries.flatMap(({ result }) => {
+    if (!isOk(result)) {
+      return [];
+    }
+
+    if (result.value.draft && !includeDrafts) {
+      return [];
+    }
+
+    return [result.value];
+  });
   const byId = new Map<string, LoadedKnowledgeEntry>();
 
   for (const entry of entries) {
@@ -357,6 +371,7 @@ async function loadKnowledgeEntry(
     appliesToLenses: normalizedFrontmatter.appliesToLenses,
     steps: normalizedFrontmatter.steps,
     tags: normalizedFrontmatter.tags,
+    draft: normalizedFrontmatter.draft,
     sourcePath,
   });
 }
@@ -371,6 +386,7 @@ function normalizeFrontmatter(frontmatter: RawKnowledgeFrontmatter): {
   readonly appliesToLenses: readonly string[];
   readonly steps: readonly string[];
   readonly tags: readonly string[];
+  readonly draft: boolean;
 } {
   return {
     id: frontmatter.id,
@@ -382,6 +398,7 @@ function normalizeFrontmatter(frontmatter: RawKnowledgeFrontmatter): {
     appliesToLenses: frontmatter.appliesToLenses ?? frontmatter.lensIds ?? frontmatter.lenses ?? [],
     steps: frontmatter.steps,
     tags: frontmatter.tags,
+    draft: frontmatter.draft,
   };
 }
 

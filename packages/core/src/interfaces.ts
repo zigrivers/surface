@@ -249,6 +249,7 @@ export interface KnowledgeEntry {
   readonly appliesToLenses?: readonly string[];
   readonly steps?: readonly string[];
   readonly tags?: readonly string[];
+  readonly draft?: boolean;
   readonly sourcePath?: string;
 }
 
