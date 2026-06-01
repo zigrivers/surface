@@ -18,6 +18,7 @@ export * from "./pipeline-orchestrator.js";
 export * from "./report-renderers.js";
 export * from "./responsiveness-states-lens.js";
 export * from "./state-store.js";
+export * from "./usability-heuristic-lens.js";
 export * from "./visual-hierarchy-lens.js";
 export { createTrackedFinding, transitionTrackedFinding } from "./tracked-findings.js";
 export type {

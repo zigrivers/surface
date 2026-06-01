@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import { resolveSurfaceConfig } from "./config.js";
 import {
   BUILT_IN_LENS_REGISTRY,
+  instantiateLensExecutionPlan,
   selectLensExecutionPlan,
   synthesizeMeasuredWinsDecision,
   type LensRegistration,
@@ -201,6 +202,119 @@ describe("lens registry", () => {
         message: "Lens requires computed styles, but this capture did not produce them.",
       },
     ]);
+  });
+
+  it("skips usability when model is available but the DOM snapshot is missing", () => {
+    const config = resolveSurfaceConfig({
+      cli: {
+        evaluation: {
+          appType: "generic",
+          depth: 3,
+          preset: "standard",
+        },
+      },
+    });
+    const screenshotOnlyCapture = {
+      ...completedCapture,
+      artifacts: [
+        {
+          id: "screenshot",
+          type: "screenshot",
+          path: ".surface/captures/screenshot.png",
+          redacted: false,
+        },
+      ],
+    } satisfies Capture;
+
+    const plan = selectLensExecutionPlan({
+      capture: screenshotOnlyCapture,
+      config,
+      modelAvailability: {
+        available: true,
+        model: "reviewer",
+        provider: "local",
+      },
+    });
+
+    expect(plan.skipped).toContainEqual({
+      lensId: "usability",
+      reason: "live_dom_unavailable",
+      message: "Lens requires a live DOM snapshot, but this capture did not produce one.",
+    });
+  });
+
+  it("skips usability when model is available but capture artifacts are empty", () => {
+    const config = resolveSurfaceConfig({
+      cli: {
+        evaluation: {
+          appType: "generic",
+          depth: 3,
+          preset: "standard",
+        },
+      },
+    });
+    const emptyCapture = {
+      ...completedCapture,
+      artifacts: [],
+    } satisfies Capture;
+
+    const plan = selectLensExecutionPlan({
+      capture: emptyCapture,
+      config,
+      modelAvailability: {
+        available: true,
+        model: "reviewer",
+        provider: "local",
+      },
+    });
+
+    expect(plan.skipped).toContainEqual({
+      lensId: "usability",
+      reason: "live_dom_unavailable",
+      message: "Lens requires a live DOM snapshot, but this capture did not produce one.",
+    });
+  });
+
+  it("selects usability when model and DOM snapshot are available", () => {
+    const config = resolveSurfaceConfig({
+      cli: {
+        evaluation: {
+          appType: "generic",
+          depth: 3,
+          preset: "standard",
+        },
+      },
+    });
+
+    const plan = selectLensExecutionPlan({
+      capture: completedCapture,
+      config,
+      modelAvailability: {
+        available: true,
+        model: "reviewer",
+        provider: "local",
+      },
+    });
+    const usability = plan.selected.find((lens) => lens.id === "usability");
+
+    expect(plan.skipped.some((lens) => lens.lensId === "usability")).toBe(false);
+    expect(usability).toMatchObject({
+      requiredArtifacts: ["dom-snapshot"],
+      requiresLiveDom: true,
+      requiresModel: true,
+    });
+    expect(usability?.create?.({ maxDomChars: 10, projectRoot: "/tmp/project" })).toMatchObject({
+      id: "usability",
+      requiresLiveDom: true,
+      requiresModel: true,
+    });
+    const instantiatedUsability = instantiateLensExecutionPlan(plan, {
+      maxDomChars: 10,
+      projectRoot: "/tmp/project",
+    }).find((entry) => entry.registration.id === "usability");
+
+    expect(instantiatedUsability?.lens.id).toBe("usability");
+    expect(instantiatedUsability?.registration.id).toBe("usability");
   });
 
   it("keeps measured-wins synthesis decisions auditable", () => {
