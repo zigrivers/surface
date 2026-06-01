@@ -1,8 +1,18 @@
 import { z } from "zod";
 
+import { FindingsPolicySchema } from "./findings-policy.js";
 import { SeverityBandSchema } from "./findings.js";
+import { NormalizedScoreSchema } from "./scores.js";
+export {
+  ConfidenceCutoffsSchema,
+  DEFAULT_FINDINGS_POLICY,
+  FindingsPolicySchema,
+  SeverityCutoffsSchema,
+  type ConfidenceCutoffs,
+  type FindingsPolicy,
+  type SeverityCutoffs,
+} from "./findings-policy.js";
 
-const normalizedScoreSchema = z.number().min(0).max(1);
 const nonEmptyStringSchema = z
   .string()
   .min(1)
@@ -83,52 +93,19 @@ export const EvaluationConfigSchema = z
   .strict();
 export type EvaluationConfig = z.infer<typeof EvaluationConfigSchema>;
 
-export const ConfidenceCutoffsSchema = z
-  .object({
-    assert: normalizedScoreSchema,
-    question: normalizedScoreSchema,
-  })
-  .strict()
-  .refine((cutoffs) => cutoffs.assert >= cutoffs.question, {
-    message: "assert cutoff must be greater than or equal to question cutoff",
-  });
-
-export const SeverityCutoffsSchema = z
-  .object({
-    P0: normalizedScoreSchema,
-    P1: normalizedScoreSchema,
-    P2: normalizedScoreSchema,
-    P3: normalizedScoreSchema,
-  })
-  .strict()
-  .refine(
-    (cutoffs) => cutoffs.P0 >= cutoffs.P1 && cutoffs.P1 >= cutoffs.P2 && cutoffs.P2 >= cutoffs.P3,
-    {
-      message: "severity cutoffs must descend from P0 through P3",
-    },
-  );
-
-export const FindingsPolicySchema = z
-  .object({
-    confidenceCutoffs: ConfidenceCutoffsSchema,
-    severityCutoffs: SeverityCutoffsSchema,
-  })
-  .strict();
-export type FindingsPolicy = z.infer<typeof FindingsPolicySchema>;
-
 export const ConfidenceCutoffsLayerSchema = z
   .object({
-    assert: normalizedScoreSchema.optional(),
-    question: normalizedScoreSchema.optional(),
+    assert: NormalizedScoreSchema.optional(),
+    question: NormalizedScoreSchema.optional(),
   })
   .strict();
 
 export const SeverityCutoffsLayerSchema = z
   .object({
-    P0: normalizedScoreSchema.optional(),
-    P1: normalizedScoreSchema.optional(),
-    P2: normalizedScoreSchema.optional(),
-    P3: normalizedScoreSchema.optional(),
+    P0: NormalizedScoreSchema.optional(),
+    P1: NormalizedScoreSchema.optional(),
+    P2: NormalizedScoreSchema.optional(),
+    P3: NormalizedScoreSchema.optional(),
   })
   .strict();
 
@@ -138,7 +115,7 @@ export type ExportTarget = z.infer<typeof ExportTargetSchema>;
 export const GatePolicySchema = z
   .object({
     failOnNewMeasuredAtOrAbove: SeverityBandSchema,
-    thresholds: z.record(nonEmptyStringSchema, normalizedScoreSchema),
+    thresholds: z.record(nonEmptyStringSchema, NormalizedScoreSchema),
     neverFailOn: z.array(z.enum(["judged", "gatedForHuman"])).min(2),
   })
   .strict()
@@ -210,7 +187,7 @@ export const FindingsPolicyLayerSchema = z
 export const GatePolicyLayerSchema = z
   .object({
     failOnNewMeasuredAtOrAbove: SeverityBandSchema.optional(),
-    thresholds: z.record(nonEmptyStringSchema, normalizedScoreSchema).optional(),
+    thresholds: z.record(nonEmptyStringSchema, NormalizedScoreSchema).optional(),
   })
   .strict();
 
