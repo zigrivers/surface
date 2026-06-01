@@ -259,6 +259,90 @@ describe("@surface/mcp bootstrap", () => {
       error: { code: "finding_not_found", kind: "StateError" },
     });
   });
+
+  it("runs closed-loop MCP tools over stored audit runs", async () => {
+    const capture = captureFixture();
+    let findingDrafts = [findingDraftFixture()];
+    const server = createSurfaceMcpServer({
+      composition: compositionFixture({
+        capture,
+        lensRegistry: [lensRegistrationFixture(() => findingDrafts)],
+      }),
+    });
+
+    const before = await server.callTool("surface_audit", { target: capture.target });
+
+    if (!before.ok) {
+      throw new Error(before.error.message);
+    }
+
+    await expect(
+      server.callTool("surface_gate", { runId: before.value.runId }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { exitCode: 1, failingFindingIds: [findingDrafts[0]?.draftId] },
+    });
+    await expect(
+      server.callTool("surface_validate", { runId: before.value.runId }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { checks: [{ findingId: findingDrafts[0]?.draftId, passed: true }] },
+    });
+    await expect(
+      server.callTool("surface_baseline", { reason: "accepted current debt" }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { count: 1 },
+    });
+    await expect(
+      server.callTool("surface_gate", { runId: before.value.runId }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { exitCode: 0, failingFindingIds: [] },
+    });
+    await expect(
+      server.callTool("surface_verdict", {
+        decision: "accept",
+        findingId: findingDrafts[0]?.draftId,
+        rationale: "matches measured evidence",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { decision: "accept", findingId: findingDrafts[0]?.draftId },
+    });
+    await expect(
+      server.callTool("surface_trace", { findingId: findingDrafts[0]?.draftId }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: { trackedFinding: { currentFindingId: findingDrafts[0]?.draftId, status: "new" } },
+    });
+
+    findingDrafts = [
+      findingDraftFixture({
+        draftId: "f_accessibility_2",
+        selector: ".secondary",
+        title: "Secondary control contrast is too low",
+      }),
+    ];
+    const after = await server.callTool("surface_audit", { target: capture.target });
+
+    if (!after.ok) {
+      throw new Error(after.error.message);
+    }
+
+    await expect(
+      server.callTool("surface_diff", {
+        after: { runId: after.value.runId },
+        before: { runId: before.value.runId },
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        introduced: [{ findingId: "f_accessibility_2" }],
+        resolved: [{ findingId: "f_accessibility_1" }],
+      },
+    });
+  });
 });
 
 function captureFixture(): Capture {
@@ -305,14 +389,16 @@ function compositionFixture(input: {
   };
 }
 
-function findingDraftFixture(): FindingDraft {
+function findingDraftFixture(
+  options: { readonly draftId?: string; readonly selector?: string; readonly title?: string } = {},
+): FindingDraft {
   return {
-    draftId: "f_accessibility_1",
+    draftId: options.draftId ?? "f_accessibility_1",
     lens: "accessibility",
     issueType: "contrast-insufficient",
     method: "measured",
-    title: "Button contrast is too low",
-    rationale: "The primary button text does not meet the configured contrast threshold.",
+    title: options.title ?? "Control contrast is too low",
+    rationale: "The primary control foreground does not meet the configured contrast threshold.",
     citedHeuristics: [],
     evidence: [
       {
@@ -332,11 +418,13 @@ function findingDraftFixture(): FindingDraft {
       severity: 0.8,
       userImpact: 0.7,
     },
-    location: { selector: ".primary" },
+    location: { selector: options.selector ?? ".primary" },
   };
 }
 
-function lensRegistrationFixture(findingDraft: FindingDraft): LensRegistration {
+function lensRegistrationFixture(
+  findingDrafts: FindingDraft | (() => FindingDraft[]),
+): LensRegistration {
   return {
     id: "accessibility",
     method: "measured",
@@ -348,7 +436,7 @@ function lensRegistrationFixture(findingDraft: FindingDraft): LensRegistration {
       method: "measured",
       requiresModel: false,
       requiresLiveDom: true,
-      evaluate: () => ok([findingDraft]),
+      evaluate: () => ok(typeof findingDrafts === "function" ? findingDrafts() : [findingDrafts]),
     }),
   } as const;
 }
