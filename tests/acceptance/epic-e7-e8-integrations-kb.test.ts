@@ -190,6 +190,8 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
 
       expect(activeResult.value.map((entry) => entry.id).sort()).toEqual([
         "kb_content_plain_language_readability",
+        "kb_responsiveness_reflow",
+        "kb_states_recovery_actions",
         "kb_visual_hierarchy_type_scale",
       ]);
       expect(activeResult.value.every((entry) => entry.draft !== true)).toBe(true);

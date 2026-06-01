@@ -516,6 +516,7 @@ interface BrowserEvaluateGlobal {
 
 interface BrowserElement {
   readonly children?: ArrayLike<BrowserElement>;
+  readonly clientWidth: number;
   readonly id: string;
   readonly nodeType: number;
   readonly offsetHeight: number;
@@ -523,6 +524,7 @@ interface BrowserElement {
   readonly parentElement: BrowserElement | null;
   readonly parentNode?: BrowserQueryableRoot | null;
   readonly previousElementSibling: BrowserElement | null;
+  readonly scrollWidth: number;
   readonly shadowRoot?: BrowserQueryableRoot | null;
   readonly tagName: string;
   checkVisibility?(options: {
@@ -539,7 +541,10 @@ interface BrowserStyle {
   readonly display: string;
   readonly fontFamily: string;
   readonly fontSize: string;
+  readonly minWidth: string;
+  readonly overflowX: string;
   readonly visibility: string;
+  readonly width: string;
 }
 
 interface BrowserQueryableRoot {
@@ -690,15 +695,20 @@ async function computedStyleSnapshot(page: PlaywrightPage, limit: number): Promi
     return visible.map(({ element, styles }, index) => {
       return {
         backgroundColor: styles.backgroundColor,
+        clientWidth: element.clientWidth,
         color: styles.color,
         display: styles.display,
         fontFamily: styles.fontFamily,
         fontSize: styles.fontSize,
         id: element.id,
         index,
+        minWidth: styles.minWidth,
+        overflowX: styles.overflowX,
+        scrollWidth: element.scrollWidth,
         selector: selectorFor(element),
         tagName: element.tagName.toLowerCase(),
         visibility: styles.visibility,
+        width: styles.width,
       };
     });
   }, limit);
