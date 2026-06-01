@@ -2,7 +2,11 @@ import { describe, expect, it } from "vitest";
 
 import { FindingsEnvelopeSchema, type Backlog, type Finding } from "./findings.js";
 import { isErr, isOk } from "./errors.js";
-import { createFindingsJsonRenderer, createFindingsMarkdownRenderer } from "./report-renderers.js";
+import {
+  createFindingsJsonRenderer,
+  createFindingsMarkdownRenderer,
+  defaultPlanningReportArtifactSpecs,
+} from "./report-renderers.js";
 
 const textDecoder = new TextDecoder();
 
@@ -55,6 +59,16 @@ const findingB = {
   evidence: [{ kind: "cited-heuristic", knowledgeEntryId: "kb_nielsen_match" }],
   severityBand: "P2",
   location: { file: "src/IconButton.tsx", selector: ".icon`button" },
+} satisfies Finding;
+
+const findingC = {
+  ...findingA,
+  id: "f_c",
+  issueType: "secondary-spacing",
+  title: "Secondary spacing issue is informational",
+  rationale: "This finding is not part of the prioritized backlog.",
+  severityBand: "P3",
+  location: { file: "src/Card.tsx", selector: ".card" },
 } satisfies Finding;
 
 const backlog = {
@@ -126,6 +140,49 @@ describe("report renderers", () => {
     expect(markdown).toContain("heuristic `kb_nielsen_match`");
     expect(markdown).toContain("tool `axe`; rule `color-contrast`");
     expect(markdown).not.toMatch(/overall score|vanity score/i);
+  });
+
+  it("renders byte-stable backlog, agent-plan, and validation-report artifacts", async () => {
+    const renderers = defaultPlanningReportArtifactSpecs().map((spec) => spec.renderer);
+
+    for (const renderer of renderers) {
+      const first = await renderer.render([findingA, findingB], backlog);
+      const second = await renderer.render([findingA, findingB], backlog);
+
+      expect(isOk(first)).toBe(true);
+      expect(isOk(second)).toBe(true);
+
+      if (!isOk(first) || !isOk(second)) {
+        return;
+      }
+
+      const text = textDecoder.decode(first.value.bytes);
+      expect(first.value).toMatchObject({ format: renderer.format, byteStable: true });
+      expect(first.value.bytes).toEqual(second.value.bytes);
+      expect(text).toContain("Run: `run_123`");
+      expect(text).toContain("Primary button contrast is below AA");
+      expect(text).toContain("Icon\\-only action lacks a clear label");
+      expect(text).not.toMatch(/overall score|vanity score/i);
+    }
+  });
+
+  it("limits planning artifacts to findings referenced by the backlog", async () => {
+    const renderers = defaultPlanningReportArtifactSpecs().map((spec) => spec.renderer);
+
+    for (const renderer of renderers) {
+      const result = await renderer.render([findingA, findingB, findingC], backlog);
+
+      expect(isOk(result)).toBe(true);
+
+      if (!isOk(result)) {
+        return;
+      }
+
+      const text = textDecoder.decode(result.value.bytes);
+      expect(text).toContain("Primary button contrast is below AA");
+      expect(text).toContain("Icon\\-only action lacks a clear label");
+      expect(text).not.toContain("Secondary spacing issue is informational");
+    }
   });
 
   it("returns an error when backlog entries reference missing findings", async () => {
