@@ -160,6 +160,7 @@ interface PlaywrightPage {
     options: { readonly timeout: number; readonly waitUntil: "domcontentloaded" | "load" },
   ): Promise<unknown>;
   screenshot(options: { readonly fullPage: true; readonly path: string }): Promise<unknown>;
+  url(): string;
 }
 
 interface PlaywrightCDPSession {
@@ -254,6 +255,12 @@ export function createPlaywrightCaptureBackend(
         );
       }
 
+      const authStateValidation = await validateAuthStateRef(captureOptions.authStateRef);
+
+      if (!authStateValidation.ok) {
+        return err(authStateValidation.error);
+      }
+
       const captureId = idFactory(target);
       const artifactRoot = captureOptions.artifactRoot ?? ".surface/captures";
       const captureRoot = join(artifactRoot, captureId);
@@ -290,6 +297,17 @@ export function createPlaywrightCaptureBackend(
           timeout: captureOptions.navigationTimeoutMs ?? 15_000,
           waitUntil: captureOptions.navigationWaitUntil ?? "load",
         });
+        const verification = targetVerificationForPlaywright(targetUrl, page, captureOptions);
+
+        if (
+          captureOptions.authStateRef !== undefined &&
+          (!verification.authInjectedBeforeNavigation || !verification.isRequestedTarget)
+        ) {
+          await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
+
+          return err(authInjectionVerificationError(verification));
+        }
+
         await page.screenshot({ fullPage: true, path: screenshotPath });
         const screenshotRedaction = redactArtifactBytes(
           await readFile(screenshotPath),
@@ -348,9 +366,11 @@ export function createPlaywrightCaptureBackend(
           ],
           backend: "playwright",
           capturedAt: clock(),
+          authUsed: captureOptions.authStateRef !== undefined,
           id: captureId,
           status: "completed",
           target,
+          verification,
         });
       } catch (cause) {
         await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
@@ -361,6 +381,120 @@ export function createPlaywrightCaptureBackend(
       }
     },
   };
+}
+
+async function validateAuthStateRef(
+  authStateRef: string | undefined,
+): Promise<Result<void, SurfaceError>> {
+  if (authStateRef === undefined) {
+    return ok(undefined);
+  }
+
+  try {
+    const parsed = JSON.parse(await readFile(authStateRef, "utf8")) as unknown;
+
+    if (!isPlaywrightStorageState(parsed)) {
+      return err(
+        createSurfaceError(
+          "auth_injection_failed",
+          "Auth state must be a valid Playwright storage-state JSON file.",
+          {
+            details: { reason: "invalid-storage-state", authStateRef },
+          },
+        ),
+      );
+    }
+
+    return ok(undefined);
+  } catch (cause) {
+    if (cause instanceof SyntaxError) {
+      return err(
+        createSurfaceError(
+          "auth_injection_failed",
+          "Auth state must be a valid Playwright storage-state JSON file.",
+          {
+            cause,
+            details: { reason: "invalid-storage-state", authStateRef },
+          },
+        ),
+      );
+    }
+
+    return err(
+      createSurfaceError("auth_injection_failed", "Auth state file could not be read.", {
+        cause,
+        details: { reason: "auth-state-unreadable", authStateRef },
+      }),
+    );
+  }
+}
+
+function isPlaywrightStorageState(value: unknown): boolean {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const candidate = value as {
+    readonly cookies?: unknown;
+    readonly origins?: unknown;
+  };
+
+  return Array.isArray(candidate.cookies) && Array.isArray(candidate.origins);
+}
+
+function targetVerificationForPlaywright(
+  requestedUrl: string,
+  page: PlaywrightPage,
+  captureOptions: CaptureOptions,
+): {
+  readonly authInjectedBeforeNavigation: boolean;
+  readonly isRequestedTarget: boolean;
+  readonly landedUrl: string;
+  readonly requestedUrl: string;
+} {
+  const landedUrl = page.url();
+
+  return {
+    authInjectedBeforeNavigation: captureOptions.authStateRef !== undefined,
+    isRequestedTarget: landedUrlMatchesRequestedUrl(landedUrl, requestedUrl),
+    landedUrl,
+    requestedUrl,
+  };
+}
+
+function landedUrlMatchesRequestedUrl(landedUrl: string, requestedUrl: string): boolean {
+  try {
+    const landed = new URL(landedUrl);
+    const requested = new URL(requestedUrl);
+
+    landed.hash = "";
+    requested.hash = "";
+
+    return landed.href === requested.href;
+  } catch {
+    return landedUrl === requestedUrl;
+  }
+}
+
+function authInjectionVerificationError(verification: {
+  readonly authInjectedBeforeNavigation: boolean;
+  readonly isRequestedTarget: boolean;
+  readonly landedUrl: string;
+  readonly requestedUrl: string;
+}): SurfaceError {
+  return createSurfaceError(
+    "auth_injection_failed",
+    "Authenticated capture did not land on the requested target.",
+    {
+      details: {
+        authInjectedBeforeNavigation: verification.authInjectedBeforeNavigation,
+        isRequestedTarget: verification.isRequestedTarget,
+        landedUrl: verification.landedUrl,
+        reason: "target-verification-failed",
+        requestedUrl: verification.requestedUrl,
+      },
+    },
+  );
 }
 
 /**

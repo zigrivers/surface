@@ -250,10 +250,14 @@ function fakePlaywrightModule(
     readonly onAbort?: () => void;
     readonly onContinue?: () => void;
     readonly onGoto?: (options: { readonly timeout: number; readonly waitUntil: string }) => void;
-    readonly onNewContext?: (options: { readonly serviceWorkers?: string }) => void;
+    readonly onNewContext?: (options: {
+      readonly serviceWorkers?: string;
+      readonly storageState?: string;
+    }) => void;
     readonly onWebSocketClose?: () => void;
     readonly onWebSocketConnect?: () => void;
     readonly pageContent?: string;
+    readonly pageUrl?: string;
     readonly screenshotContents?: string;
   } = {},
 ): unknown {
@@ -261,7 +265,10 @@ function fakePlaywrightModule(
     chromium: {
       launch: async () => ({
         close: async () => {},
-        newContext: async (contextOptions: { readonly serviceWorkers?: string }) => {
+        newContext: async (contextOptions: {
+          readonly serviceWorkers?: string;
+          readonly storageState?: string;
+        }) => {
           options.onNewContext?.(contextOptions);
 
           return {
@@ -298,6 +305,7 @@ function fakePlaywrightModule(
               screenshot: async (screenshotOptions: { readonly path: string }) => {
                 await writeFile(screenshotOptions.path, options.screenshotContents ?? "png");
               },
+              url: () => options.pageUrl ?? "https://example.com",
             }),
             route: async (
               _pattern: string,
@@ -557,6 +565,10 @@ describe("E1 Capture & Inputs", () => {
 
     it("[US-001][AC1] Playwright backend blocks default cross-origin subresources with auth state (unit)", async () => {
       const artifactRoot = await createTempArtifactRoot();
+      const authStateRoot = await mkdtemp(join(tmpdir(), "surface-auth-state-"));
+      temporaryRoots.push(authStateRoot);
+      const authStatePath = join(authStateRoot, "state.json");
+      await writeFile(authStatePath, JSON.stringify({ cookies: [], origins: [] }));
       let subresourceAborted = false;
       let subresourceContinued = false;
       const service = createCaptureService({
@@ -582,7 +594,7 @@ describe("E1 Capture & Inputs", () => {
 
       const result = await service.capture(target, {
         artifactRoot,
-        authStateRef: "state.json",
+        authStateRef: authStatePath,
         config: DEFAULT_SURFACE_CONFIG.capture,
       });
 
@@ -2060,8 +2072,105 @@ describe("E1 Capture & Inputs", () => {
     });
   });
   describe("US-002 capture behind auth [gate]", () => {
-    it.skip("[US-002][AC1] valid --auth-state → session injected before navigation; authenticated DOM captured (integration)", () => {});
-    it.skip("[US-002][AC2] invalid/expired auth-state → auth-injection failure, non-zero exit; never captures login page as target (e2e)", () => {});
+    it("[US-002][AC1] valid --auth-state → session injected before navigation; authenticated DOM captured (integration)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const authStateRoot = await mkdtemp(join(tmpdir(), "surface-auth-state-"));
+      temporaryRoots.push(authStateRoot);
+      const authStatePath = join(authStateRoot, "state.json");
+      const events: string[] = [];
+      let contextOptions:
+        | { readonly serviceWorkers?: string; readonly storageState?: string }
+        | undefined;
+      await writeFile(authStatePath, JSON.stringify({ cookies: [], origins: [] }));
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-authenticated",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                onGoto: () => {
+                  events.push("goto");
+                },
+                onNewContext: (options) => {
+                  contextOptions = options;
+                  events.push("context");
+                },
+                pageContent: "<html><body><h1>Dashboard</h1></body></html>",
+                pageUrl: "https://example.com",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        authStateRef: authStatePath,
+        config: allowedCaptureConfig,
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!result.ok) {
+        return;
+      }
+
+      expect(events).toEqual(["context", "goto"]);
+      expect(contextOptions).toMatchObject({ storageState: authStatePath });
+      expect(result.value.authUsed).toBe(true);
+      expect(result.value.verification).toEqual({
+        authInjectedBeforeNavigation: true,
+        isRequestedTarget: true,
+        landedUrl: "https://example.com",
+        requestedUrl: "https://example.com",
+      });
+      await expect(
+        readFile(join(artifactRoot, "cap-authenticated", "dom.html"), "utf8"),
+      ).resolves.toContain("Dashboard");
+    });
+
+    it("[US-002][AC2] invalid/expired auth-state → auth-injection failure; never captures login page as target (e2e)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const authStateRoot = await mkdtemp(join(tmpdir(), "surface-auth-state-"));
+      temporaryRoots.push(authStateRoot);
+      const authStatePath = join(authStateRoot, "state.json");
+      await writeFile(authStatePath, JSON.stringify({ cookies: [], origins: [] }));
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            idFactory: () => "cap-login-bounce",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                pageContent: "<html><body>Login</body></html>",
+                pageUrl: "https://example.com/login",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        authStateRef: authStatePath,
+        config: allowedCaptureConfig,
+      });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "auth_injection_failed",
+          details: {
+            landedUrl: "https://example.com/login",
+            reason: "target-verification-failed",
+            requestedUrl: "https://example.com",
+          },
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-login-bounce"))).rejects.toThrow();
+    });
   });
   describe("US-003 ingest static & context inputs [gate]", () => {
     it("[US-003][AC1] --component/tokens/--scaffold-docs used as context; recorded which inputs were present (integration)", async () => {
