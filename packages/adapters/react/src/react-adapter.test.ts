@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import { createReactAdapter } from "./index.js";
 
@@ -188,6 +189,80 @@ describe("react framework adapter", () => {
         ],
       },
     });
+  });
+
+  it("maps the seeded React defect fixture to stable component selectors", async () => {
+    const adapter = createReactAdapter();
+    const fixtureUrl = new URL(
+      "../../../../fixtures/seeded-defects/react/SeededDefectFixture.tsx",
+      import.meta.url,
+    );
+    const contents = await readFile(fixtureUrl, "utf8");
+
+    const result = await adapter.introspect({
+      path: "fixtures/seeded-defects/react/SeededDefectFixture.tsx",
+      contents,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const entriesByComponent = new Map(
+      result.value.entries.map((entry) => [entry.component, entry]),
+    );
+
+    expect([...entriesByComponent.keys()].sort()).toEqual([
+      "EmptyOrdersState",
+      "LowContrastHero",
+      "SeededDefectFixture",
+      "TargetSizeControls",
+    ]);
+    const emptyOrdersEntry = entriesByComponent.get("EmptyOrdersState");
+    const lowContrastEntry = entriesByComponent.get("LowContrastHero");
+    const fixtureEntry = entriesByComponent.get("SeededDefectFixture");
+    const targetSizeEntry = entriesByComponent.get("TargetSizeControls");
+
+    expect(emptyOrdersEntry?.file).toBe("fixtures/seeded-defects/react/SeededDefectFixture.tsx");
+    expect(emptyOrdersEntry?.selectors).toEqual(
+      expect.arrayContaining([
+        '[data-surface-component="EmptyOrdersState"]',
+        '[data-testid="seeded-react-empty-title"]',
+        '[id="orders"]',
+      ]),
+    );
+    expect(lowContrastEntry?.file).toBe("fixtures/seeded-defects/react/SeededDefectFixture.tsx");
+    expect(lowContrastEntry?.selectors).toEqual(
+      expect.arrayContaining([
+        '[data-surface-component="LowContrastHero"]',
+        '[data-testid="seeded-react-low-contrast"]',
+        '[data-testid="seeded-react-skip-link"]',
+        '[data-testid="seeded-react-title"]',
+      ]),
+    );
+    expect(lowContrastEntry?.selectors).not.toContain("a");
+    expect(lowContrastEntry?.selectors).not.toContain("h1");
+    expect(lowContrastEntry?.selectors).not.toContain("p");
+    expect(fixtureEntry?.file).toBe("fixtures/seeded-defects/react/SeededDefectFixture.tsx");
+    expect(fixtureEntry?.selectors).toEqual(
+      expect.arrayContaining([
+        '[data-component="SeededDefectFixture"]',
+        "react:EmptyOrdersState",
+        "react:LowContrastHero",
+        "react:TargetSizeControls",
+      ]),
+    );
+    expect(fixtureEntry?.selectors).not.toContain("h2");
+    expect(targetSizeEntry?.file).toBe("fixtures/seeded-defects/react/SeededDefectFixture.tsx");
+    expect(targetSizeEntry?.selectors).toEqual(
+      expect.arrayContaining([
+        '[aria-label="Checkout actions"]',
+        '[data-surface-component="TargetSizeControls"]',
+        '[data-testid="primary-checkout"]',
+        '[data-testid="tiny-remove"]',
+      ]),
+    );
   });
 
   it("maps anonymous and named default function expressions", async () => {

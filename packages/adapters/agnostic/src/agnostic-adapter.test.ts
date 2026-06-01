@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import { createAgnosticAdapter } from "./index.js";
 
@@ -195,6 +196,57 @@ describe("agnostic framework adapter", () => {
         ],
       },
     });
+  });
+
+  it("maps the seeded plain HTML defect fixture to stable component selectors", async () => {
+    const adapter = createAgnosticAdapter();
+    const fixtureUrl = new URL(
+      "../../../../fixtures/seeded-defects/plain-html/index.html",
+      import.meta.url,
+    );
+    const contents = await readFile(fixtureUrl, "utf8");
+
+    const result = await adapter.introspect({
+      path: "fixtures/seeded-defects/plain-html/index.html",
+      contents,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const entriesByComponent = new Map(
+      result.value.entries.map((entry) => [entry.component, entry]),
+    );
+
+    expect([...entriesByComponent.keys()].sort()).toEqual([
+      "EmptyOrdersState",
+      "LowContrastHero",
+      "SeededDefectHtmlFixture",
+      "TargetSizeControls",
+    ]);
+    const fixtureEntry = entriesByComponent.get("SeededDefectHtmlFixture");
+    const lowContrastEntry = entriesByComponent.get("LowContrastHero");
+    const targetSizeEntry = entriesByComponent.get("TargetSizeControls");
+    const emptyOrdersEntry = entriesByComponent.get("EmptyOrdersState");
+
+    expect(fixtureEntry?.file).toBe("fixtures/seeded-defects/plain-html/index.html");
+    expect(fixtureEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-component="SeededDefectHtmlFixture"]']),
+    );
+    expect(lowContrastEntry?.file).toBe("fixtures/seeded-defects/plain-html/index.html");
+    expect(lowContrastEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-surface-component="LowContrastHero"]']),
+    );
+    expect(targetSizeEntry?.file).toBe("fixtures/seeded-defects/plain-html/index.html");
+    expect(targetSizeEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-surface-component="TargetSizeControls"]']),
+    );
+    expect(emptyOrdersEntry?.file).toBe("fixtures/seeded-defects/plain-html/index.html");
+    expect(emptyOrdersEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-surface-component="EmptyOrdersState"]']),
+    );
   });
 
   it("returns an error result for malformed source references", async () => {

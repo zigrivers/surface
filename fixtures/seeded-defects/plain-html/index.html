@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Surface seeded defects - HTML</title>
+    <style>
+      :root {
+        color: #1f2937;
+        font-family: Arial, sans-serif;
+      }
+
+      body {
+        margin: 0;
+        background: #f8fafc;
+      }
+
+      main {
+        margin: 0 auto;
+        max-width: 960px;
+        padding: 32px;
+      }
+
+      .hero {
+        background: #eef2ff;
+        border-radius: 12px;
+        padding: 24px;
+      }
+
+      .low-contrast {
+        color: #b7bdd1;
+      }
+
+      .focus-broken:focus {
+        outline: none;
+      }
+
+      .tiny-target {
+        border: 0;
+        height: 20px;
+        min-width: 20px;
+        padding: 0;
+      }
+
+      .empty-state {
+        border: 1px dashed #cbd5e1;
+        color: #94a3b8;
+        min-height: 120px;
+        padding: 16px;
+      }
+    </style>
+  </head>
+  <body>
+    <main data-component="SeededDefectHtmlFixture">
+      <section class="hero" data-surface-component="LowContrastHero">
+        <h1>Seeded checkout defects</h1>
+        <p class="low-contrast">This muted paragraph intentionally fails contrast guidance.</p>
+        <a class="focus-broken" href="#orders">Skip to orders</a>
+      </section>
+
+      <section data-surface-component="TargetSizeControls" aria-label="Checkout actions">
+        <button class="tiny-target">x</button>
+        <button>Checkout</button>
+      </section>
+
+      <section id="orders" class="empty-state" data-surface-component="EmptyOrdersState">
+        <h2>Orders</h2>
+      </section>
+    </main>
+  </body>
+</html>
