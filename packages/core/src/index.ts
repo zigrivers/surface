@@ -5,6 +5,7 @@ export * from "./errors.js";
 export * from "./findings.js";
 export * from "./identity.js";
 export * from "./logging.js";
+export * from "./model-provider.js";
 export * from "./state-store.js";
 export { createTrackedFinding, transitionTrackedFinding } from "./tracked-findings.js";
 export type {

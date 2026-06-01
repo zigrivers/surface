@@ -24,6 +24,8 @@ const API_CONTRACT_ERROR_CODES = [
   "auth_injection_failed",
   "capture_failed",
   "model_unavailable",
+  "invalid_model_request",
+  "model_request_failed",
   "finding_draft_invalid",
   "finding_score_failed",
   "backlog_synthesis_failed",
