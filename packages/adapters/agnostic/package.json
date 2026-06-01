@@ -1,0 +1,37 @@
+{
+  "name": "@surface/adapters-agnostic",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist"
+  ],
+  "dependencies": {
+    "@surface/core": "workspace:*",
+    "parse5": "^8.0.0"
+  },
+  "scripts": {
+    "build": "tsup",
+    "build:smoke": "node scripts/build-smoke.mjs",
+    "clean": "node scripts/clean.mjs",
+    "lint": "eslint src",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "catalog:",
+    "eslint": "catalog:",
+    "tsup": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
