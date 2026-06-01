@@ -67,7 +67,7 @@ describe("E6 Interfaces", () => {
     it("[US-050][AC4] core verbs accept target flags and preserve JSON envelopes (e2e)", async () => {
       const stdout: string[] = [];
       const exitCode = await runSurfaceCli({
-        argv: ["node", "surface", "--json", "capture", "--dom", "<main>Acceptance</main>"],
+        argv: ["node", "surface", "--json", "capture", "--url", "https://example.com"],
         composition: createSurfaceComposition({
           captureBackends: [
             {

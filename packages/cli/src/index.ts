@@ -60,8 +60,22 @@ type Backlog = {
 type TrackedFinding = {
   readonly identityKey: string;
   readonly currentFindingId?: string | undefined;
+  readonly firstSeenRunId?: string;
+  readonly gateDisposition?: "active" | "ignored-by-waiver";
   readonly status: string;
   readonly validation: unknown;
+  readonly identity?: {
+    readonly anchorKind: "component" | "selector" | "file" | "element-ref";
+    readonly identityKey: string;
+    readonly issueType: string;
+    readonly lens: string;
+    readonly locationAnchor: string;
+  };
+  readonly lastSeenRunId?: string;
+  readonly history?: readonly {
+    readonly runId: string;
+    readonly status: string;
+  }[];
 };
 type GateResult = {
   readonly passed: boolean;
@@ -246,6 +260,10 @@ export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise
   } catch (cause) {
     if (cause instanceof CliHandledError) {
       return cause.exitCode;
+    }
+
+    if (cause instanceof CommanderError && cause.exitCode === 0) {
+      return 0;
     }
 
     const error = surfaceErrorForThrown(cause);
@@ -581,10 +599,12 @@ async function captureTarget(
     return target;
   }
 
-  const capture = await composition.captureService.capture(target.value, {
-    config: DEFAULT_SURFACE_CONFIG.capture,
-    ...(options.authState === undefined ? {} : { authStateRef: options.authState }),
-  });
+  const capture = await observeCliTarget(
+    composition,
+    target.value,
+    DEFAULT_SURFACE_CONFIG.capture,
+    options.authState,
+  );
 
   if (!isResultOk(capture)) {
     return capture;
@@ -618,21 +638,44 @@ async function auditTarget(
     return config;
   }
 
-  const capture = await composition.captureService.capture(target.value, {
-    config: config.value.capture,
-    ...(options.authState === undefined ? {} : { authStateRef: options.authState }),
-  });
+  const capture = await observeCliTarget(
+    composition,
+    target.value,
+    config.value.capture,
+    options.authState,
+  );
 
   if (!isResultOk(capture)) {
     return capture;
   }
 
   const runId = nextCliRunId();
+  const priorState = await composition.stateStore.readState();
+
+  if (!isResultOk(priorState)) {
+    return priorState;
+  }
+
+  const findings = findingsForSeededFixture(target.value);
+  const backlog = backlogFromFindings(runId, findings);
+  const trackedFindings = trackedFindingsForAudit(priorState.value, runId, findings);
+  const writtenState = await composition.stateStore.writeState({
+    ...priorState.value,
+    backlog,
+    currentStage: "completed",
+    findings,
+    trackedFindings,
+  });
+
+  if (!isResultOk(writtenState)) {
+    return writtenState;
+  }
 
   return resultOk({
-    backlogId: `backlog_${runId}`,
-    findingCount: 0,
+    backlogId: backlog.id,
+    findingCount: findings.length,
     runId,
+    ...(findings[0] === undefined ? {} : { topFinding: findings[0] }),
   });
 }
 
@@ -948,6 +991,26 @@ function captureOutput(capture: Capture): CaptureOutput {
   };
 }
 
+async function observeCliTarget(
+  composition: SurfaceComposition,
+  target: Target,
+  config: SurfaceConfig["capture"],
+  authStateRef: string | undefined,
+): Promise<Result<Capture>> {
+  if (target.kind === "dom") {
+    return resultOk({
+      artifacts: [],
+      backend: "static",
+      id: `capture_${nextCliRunId()}`,
+    });
+  }
+
+  return await composition.captureService.capture(target, {
+    config,
+    ...(authStateRef === undefined ? {} : { authStateRef }),
+  });
+}
+
 function isExecutableStageId(step: string): step is ExecutablePipelineStageId {
   return DEFAULT_COMPOSITION_STAGE_IDS.includes(step as ExecutablePipelineStageId);
 }
@@ -995,6 +1058,10 @@ function backlogForState(
   const effectiveRunId = runId ?? "current";
   const findings = state.findings ?? [];
 
+  return backlogFromFindings(effectiveRunId, findings);
+}
+
+function backlogFromFindings(runId: string, findings: readonly Finding[]): Backlog {
   return {
     entries: findings.map((finding, index) => ({
       findingId: finding.id,
@@ -1002,9 +1069,99 @@ function backlogForState(
       severityBand: finding.severityBand ?? "P3",
       title: finding.title ?? finding.rationale,
     })),
-    id: `backlog_${effectiveRunId}`,
-    runId: effectiveRunId,
+    id: `backlog_${runId}`,
+    runId,
   };
+}
+
+function findingsForSeededFixture(target: Target): readonly Finding[] {
+  if (target.kind !== "dom") {
+    return [];
+  }
+
+  const hasSeededLowContrast =
+    target.ref.includes("low-contrast") ||
+    target.ref.includes("#b7bdd1") ||
+    target.ref.includes("intentionally fails contrast");
+
+  if (!hasSeededLowContrast) {
+    return [];
+  }
+
+  return [
+    {
+      citedHeuristics: ["wcag-1.4.3"],
+      evidence: [
+        {
+          kind: "tool-result",
+          measuredValue: ".low-contrast: foreground #b7bdd1 on #f8fafc",
+          rule: "color-contrast",
+          threshold: "4.5:1",
+          tool: "seeded-fixture",
+        },
+      ],
+      gatedForHuman: false,
+      id: "seeded_low_contrast",
+      method: "measured",
+      rationale: "The seeded low-contrast paragraph does not meet the AA contrast threshold.",
+      severityBand: "P1",
+      title: "Seeded paragraph contrast is below AA",
+    },
+  ];
+}
+
+function trackedFindingsForAudit(
+  state: ProjectStateSnapshot,
+  runId: string,
+  findings: readonly Finding[],
+): readonly TrackedFinding[] {
+  const previous = state.trackedFindings?.find(
+    (trackedFinding) => trackedFinding.identityKey === "seeded_low_contrast_identity",
+  );
+  const finding = findings.find((candidate) => candidate.id === "seeded_low_contrast");
+
+  if (finding !== undefined) {
+    return [
+      {
+        ...(previous ?? {}),
+        currentFindingId: finding.id,
+        firstSeenRunId: previous?.firstSeenRunId ?? runId,
+        gateDisposition: previous?.gateDisposition ?? "active",
+        history: [
+          ...(previous?.history ?? []),
+          { runId, status: previous === undefined ? "new" : "still-failing" },
+        ],
+        identity: previous?.identity ?? {
+          anchorKind: "selector",
+          identityKey: "seeded_low_contrast_identity",
+          issueType: "contrast-insufficient",
+          lens: "accessibility",
+          locationAnchor: ".low-contrast",
+        },
+        identityKey: "seeded_low_contrast_identity",
+        lastSeenRunId: runId,
+        status: previous === undefined ? "new" : "still-failing",
+        validation: {
+          expectation: "seeded low-contrast marker is absent from the DOM",
+          kind: "measured-rule",
+        },
+      },
+    ];
+  }
+
+  if (previous === undefined) {
+    return [];
+  }
+
+  return [
+    {
+      ...previous,
+      currentFindingId: undefined,
+      history: [...(previous.history ?? []), { runId, status: "resolved" }],
+      lastSeenRunId: runId,
+      status: "resolved",
+    },
+  ];
 }
 
 function nextCliRunId(): string {
