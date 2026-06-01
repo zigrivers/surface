@@ -151,7 +151,120 @@ describe("E3 Findings, Scoring & Trust", () => {
     });
   });
   describe("US-022 deterministic fix snippets for measured findings [committed]", () => {
-    it.skip("[US-022][AC1] measured finding with computable fix → suggestedPatch present; judged findings never get an auto patch (unit)", () => {});
+    it("[US-022][AC1] measured finding with computable fix → suggestedPatch present; judged findings never get an auto patch (unit)", () => {
+      const contrastDraft = {
+        draftId: "draft_contrast_patch",
+        lens: "accessibility",
+        issueType: "contrast-insufficient",
+        method: "measured",
+        title: "Button contrast is below AA",
+        rationale: "Primary button text has insufficient contrast.",
+        citedHeuristics: ["kb_wcag_143"],
+        evidence: [
+          {
+            kind: "tool-result",
+            tool: "axe",
+            rule: "color-contrast",
+            measuredValue: ".cta: foreground #9ca3af on background #ffffff has contrast 2.5:1",
+            threshold: "4.5:1",
+          },
+        ],
+        rawDimensions: { severity: 0.76, confidence: 1 },
+        location: { selector: ".cta" },
+      } satisfies FindingDraft;
+      const ariaDraft = {
+        draftId: "draft_aria_patch",
+        lens: "accessibility",
+        issueType: "accessible-name-missing",
+        method: "measured",
+        title: "Icon button has no accessible name",
+        rationale: "A static a11y rule found a button with no accessible name.",
+        citedHeuristics: ["kb_wcag_412"],
+        evidence: [
+          {
+            kind: "tool-result",
+            tool: "eslint-jsx-a11y",
+            rule: "control-has-associated-label",
+            measuredValue: "button.icon missing accessible label",
+          },
+        ],
+        rawDimensions: { severity: 0.7 },
+        location: { selector: "button.icon" },
+      } satisfies FindingDraft;
+      const targetSizeDraft = {
+        draftId: "draft_target_size_patch",
+        lens: "accessibility",
+        issueType: "target-size",
+        method: "measured",
+        title: "Tap target is too small",
+        rationale: "The tap target is smaller than the minimum recommended hit area.",
+        citedHeuristics: ["kb_wcag_258"],
+        evidence: [
+          {
+            kind: "tool-result",
+            tool: "lighthouse",
+            rule: "target-size",
+            measuredValue: ".tap-target: 18px by 18px",
+          },
+        ],
+        rawDimensions: { severity: 0.62 },
+        location: { selector: ".tap-target" },
+      } satisfies FindingDraft;
+      const judgedDraft = {
+        draftId: "draft_judged_no_patch",
+        lens: "heuristics",
+        issueType: "accessible-name-missing",
+        method: "judged",
+        title: "Icon button label may be unclear",
+        rationale: "The icon-only button may not communicate its purpose.",
+        citedHeuristics: ["kb_wcag_412"],
+        evidence: [{ kind: "cited-heuristic", knowledgeEntryId: "kb_wcag_412" }],
+        rawDimensions: { severity: 0.55, confidence: 0.6 },
+        location: { selector: "button.icon" },
+      } satisfies FindingDraft;
+
+      const contrast = scoreFinding(contrastDraft);
+      const aria = scoreFinding(ariaDraft);
+      const targetSize = scoreFinding(targetSizeDraft);
+      const judged = scoreFinding(judgedDraft);
+
+      expect(contrast.ok).toBe(true);
+      expect(aria.ok).toBe(true);
+      expect(targetSize.ok).toBe(true);
+      expect(judged.ok).toBe(true);
+
+      if (!contrast.ok) {
+        throw new Error(contrast.error.message);
+      }
+
+      if (!aria.ok) {
+        throw new Error(aria.error.message);
+      }
+
+      if (!targetSize.ok) {
+        throw new Error(targetSize.error.message);
+      }
+
+      if (!judged.ok) {
+        throw new Error(judged.error.message);
+      }
+
+      expect(contrast.value.suggestedPatch).toMatchObject({
+        kind: "contrast-hex",
+      });
+      expect(contrast.value.suggestedPatch?.change).toContain("#9ca3af");
+      expect(contrast.value.suggestedPatch?.change).toContain("#ffffff");
+      expect(aria.value.suggestedPatch).toEqual({
+        kind: "aria-attribute",
+        change: 'Add aria-label="<accessible name>" to button.icon.',
+      });
+      expect(targetSize.value.suggestedPatch).toEqual({
+        kind: "target-size",
+        change:
+          "Set min-width and min-height to at least 44px for .tap-target; preserve spacing between adjacent targets.",
+      });
+      expect(judged.value.suggestedPatch).toBeUndefined();
+    });
   });
   describe("US-023 self-grounding accuracy & verdict loop [should]", () => {
     it.skip("[US-023][AC1] measured ground truth + human verdicts → surface reports its judged false-positive rate (integration)", () => {});

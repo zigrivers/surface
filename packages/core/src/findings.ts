@@ -115,12 +115,32 @@ export const LocationSchema = z
   );
 export type Location = z.infer<typeof LocationSchema>;
 
-export const SuggestedPatchSchema = z
+export const ContrastHexSuggestedPatchSchema = z
   .object({
-    kind: z.enum(["contrast-hex", "aria-attribute", "target-size"]),
+    kind: z.literal("contrast-hex"),
     change: nonEmptyStringSchema,
   })
   .strict();
+
+export const AriaAttributeSuggestedPatchSchema = z
+  .object({
+    kind: z.literal("aria-attribute"),
+    change: nonEmptyStringSchema,
+  })
+  .strict();
+
+export const TargetSizeSuggestedPatchSchema = z
+  .object({
+    kind: z.literal("target-size"),
+    change: nonEmptyStringSchema,
+  })
+  .strict();
+
+export const SuggestedPatchSchema = z.discriminatedUnion("kind", [
+  ContrastHexSuggestedPatchSchema,
+  AriaAttributeSuggestedPatchSchema,
+  TargetSizeSuggestedPatchSchema,
+]);
 export type SuggestedPatch = z.infer<typeof SuggestedPatchSchema>;
 
 const evidenceListSchema = z.array(EvidenceSchema).min(1);
@@ -323,6 +343,34 @@ const DEFAULT_DIMENSIONS = {
 
 const HUMAN_GATE_TEXT_PATTERN =
   /\b(meaning|brand|wording|button\s+(copy|text|label)|copy\s+(text|label|wording|change)|label\s+(copy|text|wording)|visible\s+text\s+(copy|change|wording)|critical[-\s]?flow|conversion|conversion[-\s]?flow|checkout|payment|purchase|sign[-\s]?up)\b/i;
+const HEX_COLOR_PATTERN = /#[0-9a-f]{3}(?:[0-9a-f]{3})?\b/giu;
+const CONTRAST_RATIO_PATTERN = /(\d+(?:\.\d+)?)\s*:1/u;
+const CONTRAST_EXPECTED_RATIO_PATTERN =
+  /(?:expected|threshold|at\s+least)[^0-9]*(\d+(?:\.\d+)?)\s*:1/iu;
+const DEFAULT_CONTRAST_THRESHOLD = 4.5;
+const MIN_TARGET_SIZE_PX = 44;
+const ACCESSIBLE_NAME_RULES = new Set([
+  "aria-command-name",
+  "aria-input-field-name",
+  "aria-meter-name",
+  "aria-progressbar-name",
+  "aria-toggle-field-name",
+  "aria-tooltip-name",
+  "aria-treeitem-name",
+  "button-name",
+  "control-has-associated-label",
+  "custom-controls-labels",
+  "input-button-name",
+  "label",
+  "link-name",
+  "select-name",
+]);
+
+type RgbColor = {
+  readonly red: number;
+  readonly green: number;
+  readonly blue: number;
+};
 
 function definedDimensionOverrides(
   rawDimensions: FindingDraft["rawDimensions"] | undefined,
@@ -394,6 +442,273 @@ function shouldGateForHuman(draft: FindingDraft, severityBand: SeverityBand): bo
   return (
     draftMatchesHumanGateCategory(draft) ||
     isJudgedFindingAboveHumanGateThreshold(draft.method, severityBand)
+  );
+}
+
+function toolResultEvidenceFor(draft: FindingDraft): ToolResultEvidence[] {
+  return draft.evidence.filter(
+    (entry): entry is ToolResultEvidence => entry.kind === "tool-result",
+  );
+}
+
+function generatedSuggestedPatchFor(draft: FindingDraft): SuggestedPatch | undefined {
+  if (draft.method !== "measured") {
+    return undefined;
+  }
+
+  return (
+    contrastHexSuggestedPatchFor(draft) ??
+    ariaAttributeSuggestedPatchFor(draft) ??
+    targetSizeSuggestedPatchFor(draft)
+  );
+}
+
+function suggestedPatchFor(draft: FindingDraft): SuggestedPatch | undefined {
+  return draft.suggestedPatch ?? generatedSuggestedPatchFor(draft);
+}
+
+function contrastHexSuggestedPatchFor(draft: FindingDraft): SuggestedPatch | undefined {
+  const evidence = toolResultEvidenceFor(draft).find(
+    (entry) => entry.rule === "color-contrast" || draft.issueType === "contrast-insufficient",
+  );
+
+  if (evidence === undefined) {
+    return undefined;
+  }
+
+  const contrastInputs = contrastInputsFor(evidence);
+
+  if (contrastInputs === undefined) {
+    return undefined;
+  }
+
+  const { foreground, background, threshold } = contrastInputs;
+  const currentRatio = contrastRatio(foreground.rgb, background.rgb);
+
+  if (currentRatio >= threshold) {
+    return undefined;
+  }
+
+  const replacement = foregroundReplacementFor(foreground.rgb, background.rgb, threshold);
+
+  return {
+    kind: "contrast-hex",
+    change: `Set foreground color from ${foreground.hex} to ${replacement} against ${background.hex} to meet ${formatRatio(threshold)}:1.`,
+  };
+}
+
+function contrastInputsFor(evidence: ToolResultEvidence):
+  | {
+      readonly foreground: { readonly hex: string; readonly rgb: RgbColor };
+      readonly background: { readonly hex: string; readonly rgb: RgbColor };
+      readonly threshold: number;
+    }
+  | undefined {
+  const text = [evidence.measuredValue, evidence.threshold].filter(Boolean).join(" ");
+  const colors = [...text.matchAll(HEX_COLOR_PATTERN)].map((match) => normalizeHexColor(match[0]));
+
+  if (colors.length < 2) {
+    return undefined;
+  }
+
+  const firstColor = colors[0];
+  const secondColor = colors[1];
+
+  if (firstColor === undefined || secondColor === undefined) {
+    return undefined;
+  }
+
+  const foregroundHex =
+    colorAfterLabel(text, /(?:foreground|fg|text(?:\s+color)?|color)/iu) ?? firstColor;
+  const backgroundHex = colorAfterLabel(text, /(?:background|bg)(?:\s+color)?/iu) ?? secondColor;
+  const foreground = rgbForHex(foregroundHex);
+  const background = rgbForHex(backgroundHex);
+
+  if (foreground === undefined || background === undefined) {
+    return undefined;
+  }
+
+  return {
+    foreground: { hex: foregroundHex, rgb: foreground },
+    background: { hex: backgroundHex, rgb: background },
+    threshold: thresholdFor(evidence) ?? DEFAULT_CONTRAST_THRESHOLD,
+  };
+}
+
+function colorAfterLabel(text: string, labelPattern: RegExp): string | undefined {
+  const labelMatch = labelPattern.exec(text);
+
+  if (labelMatch === null) {
+    return undefined;
+  }
+
+  HEX_COLOR_PATTERN.lastIndex = labelMatch.index + labelMatch[0].length;
+  const colorMatch = HEX_COLOR_PATTERN.exec(text);
+  HEX_COLOR_PATTERN.lastIndex = 0;
+
+  return colorMatch === null ? undefined : normalizeHexColor(colorMatch[0]);
+}
+
+function normalizeHexColor(hex: string): string {
+  const value = hex.toLowerCase();
+
+  if (value.length === 4) {
+    const red = value.charAt(1);
+    const green = value.charAt(2);
+    const blue = value.charAt(3);
+
+    return `#${red}${red}${green}${green}${blue}${blue}`;
+  }
+
+  return value;
+}
+
+function rgbForHex(hex: string): RgbColor | undefined {
+  const normalized = normalizeHexColor(hex);
+  const match = /^#([0-9a-f]{6})$/u.exec(normalized);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const value = match[1];
+
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return {
+    red: Number.parseInt(value.slice(0, 2), 16),
+    green: Number.parseInt(value.slice(2, 4), 16),
+    blue: Number.parseInt(value.slice(4, 6), 16),
+  };
+}
+
+function thresholdFor(evidence: ToolResultEvidence): number | undefined {
+  const match =
+    evidence.threshold === undefined
+      ? CONTRAST_EXPECTED_RATIO_PATTERN.exec(evidence.measuredValue)
+      : CONTRAST_RATIO_PATTERN.exec(evidence.threshold);
+
+  if (match === null) {
+    return undefined;
+  }
+
+  const matchedRatio = match[1];
+
+  if (matchedRatio === undefined) {
+    return undefined;
+  }
+
+  const value = Number(matchedRatio);
+
+  return Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function foregroundReplacementFor(
+  foreground: RgbColor,
+  background: RgbColor,
+  threshold: number,
+): string {
+  const target =
+    relativeLuminance(background) >= relativeLuminance(foreground)
+      ? { red: 0, green: 0, blue: 0 }
+      : { red: 255, green: 255, blue: 255 };
+  let low = 0;
+  let high = 1;
+  let best = target;
+
+  for (let index = 0; index < 24; index += 1) {
+    const midpoint = (low + high) / 2;
+    const candidate = mixColor(foreground, target, midpoint);
+
+    if (contrastRatio(candidate, background) >= threshold) {
+      best = candidate;
+      high = midpoint;
+    } else {
+      low = midpoint;
+    }
+  }
+
+  return hexForRgb(best);
+}
+
+function mixColor(from: RgbColor, to: RgbColor, amount: number): RgbColor {
+  return {
+    red: Math.round(from.red + (to.red - from.red) * amount),
+    green: Math.round(from.green + (to.green - from.green) * amount),
+    blue: Math.round(from.blue + (to.blue - from.blue) * amount),
+  };
+}
+
+function hexForRgb(color: RgbColor): string {
+  return `#${hexByte(color.red)}${hexByte(color.green)}${hexByte(color.blue)}`;
+}
+
+function hexByte(value: number): string {
+  return Math.max(0, Math.min(255, value)).toString(16).padStart(2, "0");
+}
+
+function contrastRatio(left: RgbColor, right: RgbColor): number {
+  const leftLuminance = relativeLuminance(left);
+  const rightLuminance = relativeLuminance(right);
+  const lighter = Math.max(leftLuminance, rightLuminance);
+  const darker = Math.min(leftLuminance, rightLuminance);
+
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function relativeLuminance(color: RgbColor): number {
+  const [red, green, blue] = [color.red, color.green, color.blue].map((component) => {
+    const normalized = component / 255;
+
+    return normalized <= 0.03928 ? normalized / 12.92 : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+
+  return 0.2126 * red! + 0.7152 * green! + 0.0722 * blue!;
+}
+
+function formatRatio(value: number): string {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)));
+}
+
+function ariaAttributeSuggestedPatchFor(draft: FindingDraft): SuggestedPatch | undefined {
+  const hasAccessibleNameRule = toolResultEvidenceFor(draft).some((entry) =>
+    ACCESSIBLE_NAME_RULES.has(entry.rule),
+  );
+
+  if (draft.issueType !== "accessible-name-missing" && !hasAccessibleNameRule) {
+    return undefined;
+  }
+
+  return {
+    kind: "aria-attribute",
+    change: `Add aria-label="<accessible name>" to ${targetForPatch(draft)}.`,
+  };
+}
+
+function targetSizeSuggestedPatchFor(draft: FindingDraft): SuggestedPatch | undefined {
+  const hasTargetSizeRule = toolResultEvidenceFor(draft).some(
+    (entry) => entry.rule === "target-size",
+  );
+
+  if (draft.issueType !== "target-size" && !hasTargetSizeRule) {
+    return undefined;
+  }
+
+  return {
+    kind: "target-size",
+    change: `Set min-width and min-height to at least ${MIN_TARGET_SIZE_PX}px for ${targetForPatch(draft)}; preserve spacing between adjacent targets.`,
+  };
+}
+
+function targetForPatch(draft: FindingDraft): string {
+  return (
+    draft.location.selector ??
+    draft.location.elementRef ??
+    draft.location.component ??
+    draft.location.file ??
+    "the affected element"
   );
 }
 
@@ -698,6 +1013,7 @@ export function scoreFinding(
   const severityBand = severityBandFor(dimensions.severity, parsedPolicy.data);
   const confidenceBand = confidenceBandFor(dimensions.confidence, parsedPolicy.data);
   const gatedForHuman = shouldGateForHuman(validDraft, severityBand);
+  const suggestedPatch = suggestedPatchFor(validDraft);
   const finding = FindingSchema.safeParse({
     id: validDraft.draftId,
     lens: validDraft.lens,
@@ -712,9 +1028,7 @@ export function scoreFinding(
     location: validDraft.location,
     confidenceBand,
     gatedForHuman,
-    ...(validDraft.method === "measured" && validDraft.suggestedPatch !== undefined
-      ? { suggestedPatch: validDraft.suggestedPatch }
-      : {}),
+    ...(suggestedPatch !== undefined ? { suggestedPatch } : {}),
   });
 
   if (!finding.success) {
