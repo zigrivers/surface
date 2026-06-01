@@ -6,6 +6,7 @@
     "test": { "dependsOn": ["^build"] },
     "test:watch": { "cache": false, "persistent": true },
     "lint": {},
+    "@surface/adapters-agnostic#lint": { "dependsOn": ["^build"] },
     "typecheck": { "dependsOn": ["^build"] },
     "clean": { "cache": false }
   }
