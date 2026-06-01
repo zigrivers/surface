@@ -182,6 +182,12 @@ interface PlaywrightWebSocketRoute {
 }
 
 type ThemeLike = "dark" | "light";
+type RedactionTarget = "dom" | "screenshot";
+
+interface CompiledCaptureRedactionRule {
+  readonly appliesTo: readonly RedactionTarget[];
+  readonly pattern: RegExp;
+}
 
 export function createCaptureService(options: CaptureServiceOptions): CaptureService {
   return {
@@ -255,8 +261,13 @@ export function createPlaywrightCaptureBackend(
       const domPath = join(captureRoot, "dom.html");
       const accessibilityPath = join(captureRoot, "accessibility-tree.json");
       const computedStylesPath = join(captureRoot, "computed-styles.json");
-      // Browser evidence is raw; redaction remains a downstream reporting concern.
-      const artifactRedacted = false;
+      // Capture-write redaction is applied before artifacts become evidence.
+      const redactionRules = compileCaptureRedactionRules(captureOptions.config.redactionRules);
+
+      if (!redactionRules.ok) {
+        return err(redactionRules.error);
+      }
+
       const hostAddressCache: HostAddressCache = new Map();
       let browser: PlaywrightBrowser | undefined;
       let context: PlaywrightBrowserContext | undefined;
@@ -280,44 +291,58 @@ export function createPlaywrightCaptureBackend(
           waitUntil: captureOptions.navigationWaitUntil ?? "load",
         });
         await page.screenshot({ fullPage: true, path: screenshotPath });
-        await writeFile(domPath, await page.content());
-        await writeFile(
-          accessibilityPath,
-          JSON.stringify(await playwrightAccessibilitySnapshot(page, context), null, 2),
+        const screenshotRedaction = redactArtifactBytes(
+          await readFile(screenshotPath),
+          "screenshot",
+          redactionRules.value,
         );
-        await writeFile(
-          computedStylesPath,
+        await writeFile(screenshotPath, screenshotRedaction.contents);
+
+        const domRedaction = redactArtifactText(await page.content(), "dom", redactionRules.value);
+        await writeFile(domPath, domRedaction.contents);
+
+        const accessibilityRedaction = redactArtifactText(
+          JSON.stringify(await playwrightAccessibilitySnapshot(page, context), null, 2),
+          "dom",
+          redactionRules.value,
+        );
+        await writeFile(accessibilityPath, accessibilityRedaction.contents);
+
+        const computedStylesRedaction = redactArtifactText(
           JSON.stringify(
             await computedStyleSnapshot(page, captureOptions.computedStyleLimit ?? 2_000),
             null,
             2,
           ),
+          "dom",
+          redactionRules.value,
         );
+        await writeFile(computedStylesPath, computedStylesRedaction.contents);
 
         return ok({
           artifacts: [
             {
               id: "screenshot",
               path: screenshotPath,
-              redacted: artifactRedacted,
+              redacted: screenshotRedaction.redacted,
               type: "screenshot",
             },
             {
               id: "dom",
               path: domPath,
-              redacted: artifactRedacted,
+              redacted: domRedaction.redacted,
               type: "dom-snapshot",
             },
             {
               id: "accessibility-tree",
               path: accessibilityPath,
-              redacted: artifactRedacted,
+              redacted: accessibilityRedaction.redacted,
               type: "accessibility-tree",
             },
             {
               id: "computed-styles",
               path: computedStylesPath,
-              redacted: artifactRedacted,
+              redacted: computedStylesRedaction.redacted,
               type: "computed-styles",
             },
           ],
@@ -362,6 +387,11 @@ export function createStaticCaptureBackend(
       const screenshotPath = join(captureRoot, `screenshot${extension ?? ".png"}`);
       const domPath = join(captureRoot, "dom.html");
       let captureRootCreated = false;
+      const redactionRules = compileCaptureRedactionRules(captureOptions.config.redactionRules);
+
+      if (!redactionRules.ok) {
+        return err(redactionRules.error);
+      }
 
       if (!isStaticCaptureIdSafe(captureId)) {
         return err(staticCaptureIdError(captureId, target));
@@ -391,6 +421,7 @@ export function createStaticCaptureBackend(
           domPath,
           allowedSourceRoots,
           clock,
+          redactionRules.value,
         );
       }
 
@@ -480,6 +511,12 @@ export function createStaticCaptureBackend(
           );
         }
 
+        const screenshotRedaction = redactArtifactBytes(
+          sourceBytes,
+          "screenshot",
+          redactionRules.value,
+        );
+
         await mkdir(artifactRoot, { recursive: true });
         try {
           await mkdir(captureRoot);
@@ -492,14 +529,14 @@ export function createStaticCaptureBackend(
         }
         captureRootCreated = true;
 
-        await writeFile(screenshotPath, sourceBytes);
+        await writeFile(screenshotPath, screenshotRedaction.contents);
 
         return ok({
           artifacts: [
             {
               id: "screenshot",
               path: screenshotPath,
-              redacted: false,
+              redacted: screenshotRedaction.redacted,
               type: "screenshot",
             },
           ],
@@ -543,6 +580,7 @@ async function captureStaticTextTarget(
   domPath: string,
   allowedSourceRoots: readonly string[] | undefined,
   clock: CaptureClock,
+  redactionRules: readonly CompiledCaptureRedactionRule[],
 ): Promise<Result<Capture, SurfaceError>> {
   let captureRootCreated = false;
 
@@ -593,6 +631,7 @@ async function captureStaticTextTarget(
     }
 
     const sourceText = await readFile(sourceContainment.value, "utf8");
+    const domRedaction = redactArtifactText(sourceText, "dom", redactionRules);
 
     await mkdir(artifactRoot, { recursive: true });
     try {
@@ -606,14 +645,14 @@ async function captureStaticTextTarget(
     }
     captureRootCreated = true;
 
-    await writeFile(domPath, sourceText);
+    await writeFile(domPath, domRedaction.contents);
 
     return ok({
       artifacts: [
         {
           id: "dom",
           path: domPath,
-          redacted: false,
+          redacted: domRedaction.redacted,
           type: "dom-snapshot",
         },
       ],
@@ -639,6 +678,71 @@ async function captureStaticTextTarget(
       }),
     );
   }
+}
+
+function compileCaptureRedactionRules(
+  rules: CaptureOptions["config"]["redactionRules"],
+): Result<readonly CompiledCaptureRedactionRule[], SurfaceError> {
+  const compiled = [];
+
+  for (const rule of rules) {
+    const appliesTo = rule.appliesTo.filter(
+      (target): target is RedactionTarget => target === "dom" || target === "screenshot",
+    );
+
+    if (appliesTo.length === 0) {
+      continue;
+    }
+
+    try {
+      compiled.push({
+        appliesTo,
+        pattern: new RegExp(rule.pattern, "gu"),
+      });
+    } catch (cause) {
+      return err(
+        createSurfaceError("config_invalid", "Capture redaction rule pattern is invalid.", {
+          cause,
+          details: { pattern: rule.pattern },
+        }),
+      );
+    }
+  }
+
+  return ok(compiled);
+}
+
+function redactArtifactText(
+  contents: string,
+  target: RedactionTarget,
+  rules: readonly CompiledCaptureRedactionRule[],
+): { readonly contents: string; readonly redacted: boolean } {
+  let redactedContents = contents;
+
+  for (const rule of rules) {
+    if (rule.appliesTo.includes(target)) {
+      redactedContents = redactedContents.replace(rule.pattern, "[Redacted]");
+    }
+  }
+
+  return {
+    contents: redactedContents,
+    redacted: redactedContents !== contents,
+  };
+}
+
+function redactArtifactBytes(
+  contents: Buffer,
+  target: RedactionTarget,
+  rules: readonly CompiledCaptureRedactionRule[],
+): { readonly contents: Buffer; readonly redacted: boolean } {
+  const text = contents.toString("utf8");
+  const redaction = redactArtifactText(text, target, rules);
+
+  return {
+    contents: redaction.redacted ? Buffer.from(redaction.contents, "utf8") : contents,
+    redacted: redaction.redacted,
+  };
 }
 
 function isStaticCaptureIdSafe(captureId: string): boolean {

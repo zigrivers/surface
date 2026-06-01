@@ -253,6 +253,8 @@ function fakePlaywrightModule(
     readonly onNewContext?: (options: { readonly serviceWorkers?: string }) => void;
     readonly onWebSocketClose?: () => void;
     readonly onWebSocketConnect?: () => void;
+    readonly pageContent?: string;
+    readonly screenshotContents?: string;
   } = {},
 ): unknown {
   return {
@@ -276,7 +278,8 @@ function fakePlaywrightModule(
             }),
             newPage: async () => ({
               close: async () => {},
-              content: async () => "<html><body><button>Buy</button></body></html>",
+              content: async () =>
+                options.pageContent ?? "<html><body><button>Buy</button></body></html>",
               evaluate: async () => [
                 {
                   color: "rgb(0, 0, 0)",
@@ -292,8 +295,8 @@ function fakePlaywrightModule(
 
                 return null;
               },
-              screenshot: async (options: { readonly path: string }) => {
-                await writeFile(options.path, "png");
+              screenshot: async (screenshotOptions: { readonly path: string }) => {
+                await writeFile(screenshotOptions.path, options.screenshotContents ?? "png");
               },
             }),
             route: async (
@@ -2221,6 +2224,56 @@ describe("E1 Capture & Inputs", () => {
     it.skip("[US-004][AC2] prefers-color-scheme toggle → light+dark captured; findings tagged with theme (integration)", () => {});
   });
   describe("US-005 sensitive-data redaction [committed]", () => {
-    it.skip("[US-005][AC1] redaction rules → matched content replaced with visible marker; full evidence retained local-only (unit+integration)", () => {});
+    it("[US-005][AC1] capture-write redaction replaces matched content and marks changed artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [
+          createPlaywrightCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:00:00.000Z",
+            idFactory: () => "cap-redacted",
+            loadPlaywright: async () =>
+              fakePlaywrightModule({
+                pageContent:
+                  "<html><body><p>customer@example.com</p><p>secret-token</p></body></html>",
+                screenshotContents: "visual secret-token",
+              }),
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        config: {
+          ...allowedCaptureConfig,
+          redactionRules: [
+            {
+              appliesTo: ["dom", "screenshot"],
+              pattern: "customer@example\\.com|secret-token",
+            },
+          ],
+        },
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!result.ok) {
+        return;
+      }
+
+      expect(result.value.artifacts).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ redacted: true, type: "dom-snapshot" }),
+          expect.objectContaining({ redacted: true, type: "screenshot" }),
+        ]),
+      );
+      await expect(readFile(join(artifactRoot, "cap-redacted", "dom.html"), "utf8")).resolves.toBe(
+        "<html><body><p>[Redacted]</p><p>[Redacted]</p></body></html>",
+      );
+      await expect(
+        readFile(join(artifactRoot, "cap-redacted", "screenshot.png"), "utf8"),
+      ).resolves.toBe("visual [Redacted]");
+    });
   });
 });
