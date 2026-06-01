@@ -9,6 +9,7 @@ export * from "./findings.js";
 export * from "./gate-evaluator.js";
 export * from "./github-issue-exporter.js";
 export * from "./identity.js";
+export * from "./knowledge-source.js";
 export * from "./logging.js";
 export * from "./model-provider.js";
 export * from "./pipeline-orchestrator.js";

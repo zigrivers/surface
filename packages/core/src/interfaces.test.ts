@@ -81,9 +81,47 @@ describe("published plugin interfaces", () => {
 
     const knowledge: KnowledgeSource = {
       query: () =>
-        ok([{ id: "kb_empty_state", title: "Empty states", summary: "Offer recovery." }]),
+        ok([
+          {
+            id: "kb_empty_state",
+            title: "Empty states",
+            category: "states",
+            summary: "Offer recovery.",
+            deepGuidance: "Explain why the state happened and offer a clear next action.",
+            citation: {
+              source: "Surface fixture",
+              retrievedAt: "2026-05-31T00:00:00.000Z",
+            },
+            freshness: {
+              volatility: "stable",
+              lastReviewed: "2026-05-31T00:00:00.000Z",
+            },
+            appliesToAppTypes: ["generic"],
+            appliesToLenses: ["empty-state"],
+            steps: ["evaluate"],
+            tags: ["empty-state"],
+          },
+        ]),
       resolve: () =>
-        ok({ id: "kb_empty_state", title: "Empty states", summary: "Offer recovery." }),
+        ok({
+          id: "kb_empty_state",
+          title: "Empty states",
+          category: "states",
+          summary: "Offer recovery.",
+          deepGuidance: "Explain why the state happened and offer a clear next action.",
+          citation: {
+            source: "Surface fixture",
+            retrievedAt: "2026-05-31T00:00:00.000Z",
+          },
+          freshness: {
+            volatility: "stable",
+            lastReviewed: "2026-05-31T00:00:00.000Z",
+          },
+          appliesToAppTypes: ["generic"],
+          appliesToLenses: ["empty-state"],
+          steps: ["evaluate"],
+          tags: ["empty-state"],
+        }),
     };
 
     const lens: Lens = {

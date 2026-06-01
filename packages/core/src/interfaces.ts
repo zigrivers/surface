@@ -201,10 +201,55 @@ export interface IssueExporter {
   export(backlog: LocalBacklogRef): MaybePromise<Result<IssueExport, SurfaceError>>;
 }
 
+export const KNOWLEDGE_CATEGORIES = [
+  "core-heuristics",
+  "accessibility",
+  "forms",
+  "navigation",
+  "states",
+  "visual-content",
+  "design-systems",
+  "conversion",
+  "platform-web",
+  "agent-implementation",
+  "dashboards",
+  "data-viz",
+  "e-commerce",
+  "saas-onboarding",
+  "admin",
+  "search-discovery",
+  "trust-safety",
+  "i18n",
+] as const;
+export type KnowledgeCategory = (typeof KNOWLEDGE_CATEGORIES)[number];
+
+export const FRESHNESS_VOLATILITIES = ["stable", "evolving", "volatile"] as const;
+export type FreshnessVolatility = (typeof FRESHNESS_VOLATILITIES)[number];
+
+export interface Citation {
+  readonly source: string;
+  readonly url?: string;
+  readonly retrievedAt: string;
+}
+
+export interface Freshness {
+  readonly volatility: FreshnessVolatility;
+  readonly lastReviewed: string;
+}
+
 export interface KnowledgeEntry {
   readonly id: string;
   readonly title: string;
   readonly summary: string;
+  readonly category?: KnowledgeCategory;
+  readonly deepGuidance?: string;
+  readonly citation?: Citation;
+  readonly freshness?: Freshness;
+  readonly appliesToAppTypes?: readonly AppType[];
+  readonly appliesToLenses?: readonly string[];
+  readonly steps?: readonly string[];
+  readonly tags?: readonly string[];
+  readonly sourcePath?: string;
 }
 
 export interface RelevanceQuery {
