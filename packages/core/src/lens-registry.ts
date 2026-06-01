@@ -1,4 +1,5 @@
 import type { SurfaceConfig } from "./config.js";
+import { createAccessibilityLens } from "./accessibility-lens.js";
 import { getAppTypeOverlay, type AppTypeOverlay } from "./app-type-overlays.js";
 import type { Capture, CaptureArtifactType, Lens } from "./interfaces.js";
 import type { ModelAvailability } from "./model-provider.js";
@@ -71,6 +72,7 @@ export const BUILT_IN_LENS_REGISTRY = [
     requiresModel: false,
     requiresLiveDom: true,
     presets: ["quick", "mvp", "standard", "deep", "accessibility-first", "agent-ready"],
+    create: () => createAccessibilityLens(),
   },
   {
     id: "usability",

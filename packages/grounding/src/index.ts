@@ -2,7 +2,12 @@ import { ESLint, type Linter } from "eslint";
 import jsxA11y from "eslint-plugin-jsx-a11y";
 import tseslint from "typescript-eslint";
 
-import { createSurfaceError, type Result, type SurfaceError } from "@surface/core";
+import {
+  LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS,
+  createSurfaceError,
+  type Result,
+  type SurfaceError,
+} from "@surface/core";
 import type { Capture, GroundingTool, SourceFileRef, ToolResult } from "@surface/core/interfaces";
 
 export const AXE_GROUNDING_ID = "axe";
@@ -13,6 +18,7 @@ const JSX_A11Y_THRESHOLD = "eslint-plugin-jsx-a11y recommended";
 const JSX_A11Y_RULE_PREFIX = "jsx-a11y/";
 const LIGHTHOUSE_AUDIT_THRESHOLD = "Lighthouse audit score 1";
 const LIGHTHOUSE_GROUNDING_CATEGORIES = ["accessibility", "performance"] as const;
+const LIGHTHOUSE_ACCESSIBILITY_AUDIT_ID_SET = new Set<string>(LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS);
 const HTTP_URL_SCHEME_PATTERN = /^https?:\/\//iu;
 const SOURCE_EXTENSIONS = [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"] as const;
 const CONTRAST_MEASURED_PATTERN = /color contrast of\s+(\d+(?:\.\d+)?)/iu;
@@ -150,10 +156,13 @@ export function axeResultToToolResults(result: AxeRunResult | null | undefined):
     .map((item, index) => ({ index, item }))
     .sort(
       (left, right) =>
+        accessibilityAuditSortPriority(left.item.rule) -
+          accessibilityAuditSortPriority(right.item.rule) ||
         compareStableStrings(
           `${left.item.rule}\0${left.item.measuredValue}`,
           `${right.item.rule}\0${right.item.measuredValue}`,
-        ) || left.index - right.index,
+        ) ||
+        left.index - right.index,
     )
     .map(({ item }) => item);
 
@@ -185,6 +194,10 @@ export function lighthouseResultToToolResults(
     .map(({ item }) => item);
 
   return evidence.length === 0 ? [] : [{ tool: LIGHTHOUSE_GROUNDING_ID, evidence }];
+}
+
+function accessibilityAuditSortPriority(rule: string): number {
+  return LIGHTHOUSE_ACCESSIBILITY_AUDIT_ID_SET.has(rule) ? 0 : 1;
 }
 
 export function createJsxA11yGroundingTool(options: JsxA11yGroundingOptions): JsxA11yGroundingTool {
@@ -369,10 +382,23 @@ function lighthouseAuditIds(lhr: LighthouseResult): readonly string[] {
         });
 
   if (fromCategories.length > 0) {
-    return uniqueStrings(fromCategories);
+    return knownAccessibilityAuditIdsFirst(uniqueStrings(fromCategories));
   }
 
-  return Object.keys(recordOrUndefined(lhr.audits) ?? {});
+  const auditIds = Object.keys(recordOrUndefined(lhr.audits) ?? {});
+
+  return knownAccessibilityAuditIdsFirst(auditIds);
+}
+
+// Accessibility audits sort ahead of performance/other audits, with each group preserving
+// Lighthouse's order. This keeps a11y evidence prominent without shuffling within categories.
+function knownAccessibilityAuditIdsFirst(auditIds: readonly string[]): readonly string[] {
+  const knownAccessibilityAuditIds = auditIds.filter((id) =>
+    LIGHTHOUSE_ACCESSIBILITY_AUDIT_ID_SET.has(id),
+  );
+  const otherAuditIds = auditIds.filter((id) => !LIGHTHOUSE_ACCESSIBILITY_AUDIT_ID_SET.has(id));
+
+  return [...knownAccessibilityAuditIds, ...otherAuditIds];
 }
 
 function lighthouseAuditScore(audit: Readonly<Record<string, unknown>>): number | undefined {
