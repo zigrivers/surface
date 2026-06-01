@@ -139,6 +139,12 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
                 path: ".surface/captures/dom.html",
                 redacted: false,
               },
+              {
+                id: "computed-styles",
+                type: "computed-styles",
+                path: ".surface/captures/computed-styles.json",
+                redacted: false,
+              },
             ],
             capturedAt: "2026-05-31T00:00:00.000Z",
             status: "completed",
@@ -171,14 +177,8 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
 
         expect(plan.overlay.appType).toBe("generic");
         expect(plan.preset).toBe("accessibility-first");
-        expect(plan.selected.map((lens) => lens.id)).toEqual(["accessibility"]);
-        expect(plan.skipped).toEqual([
-          {
-            lensId: "visual-hierarchy",
-            reason: "model_unavailable",
-            message: "No model configured.",
-          },
-        ]);
+        expect(plan.selected.map((lens) => lens.id)).toEqual(["accessibility", "visual-hierarchy"]);
+        expect(plan.skipped).toEqual([]);
         expect(decision).toMatchObject({
           factKey: "contrast:.btn-primary",
           sourceOfTruth: "measured",

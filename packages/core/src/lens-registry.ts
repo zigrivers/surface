@@ -6,6 +6,7 @@ import type { ModelAvailability } from "./model-provider.js";
 export type LensRegistration = {
   readonly id: string;
   readonly method: "measured" | "judged";
+  readonly requiredArtifacts?: readonly CaptureArtifactType[];
   readonly requiresModel: boolean;
   readonly requiresLiveDom: boolean;
   readonly presets: readonly SurfaceConfig["evaluation"]["preset"][];
@@ -69,8 +70,9 @@ export const BUILT_IN_LENS_REGISTRY = [
   {
     id: "visual-hierarchy",
     method: "judged",
-    requiresModel: true,
-    requiresLiveDom: false,
+    requiredArtifacts: ["dom-snapshot", "computed-styles"],
+    requiresModel: false,
+    requiresLiveDom: true,
     presets: ["mvp", "standard", "deep", "accessibility-first", "design-system-focused"],
   },
   {
@@ -135,10 +137,11 @@ export function selectLensExecutionPlan(input: SelectLensExecutionPlanInput): Le
   const overlay = getAppTypeOverlay(input.config.evaluation.appType);
   const preset = input.config.evaluation.preset;
   const overlayLensIds = new Set(Object.keys(overlay.lensCriteria));
+  const registry: readonly LensRegistration[] = input.registry ?? BUILT_IN_LENS_REGISTRY;
   const selected: LensRegistration[] = [];
   const skipped: LensExecutionSkip[] = [];
 
-  for (const lens of input.registry ?? BUILT_IN_LENS_REGISTRY) {
+  for (const lens of registry) {
     if (!overlayLensIds.has(lens.id) || !lens.presets.includes(preset)) {
       continue;
     }
@@ -180,12 +183,18 @@ function skipForLens(
     };
   }
 
-  if (lens.requiresLiveDom && !hasCaptureArtifact(input.capture, "dom-snapshot")) {
-    return {
-      lensId: lens.id,
-      reason: "live_dom_unavailable",
-      message: liveDomUnavailableMessage(input.capture),
-    };
+  if (lens.requiresLiveDom) {
+    const missingArtifact = (lens.requiredArtifacts ?? ["dom-snapshot"]).find(
+      (artifactType) => !hasCaptureArtifact(input.capture, artifactType),
+    );
+
+    if (missingArtifact !== undefined) {
+      return {
+        lensId: lens.id,
+        reason: "live_dom_unavailable",
+        message: liveDomUnavailableMessage(input.capture, missingArtifact),
+      };
+    }
   }
 
   return undefined;
@@ -198,7 +207,16 @@ function hasCaptureArtifact(
   return capture?.artifacts.some((artifact) => artifact.type === artifactType) ?? false;
 }
 
-function liveDomUnavailableMessage(capture: Capture | undefined): string {
+function liveDomUnavailableMessage(
+  capture: Capture | undefined,
+  missingArtifact: CaptureArtifactType,
+): string {
+  if (missingArtifact === "computed-styles") {
+    return capture === undefined
+      ? "Lens requires computed styles, but no capture was provided."
+      : "Lens requires computed styles, but this capture did not produce them.";
+  }
+
   return capture === undefined
     ? "Lens requires a live DOM snapshot, but no capture was provided."
     : "Lens requires a live DOM snapshot, but this capture did not produce one.";
