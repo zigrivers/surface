@@ -3,11 +3,18 @@ import { describe, expect, it } from "vitest";
 
 import {
   assignFindingIdentities,
+  createNoopPipelineHandlers,
+  createPipelineOrchestrator,
   createTrackedFinding,
   deriveFindingIdentity,
   matchFindingIdentity,
+  selectPipelineStages,
   transitionTrackedFinding,
+  DEFAULT_SURFACE_CONFIG,
+  ok,
   type Finding,
+  type ProjectStateSnapshot,
+  type StateStore,
 } from "../../packages/core/src/index.js";
 
 const identityFinding = {
@@ -78,6 +85,23 @@ function expectStableAssignment(
   }
 
   throw new Error("Expected stable identity assignment");
+}
+
+class AcceptanceMemoryStateStore implements StateStore {
+  constructor(private state: ProjectStateSnapshot) {}
+
+  readState() {
+    return ok(this.state);
+  }
+
+  writeState(state: ProjectStateSnapshot) {
+    this.state = state;
+    return ok(state);
+  }
+
+  writeArtifact() {
+    return ok({ path: ".surface/reports/findings.json", sha256: "abc123" });
+  }
 }
 
 describe("E5 Closed Loop, State & Baselines", () => {
@@ -238,7 +262,42 @@ describe("E5 Closed Loop, State & Baselines", () => {
   });
   describe("US-041 concurrency-safe, resumable state [gate]", () => {
     it.skip("[US-041][AC1] two overlapping runs → state access locked; neither corrupts the store (integration)", () => {});
-    it.skip("[US-041][AC2] interrupted run → re-invoke resumes from currentStage, not half-written (integration)", () => {});
+    it("[US-041][AC2] interrupted run → re-invoke resumes from currentStage, not half-written (integration)", async () => {
+      const visited: string[] = [];
+      const orchestrator = createPipelineOrchestrator({
+        handlers: createNoopPipelineHandlers({
+          capture: ({ stage }) => {
+            visited.push(stage.id);
+            return ok({ captureId: "cap_resume" });
+          },
+          validation: ({ stage }) => {
+            visited.push(stage.id);
+            return ok({ passed: true });
+          },
+        }),
+        stateStore: new AcceptanceMemoryStateStore({
+          currentStage: "capture",
+          pipeline: {
+            runId: "run_resume_acceptance",
+            stageIds: selectPipelineStages(DEFAULT_SURFACE_CONFIG).map((stage) => stage.id),
+          },
+          version: "1.0",
+        }),
+      });
+
+      const result = await orchestrator.run({
+        config: DEFAULT_SURFACE_CONFIG,
+        runId: "run_resume_acceptance",
+      });
+
+      expect(result).toMatchObject({
+        value: {
+          runId: "run_resume_acceptance",
+          newlyCompletedStages: expect.arrayContaining(["capture", "validation"]),
+        },
+      });
+      expect(visited).toEqual(["capture", "validation"]);
+    });
   });
   describe("US-042 baseline & waivers [committed]", () => {
     it.skip("[US-042][AC1] `surface baseline` → snapshot; `gate` thereafter fails only on net-new/expired findings (integration)", () => {});

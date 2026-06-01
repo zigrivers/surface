@@ -216,6 +216,16 @@ export interface PersistedArtifactRef {
 export interface ProjectStateSnapshot {
   readonly version: string;
   readonly currentStage?: string;
+  // Runtime and persistence schemas validate trimmed run ids and known stage ids.
+  // The interface remains structurally open so additive pipeline metadata can
+  // survive passthrough reads and writes.
+  readonly pipeline?: {
+    readonly [key: string]: unknown;
+    readonly lastCompletedStage?: string | undefined;
+    readonly nextEventSequence?: number | undefined;
+    readonly runId: string;
+    readonly stageIds: readonly string[];
+  };
   readonly trackedFindings?: readonly TrackedFinding[];
 }
 
