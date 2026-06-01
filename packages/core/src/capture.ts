@@ -1,14 +1,15 @@
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
-import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { extname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
 import type {
   BuiltInCaptureBackendId,
   Capture,
   CaptureArtifact,
+  CaptureArtifactType,
   CaptureBackend,
   CaptureNetworkPolicy,
   CaptureOptions,
@@ -41,6 +42,39 @@ const TARGET_KINDS = new Set<string>([
   "component",
   "dom",
 ]);
+const STATIC_CAPTURE_SKIPPED_ARTIFACTS = [
+  "dom-snapshot",
+  "accessibility-tree",
+  "computed-styles",
+] as const satisfies readonly CaptureArtifactType[];
+const STATIC_SCREENSHOT_EXTENSIONS = new Set([".png"]);
+const STATIC_CAPTURE_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/;
+const STATIC_MAX_SCREENSHOT_BYTES = 100 * 1024 * 1024;
+const STATIC_SCREENSHOT_SKIPPED_REASON = "static screenshot input; live DOM artifacts unavailable";
+const WINDOWS_RESERVED_CAPTURE_IDS = new Set([
+  "AUX",
+  "CON",
+  "NUL",
+  "PRN",
+  "COM1",
+  "COM2",
+  "COM3",
+  "COM4",
+  "COM5",
+  "COM6",
+  "COM7",
+  "COM8",
+  "COM9",
+  "LPT1",
+  "LPT2",
+  "LPT3",
+  "LPT4",
+  "LPT5",
+  "LPT6",
+  "LPT7",
+  "LPT8",
+  "LPT9",
+]);
 
 // Custom injected backends are treated as explicit user wiring and win over built-ins.
 const CUSTOM_BACKEND_PRIORITY = 3;
@@ -64,6 +98,17 @@ export interface PlaywrightCaptureBackendOptions {
   readonly clock?: CaptureClock;
   readonly idFactory?: CaptureIdFactory;
   readonly loadPlaywright?: () => Promise<unknown>;
+}
+
+export interface StaticCaptureBackendOptions {
+  /**
+   * Optional trusted source roots for screenshot target refs. When omitted,
+   * screenshot refs are treated as trusted local file inputs and may point to
+   * any readable image file on disk.
+   */
+  readonly allowedSourceRoots?: readonly string[];
+  readonly clock?: CaptureClock;
+  readonly idFactory?: CaptureIdFactory;
 }
 
 type HostAddressCache = Map<string, Promise<readonly string[] | undefined>>;
@@ -282,6 +327,301 @@ export function createPlaywrightCaptureBackend(
       }
     },
   };
+}
+
+/**
+ * Creates the degraded static fallback backend. Screenshot target refs are
+ * trusted local file inputs unless allowedSourceRoots is configured. Do not
+ * pass attacker-controlled refs without constraining source roots.
+ */
+export function createStaticCaptureBackend(
+  options: StaticCaptureBackendOptions = {},
+): CaptureBackend {
+  const idFactory = options.idFactory ?? createDefaultCaptureIdFactory();
+  const clock = options.clock ?? (() => new Date().toISOString());
+  const allowedSourceRoots = options.allowedSourceRoots;
+
+  return {
+    id: "static",
+    detect: () => false,
+    observe: async (target, captureOptions) => {
+      const captureId = idFactory(target);
+      const artifactRoot = captureOptions.artifactRoot ?? ".surface/captures";
+      const captureRoot = join(artifactRoot, captureId);
+      const sourcePath = target.kind === "screenshot" ? resolve(target.ref) : undefined;
+      const extension = sourcePath === undefined ? undefined : extname(sourcePath).toLowerCase();
+      const screenshotPath = join(captureRoot, `screenshot${extension ?? ".png"}`);
+      let captureRootCreated = false;
+
+      if (!isStaticCaptureIdSafe(captureId)) {
+        return err(staticCaptureIdError(captureId, target));
+      }
+
+      if (sourcePath === undefined) {
+        return err(
+          createSurfaceError("capture_failed", "Static capture requires a screenshot target.", {
+            details: {
+              backendId: "static",
+              captureId,
+              reason: "screenshot-target-required",
+              targetKind: target.kind,
+            },
+          }),
+        );
+      }
+
+      const sourceExtension = extension ?? "";
+
+      if (!STATIC_SCREENSHOT_EXTENSIONS.has(sourceExtension)) {
+        return err(
+          createSurfaceError(
+            "capture_failed",
+            "Static backend screenshot source must be a supported image file.",
+            {
+              details: {
+                backendId: "static",
+                captureId,
+                extension: sourceExtension,
+                reason: "unsupported-screenshot-extension",
+                targetKind: target.kind,
+              },
+            },
+          ),
+        );
+      }
+
+      try {
+        const source = await stat(sourcePath).catch(() => undefined);
+
+        if (source === undefined || !source.isFile()) {
+          return err(
+            createSurfaceError(
+              "capture_failed",
+              "Static backend screenshot source must be a readable file.",
+              {
+                details: {
+                  backendId: "static",
+                  captureId,
+                  reason: "screenshot-source-unavailable",
+                  targetKind: target.kind,
+                },
+              },
+            ),
+          );
+        }
+
+        if (source.size > STATIC_MAX_SCREENSHOT_BYTES) {
+          return err(
+            createSurfaceError("capture_failed", "Static backend screenshot source is too large.", {
+              details: {
+                backendId: "static",
+                captureId,
+                maxBytes: STATIC_MAX_SCREENSHOT_BYTES,
+                reason: "screenshot-too-large",
+                size: source.size,
+                targetKind: target.kind,
+              },
+            }),
+          );
+        }
+
+        const sourceContainment = await validateStaticSourceRoot(
+          sourcePath,
+          allowedSourceRoots,
+          captureId,
+          target,
+        );
+
+        if (!sourceContainment.ok) {
+          return err(sourceContainment.error);
+        }
+
+        const sourceBytes = await readFile(sourceContainment.value);
+
+        if (!isSupportedScreenshotBytes(sourceBytes, sourceExtension)) {
+          return err(
+            createSurfaceError(
+              "capture_failed",
+              "Static backend screenshot source must be a supported image file.",
+              {
+                details: {
+                  backendId: "static",
+                  captureId,
+                  extension: sourceExtension,
+                  reason: "unsupported-screenshot-content",
+                  targetKind: target.kind,
+                },
+              },
+            ),
+          );
+        }
+
+        await mkdir(artifactRoot, { recursive: true });
+        try {
+          await mkdir(captureRoot);
+        } catch (cause) {
+          if (isFileSystemError(cause, "EEXIST")) {
+            return err(staticCaptureRootExistsError(captureId, target));
+          }
+
+          throw cause;
+        }
+        captureRootCreated = true;
+
+        await writeFile(screenshotPath, sourceBytes);
+
+        return ok({
+          artifacts: [
+            {
+              id: "screenshot",
+              path: screenshotPath,
+              redacted: false,
+              type: "screenshot",
+            },
+          ],
+          backend: "static",
+          capturedAt: clock(),
+          degradation: {
+            skippedArtifacts: [...STATIC_CAPTURE_SKIPPED_ARTIFACTS],
+            skippedReason: STATIC_SCREENSHOT_SKIPPED_REASON,
+          },
+          id: captureId,
+          status: "degraded",
+          target,
+        });
+      } catch (cause) {
+        if (captureRootCreated) {
+          await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
+        }
+
+        return err(
+          createSurfaceError("capture_failed", "Static backend could not capture the screenshot.", {
+            cause,
+            details: { backendId: "static", captureId, targetKind: target.kind },
+          }),
+        );
+      }
+    },
+  };
+}
+
+function isStaticCaptureIdSafe(captureId: string): boolean {
+  if (!STATIC_CAPTURE_ID_PATTERN.test(captureId)) {
+    return false;
+  }
+
+  return !WINDOWS_RESERVED_CAPTURE_IDS.has(captureId.split(".")[0]?.toUpperCase() ?? "");
+}
+
+function staticCaptureIdError(captureId: string, target: Target): SurfaceError {
+  return createSurfaceError(
+    "capture_failed",
+    "Static backend capture id must be filesystem-safe.",
+    {
+      details: {
+        backendId: "static",
+        captureId,
+        reason: "invalid-capture-id",
+        targetKind: target.kind,
+      },
+    },
+  );
+}
+
+function staticCaptureRootExistsError(captureId: string, target: Target): SurfaceError {
+  return createSurfaceError("capture_failed", "Static backend capture id already exists.", {
+    details: {
+      backendId: "static",
+      captureId,
+      reason: "capture-root-exists",
+      targetKind: target.kind,
+    },
+  });
+}
+
+function isSupportedScreenshotBytes(bytes: Buffer, extension: string): boolean {
+  switch (extension) {
+    case ".png":
+      return isValidPng(bytes);
+    default:
+      return false;
+  }
+}
+
+async function validateStaticSourceRoot(
+  sourcePath: string,
+  allowedSourceRoots: readonly string[] | undefined,
+  captureId: string,
+  target: Target,
+): Promise<Result<string, SurfaceError>> {
+  const realSourcePath = await realpath(sourcePath).catch(() => undefined);
+
+  if (realSourcePath === undefined) {
+    return err(
+      createSurfaceError(
+        "capture_failed",
+        "Static backend screenshot source must be a readable file.",
+        {
+          details: {
+            backendId: "static",
+            captureId,
+            reason: "screenshot-source-unavailable",
+            targetKind: target.kind,
+          },
+        },
+      ),
+    );
+  }
+
+  if (allowedSourceRoots === undefined || allowedSourceRoots.length === 0) {
+    return ok(realSourcePath);
+  }
+
+  const realAllowedRoots = await Promise.all(
+    allowedSourceRoots.map((root) => realpath(root).catch(() => undefined)),
+  );
+
+  if (realAllowedRoots.some((root) => root !== undefined && isPathInside(realSourcePath, root))) {
+    return ok(realSourcePath);
+  }
+
+  return err(
+    createSurfaceError(
+      "capture_failed",
+      "Static backend screenshot source is outside allowed roots.",
+      {
+        details: {
+          backendId: "static",
+          captureId,
+          reason: "screenshot-source-outside-allowed-roots",
+          targetKind: target.kind,
+        },
+      },
+    ),
+  );
+}
+
+function isValidPng(bytes: Buffer): boolean {
+  return (
+    bytes.length >= 33 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a &&
+    bytes.readUInt32BE(8) === 13 &&
+    bytes.toString("ascii", 12, 16) === "IHDR" &&
+    bytes.readUInt32BE(16) > 0 &&
+    bytes.readUInt32BE(20) > 0
+  );
+}
+
+function isPathInside(path: string, root: string): boolean {
+  const relativePath = relative(root, path);
+  return relativePath.length === 0 || (!relativePath.startsWith("..") && !isAbsolute(relativePath));
 }
 
 export function selectCaptureBackend(
@@ -824,6 +1164,10 @@ function errorCode(cause: unknown): string | undefined {
   return cause !== null && typeof cause === "object" && "code" in cause
     ? String((cause as { readonly code?: unknown }).code)
     : undefined;
+}
+
+function isFileSystemError(cause: unknown, code: string): boolean {
+  return errorCode(cause) === code;
 }
 
 function playwrightContextOptions(

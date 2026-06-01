@@ -13,6 +13,7 @@ import {
   createCaptureService,
   createDefaultCaptureIdFactory,
   createPlaywrightCaptureBackend,
+  createStaticCaptureBackend,
   err,
   isErr,
   isOk,
@@ -30,6 +31,10 @@ const allowedCaptureConfig = {
   allowlist: ["https://example.com"],
 };
 const temporaryRoots: string[] = [];
+const VALID_PNG_BYTES = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAFgwJ/l2nb4QAAAABJRU5ErkJggg==",
+  "base64",
+);
 
 afterEach(async () => {
   await Promise.all(
@@ -1003,14 +1008,24 @@ describe("E1 Capture & Inputs", () => {
 
     it("[US-001][AC2] neither backend installed → static+screenshot fallback; skipped measured checks reported (integration)", async () => {
       const artifactRoot = await createTempArtifactRoot();
+      const sourceRoot = await mkdtemp(join(tmpdir(), "surface-screenshot-source-"));
+      temporaryRoots.push(sourceRoot);
+      const sourceScreenshot = join(sourceRoot, "landing.png");
+      await writeFile(sourceScreenshot, VALID_PNG_BYTES);
       const service = createCaptureService({
         backends: [
           customBackend("playwright", false, artifactRoot),
           customBackend("agent-browser", false, artifactRoot),
         ],
-        staticFallback: staticFallbackBackend(artifactRoot, () => "cap-static"),
+        staticFallback: createStaticCaptureBackend({
+          clock: () => "2026-05-31T18:00:00.000Z",
+          idFactory: () => "cap-static",
+        }),
       });
-      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+      const result = await service.capture(
+        { kind: "screenshot", ref: sourceScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
 
       expect(isOk(result)).toBe(true);
       if (!result.ok) {
@@ -1021,8 +1036,9 @@ describe("E1 Capture & Inputs", () => {
         backend: "static",
         degradation: {
           skippedArtifacts: ["dom-snapshot", "accessibility-tree", "computed-styles"],
-          skippedReason: "no browser backend installed",
+          skippedReason: "static screenshot input; live DOM artifacts unavailable",
         },
+        id: "cap-static",
         status: "degraded",
       });
       expect(result.value.artifacts).toEqual([
@@ -1033,9 +1049,374 @@ describe("E1 Capture & Inputs", () => {
           type: "screenshot",
         },
       ]);
-      await expect(
-        access(join(artifactRoot, "cap-static", "screenshot.png")),
-      ).resolves.toBeUndefined();
+      await expect(readFile(join(artifactRoot, "cap-static", "screenshot.png"))).resolves.toEqual(
+        VALID_PNG_BYTES,
+      );
+    });
+
+    it("[US-001][AC2] static backend captures supplied screenshot targets as degraded evidence (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const sourceRoot = await mkdtemp(join(tmpdir(), "surface-screenshot-source-"));
+      temporaryRoots.push(sourceRoot);
+      const sourceScreenshot = join(sourceRoot, "landing.png");
+      await writeFile(sourceScreenshot, VALID_PNG_BYTES);
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          clock: () => "2026-05-31T18:00:00.000Z",
+          idFactory: () => "cap-static-screenshot",
+        }),
+      });
+
+      const result = await service.capture(
+        { kind: "screenshot", ref: sourceScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isOk(result)).toBe(true);
+      if (!result.ok) {
+        throw new Error("expected static screenshot capture to succeed");
+      }
+
+      const capturedScreenshot = join(artifactRoot, "cap-static-screenshot", "screenshot.png");
+      expect(result.value).toEqual({
+        artifacts: [
+          {
+            id: "screenshot",
+            path: capturedScreenshot,
+            redacted: false,
+            type: "screenshot",
+          },
+        ],
+        backend: "static",
+        capturedAt: "2026-05-31T18:00:00.000Z",
+        degradation: {
+          skippedArtifacts: ["dom-snapshot", "accessibility-tree", "computed-styles"],
+          skippedReason: "static screenshot input; live DOM artifacts unavailable",
+        },
+        id: "cap-static-screenshot",
+        status: "degraded",
+        target: { kind: "screenshot", ref: sourceScreenshot },
+      });
+      await expect(readFile(capturedScreenshot)).resolves.toEqual(VALID_PNG_BYTES);
+    });
+
+    it("[US-001][AC2] static backend rejects URL targets without fabricating evidence (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static-url",
+        }),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static-url",
+            reason: "screenshot-target-required",
+            targetKind: "url",
+          },
+          message: "Static capture requires a screenshot target.",
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-static-url"))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend rejects non-image screenshot sources without artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const sourceRoot = await mkdtemp(join(tmpdir(), "surface-screenshot-source-"));
+      temporaryRoots.push(sourceRoot);
+      const sourceScreenshot = join(sourceRoot, "landing.txt");
+      await writeFile(sourceScreenshot, "not image bytes");
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static-text-source",
+        }),
+      });
+
+      const result = await service.capture(
+        { kind: "screenshot", ref: sourceScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static-text-source",
+            extension: ".txt",
+            reason: "unsupported-screenshot-extension",
+            targetKind: "screenshot",
+          },
+          message: "Static backend screenshot source must be a supported image file.",
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-static-text-source"))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend rejects extensionless screenshot sources without artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const sourceRoot = await mkdtemp(join(tmpdir(), "surface-screenshot-source-"));
+      temporaryRoots.push(sourceRoot);
+      const sourceScreenshot = join(sourceRoot, "landing");
+      await writeFile(sourceScreenshot, VALID_PNG_BYTES);
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static-extensionless-source",
+        }),
+      });
+
+      const result = await service.capture(
+        { kind: "screenshot", ref: sourceScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static-extensionless-source",
+            reason: "unsupported-screenshot-extension",
+            targetKind: "screenshot",
+          },
+          message: "Static backend screenshot source must be a supported image file.",
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-static-extensionless-source"))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend rejects mismatched screenshot bytes without artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const sourceRoot = await mkdtemp(join(tmpdir(), "surface-screenshot-source-"));
+      temporaryRoots.push(sourceRoot);
+      const sourceScreenshot = join(sourceRoot, "landing.png");
+      await writeFile(sourceScreenshot, "not image bytes");
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static-bad-png",
+        }),
+      });
+
+      const result = await service.capture(
+        { kind: "screenshot", ref: sourceScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static-bad-png",
+            extension: ".png",
+            reason: "unsupported-screenshot-content",
+            targetKind: "screenshot",
+          },
+          message: "Static backend screenshot source must be a supported image file.",
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-static-bad-png"))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend reports missing screenshot sources without partial artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const missingScreenshot = join(artifactRoot, "missing.png");
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static-missing-source",
+        }),
+      });
+
+      const result = await service.capture(
+        { kind: "screenshot", ref: missingScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static-missing-source",
+            reason: "screenshot-source-unavailable",
+            targetKind: "screenshot",
+          },
+          message: "Static backend screenshot source must be a readable file.",
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-static-missing-source"))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend rejects unsafe capture ids without writing artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "../escape",
+        }),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "../escape",
+            reason: "invalid-capture-id",
+            targetKind: "url",
+          },
+          message: "Static backend capture id must be filesystem-safe.",
+        },
+      });
+      await expect(access(join(artifactRoot, "..", "escape"))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend rejects platform-unsafe capture ids before mkdir (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static.",
+        }),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static.",
+            reason: "invalid-capture-id",
+            targetKind: "url",
+          },
+          message: "Static backend capture id must be filesystem-safe.",
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-static."))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend rejects Windows-reserved capture ids before mkdir (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "CON",
+        }),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "CON",
+            reason: "invalid-capture-id",
+            targetKind: "url",
+          },
+          message: "Static backend capture id must be filesystem-safe.",
+        },
+      });
+      await expect(access(join(artifactRoot, "CON"))).rejects.toThrow();
+    });
+
+    it("[US-001][AC2] static backend rejects colliding capture ids without deleting artifacts (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const sourceRoot = await mkdtemp(join(tmpdir(), "surface-screenshot-source-"));
+      temporaryRoots.push(sourceRoot);
+      const sourceScreenshot = join(sourceRoot, "landing.png");
+      const existingCaptureRoot = join(artifactRoot, "cap-static-existing");
+      const existingArtifact = join(existingCaptureRoot, "screenshot.png");
+      await writeFile(sourceScreenshot, VALID_PNG_BYTES);
+      await mkdir(existingCaptureRoot, { recursive: true });
+      await writeFile(existingArtifact, "existing artifact");
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static-existing",
+        }),
+      });
+
+      const result = await service.capture(
+        { kind: "screenshot", ref: sourceScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static-existing",
+            reason: "capture-root-exists",
+            targetKind: "screenshot",
+          },
+          message: "Static backend capture id already exists.",
+        },
+      });
+      await expect(readFile(existingArtifact, "utf8")).resolves.toBe("existing artifact");
+    });
+
+    it("[US-001][AC2] static backend reports artifact-root creation failures without deleting siblings (unit)", async () => {
+      const root = await mkdtemp(join(tmpdir(), "surface-static-artifact-root-failure-"));
+      temporaryRoots.push(root);
+      const sourceScreenshot = join(root, "landing.png");
+      const artifactRoot = join(root, "captures-file");
+      const siblingFile = join(root, "sibling.txt");
+      await writeFile(sourceScreenshot, VALID_PNG_BYTES);
+      await writeFile(artifactRoot, "not a directory");
+      await writeFile(siblingFile, "keep me");
+      const service = createCaptureService({
+        backends: [],
+        staticFallback: createStaticCaptureBackend({
+          idFactory: () => "cap-static-root-failure",
+        }),
+      });
+
+      const result = await service.capture(
+        { kind: "screenshot", ref: sourceScreenshot },
+        { artifactRoot, config: DEFAULT_SURFACE_CONFIG.capture },
+      );
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_failed",
+          details: {
+            backendId: "static",
+            captureId: "cap-static-root-failure",
+            targetKind: "screenshot",
+          },
+          message: "Static backend could not capture the screenshot.",
+        },
+      });
+      await expect(access(join(artifactRoot, "cap-static-root-failure"))).rejects.toThrow();
+      await expect(readFile(siblingFile, "utf8")).resolves.toBe("keep me");
     });
 
     it("[US-001][AC2] registered static backend is only used as fallback (unit)", async () => {
@@ -1066,6 +1447,24 @@ describe("E1 Capture & Inputs", () => {
         },
       });
       expect(selectedStaticObserved).toBe(false);
+    });
+
+    it("[US-001][AC2] registered static backend does not shadow live backends (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const service = createCaptureService({
+        backends: [createStaticCaptureBackend(), backend("playwright", true, artifactRoot)],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isOk(result)).toBe(true);
+      expect(result).toMatchObject({
+        value: {
+          backend: "playwright",
+          status: "completed",
+        },
+      });
     });
 
     it("[US-001][AC3] both backends installed → deterministic selection recorded in capture metadata (integration)", async () => {
@@ -1217,6 +1616,35 @@ describe("E1 Capture & Inputs", () => {
           code: "capture_unreachable",
         },
       });
+    });
+
+    it("[US-001][AC2] public static backend preserves URL browser failures instead of fabricating evidence (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      let fallbackObserved = false;
+      const staticFallback = createStaticCaptureBackend({
+        idFactory: () => "cap-static-after-url-failure",
+      });
+      const service = createCaptureService({
+        backends: [failingBackend("playwright", "capture_unreachable")],
+        staticFallback: {
+          ...staticFallback,
+          observe: async (observedTarget, captureOptions) => {
+            fallbackObserved = true;
+            return staticFallback.observe(observedTarget, captureOptions);
+          },
+        },
+      });
+
+      const result = await service.capture(target, { artifactRoot, config: allowedCaptureConfig });
+
+      expect(isErr(result)).toBe(true);
+      expect(result).toMatchObject({
+        error: {
+          code: "capture_unreachable",
+        },
+      });
+      expect(fallbackObserved).toBe(true);
+      await expect(access(join(artifactRoot, "cap-static-after-url-failure"))).rejects.toThrow();
     });
 
     it("[US-001][AC2] throwing backend detection falls through to static fallback (unit)", async () => {
