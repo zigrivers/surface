@@ -3,6 +3,7 @@ export const CORE_PACKAGE_NAME = "@surface/core";
 export { createAccessibilityLens } from "./accessibility-lens.js";
 export * from "./app-type-overlays.js";
 export * from "./capture.js";
+export * from "./composition-factory.js";
 export * from "./config.js";
 export * from "./context-ingestor.js";
 export * from "./content-lens.js";

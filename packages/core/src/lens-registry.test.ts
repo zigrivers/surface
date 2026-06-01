@@ -349,6 +349,23 @@ describe("lens registry", () => {
     );
   });
 
+  it("wires create hooks for every implemented core-owned built-in lens", () => {
+    const implementedCoreLensIds = [
+      "accessibility",
+      "usability",
+      "visual-hierarchy",
+      "content",
+      "responsiveness",
+    ];
+    const builtInRegistry: readonly LensRegistration[] = BUILT_IN_LENS_REGISTRY;
+
+    const created = builtInRegistry
+      .filter((registration) => implementedCoreLensIds.includes(registration.id))
+      .map((registration) => registration.create?.({ projectRoot: "/tmp/project" }).id);
+
+    expect(created).toEqual(implementedCoreLensIds);
+  });
+
   it("keeps measured-wins synthesis decisions auditable", () => {
     expect(
       synthesizeMeasuredWinsDecision({

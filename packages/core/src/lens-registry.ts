@@ -1,9 +1,12 @@
 import type { SurfaceConfig } from "./config.js";
 import { createAccessibilityLens } from "./accessibility-lens.js";
 import { getAppTypeOverlay, type AppTypeOverlay } from "./app-type-overlays.js";
+import { createContentMicrocopyLens } from "./content-lens.js";
 import type { Capture, CaptureArtifactType, Lens } from "./interfaces.js";
 import type { ModelAvailability } from "./model-provider.js";
+import { createResponsivenessStatesLens } from "./responsiveness-states-lens.js";
 import { createUsabilityHeuristicLens } from "./usability-heuristic-lens.js";
+import { createVisualHierarchyLens } from "./visual-hierarchy-lens.js";
 
 export type LensFactoryOptions = {
   readonly maxDomChars?: number;
@@ -90,6 +93,7 @@ export const BUILT_IN_LENS_REGISTRY = [
     requiresModel: false,
     requiresLiveDom: true,
     presets: ["mvp", "standard", "deep", "accessibility-first", "design-system-focused"],
+    create: (options) => createVisualHierarchyLens(options),
   },
   {
     id: "content",
@@ -97,6 +101,7 @@ export const BUILT_IN_LENS_REGISTRY = [
     requiresModel: false,
     requiresLiveDom: true,
     presets: ["standard", "deep"],
+    create: (options) => createContentMicrocopyLens(options),
   },
   {
     id: "responsiveness",
@@ -104,6 +109,7 @@ export const BUILT_IN_LENS_REGISTRY = [
     requiresModel: false,
     requiresLiveDom: true,
     presets: ["mvp", "standard", "deep", "accessibility-first", "conversion-focused"],
+    create: (options) => createResponsivenessStatesLens(options),
   },
   {
     id: "conversion",
