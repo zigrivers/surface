@@ -8,6 +8,7 @@ import type {
   FindingDraft,
   ToolResultEvidence,
 } from "./findings.js";
+import type { TrackedFinding } from "./tracked-findings.js";
 export type { Backlog, BacklogEntry } from "./findings.js";
 
 type MaybePromise<T> = T | Promise<T>;
@@ -212,6 +213,7 @@ export interface PersistedArtifactRef {
 export interface ProjectStateSnapshot {
   readonly version: string;
   readonly currentStage?: string;
+  readonly trackedFindings?: readonly TrackedFinding[];
 }
 
 export interface StateStore {

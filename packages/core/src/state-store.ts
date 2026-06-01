@@ -13,6 +13,7 @@ import type {
   ProjectStateSnapshot,
   StateStore,
 } from "./interfaces.js";
+import { TrackedFindingSchema } from "./tracked-findings.js";
 
 /** Default project-local directory used for Surface state and artifacts. */
 export const SURFACE_STATE_DIR = ".surface";
@@ -25,6 +26,7 @@ const ProjectStateSnapshotSchema = z
   .object({
     version: z.string().min(1),
     currentStage: z.string().min(1).optional(),
+    trackedFindings: z.array(TrackedFindingSchema).optional(),
   })
   .passthrough();
 
@@ -33,6 +35,7 @@ const LegacyProjectStateSnapshotSchema = z
     schemaVersion: z.string().min(1).optional(),
     version: z.string().min(1).optional(),
     currentStage: z.string().min(1).optional(),
+    trackedFindings: z.array(z.unknown()).optional(),
   })
   .passthrough();
 
@@ -472,23 +475,24 @@ function migrateProjectState(
   targetVersion: string,
   options: MigrationOptions = {},
 ): MigrationResult {
+  // trackedFindings currently migrate with the project state version. Add explicit per-item
+  // migration here before changing required tracked finding fields or history invariants.
   const legacy = LegacyProjectStateSnapshotSchema.parse(value);
-  const { currentStage, schemaVersion, version, ...rest } = legacy;
+  const { currentStage, schemaVersion, trackedFindings, version, ...passthrough } = legacy;
+  const migratedTrackedFindings =
+    trackedFindings === undefined
+      ? undefined
+      : z.array(TrackedFindingSchema).parse(trackedFindings);
   const hadSchemaVersion = schemaVersion !== undefined;
   const hadVersion = version !== undefined;
   const migratedVersion =
     options.forceVersion === true || hadSchemaVersion || !hadVersion ? targetVersion : version;
-  const migrated: ProjectStateSnapshot =
-    currentStage === undefined
-      ? {
-          ...rest,
-          version: migratedVersion,
-        }
-      : {
-          ...rest,
-          currentStage,
-          version: migratedVersion,
-        };
+  const migrated: ProjectStateSnapshot = {
+    ...passthrough,
+    version: migratedVersion,
+    ...(currentStage !== undefined ? { currentStage } : {}),
+    ...(migratedTrackedFindings !== undefined ? { trackedFindings: migratedTrackedFindings } : {}),
+  };
 
   ProjectStateSnapshotSchema.parse(migrated);
   return { hadSchemaVersion, hadVersion, state: migrated };

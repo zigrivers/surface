@@ -5,7 +5,52 @@ import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { isErr, isOk } from "./errors.js";
+import { type Finding } from "./findings.js";
 import { createFileStateStore, SURFACE_STATE_VERSION } from "./state-store.js";
+import { createTrackedFinding } from "./tracked-findings.js";
+
+const stateStoreFinding = {
+  id: "f_state_1",
+  lens: "accessibility",
+  issueType: "contrast-insufficient",
+  method: "measured",
+  title: "Button contrast is below AA",
+  rationale: "Primary button contrast is insufficient against its background.",
+  citedHeuristics: ["kb_wcag_143"],
+  evidence: [
+    {
+      kind: "tool-result",
+      measuredValue: "3.1:1",
+      rule: "color-contrast",
+      threshold: "4.5:1",
+      tool: "axe",
+    },
+  ],
+  dimensions: {
+    a11yLegalRisk: 0.9,
+    agentImplementability: 0.9,
+    businessImpact: 0.5,
+    confidence: 1,
+    effort: 0.2,
+    evidenceQuality: 1,
+    severity: 0.8,
+    userImpact: 0.7,
+  },
+  severityBand: "P1",
+  location: {
+    component: "Button",
+    elementRef: "@e12",
+    file: "src/Button.tsx",
+    selector: ".btn-primary",
+  },
+  confidenceBand: "assert",
+  gatedForHuman: false,
+} satisfies Finding;
+
+const stateStoreValidation = {
+  expectation: "axe color-contrast passes on @e12",
+  kind: "measured-rule",
+} as const;
 
 async function makeTempRoot(): Promise<string> {
   const root = await mkdtemp(path.join(os.tmpdir(), "surface-state-store-"));
@@ -53,6 +98,77 @@ describe("FileStateStore", () => {
     expect(persisted).toEqual({
       currentStage: "score",
       futureField: true,
+      version: SURFACE_STATE_VERSION,
+    });
+  });
+
+  it("round-trips tracked findings and preserves them during legacy migration", async () => {
+    const root = await makeTempRoot();
+    const stateDir = path.join(root, ".surface");
+    const stateFile = path.join(stateDir, "state.json");
+    const store = createFileStateStore({ projectRoot: root });
+    const tracked = createTrackedFinding({
+      finding: stateStoreFinding,
+      runId: "run_001",
+      validation: stateStoreValidation,
+    });
+
+    const written = await store.writeState({
+      trackedFindings: [tracked],
+      version: "0.9.0",
+    });
+    const roundTripped = await store.readState();
+
+    expect(isOk(written)).toBe(true);
+    expect(isOk(roundTripped)).toBe(true);
+    expect(roundTripped).toMatchObject({
+      value: {
+        trackedFindings: [
+          {
+            currentFindingId: "f_state_1",
+            history: [{ runId: "run_001", status: "new" }],
+            identityKey: tracked.identityKey,
+            status: "new",
+          },
+        ],
+        version: SURFACE_STATE_VERSION,
+      },
+    });
+
+    await writeFile(
+      stateFile,
+      `${JSON.stringify({
+        schemaVersion: "0.1",
+        trackedFindings: [tracked],
+      })}\n`,
+    );
+
+    const migrated = await store.readState();
+    const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Record<string, unknown>;
+
+    expect(isOk(migrated)).toBe(true);
+    expect(migrated).toMatchObject({
+      value: {
+        trackedFindings: [
+          {
+            currentFindingId: "f_state_1",
+            history: [{ runId: "run_001", status: "new" }],
+            identityKey: tracked.identityKey,
+            status: "new",
+          },
+        ],
+        version: SURFACE_STATE_VERSION,
+      },
+    });
+    expect(persisted).toMatchObject({
+      trackedFindings: [
+        {
+          currentFindingId: "f_state_1",
+          history: [{ runId: "run_001", status: "new" }],
+          identityKey: tracked.identityKey,
+          status: "new",
+        },
+      ],
       version: SURFACE_STATE_VERSION,
     });
   });

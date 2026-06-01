@@ -3,8 +3,10 @@ import { describe, expect, it } from "vitest";
 
 import {
   assignFindingIdentities,
+  createTrackedFinding,
   deriveFindingIdentity,
   matchFindingIdentity,
+  transitionTrackedFinding,
   type Finding,
 } from "../../packages/core/src/index.js";
 
@@ -183,6 +185,53 @@ describe("E5 Closed Loop, State & Baselines", () => {
           },
         },
       );
+    });
+
+    it("[US-040][AC1] tracked finding lifecycle across runs is explicit (unit)", () => {
+      const movedWithElementRef = findingWith({
+        id: "f_a2",
+        location: {
+          file: "src/Header.tsx",
+          component: "Header",
+          selector: "header .primary",
+          elementRef: "@e12",
+        },
+      });
+      const tracked = createTrackedFinding({
+        finding: identityFinding,
+        runId: "run_001",
+        validation: {
+          kind: "measured-rule",
+          expectation: "axe color-contrast passes on @e12",
+        },
+      });
+      const stillFailing = transitionTrackedFinding(tracked, {
+        finding: movedWithElementRef,
+        kind: "detected",
+        runId: "run_002",
+      });
+      const resolved = transitionTrackedFinding(stillFailing, {
+        kind: "missing",
+        runId: "run_003",
+        validationPassed: true,
+      });
+      const regressed = transitionTrackedFinding(resolved, {
+        finding: movedWithElementRef,
+        kind: "detected",
+        runId: "run_004",
+      });
+      const identityBroken = transitionTrackedFinding(tracked, {
+        currentFindingId: "f_unmatchable",
+        kind: "identity-broken",
+        runId: "run_005",
+      });
+
+      expect([
+        stillFailing.status,
+        resolved.status,
+        regressed.status,
+        identityBroken.status,
+      ]).toEqual(["still-failing", "resolved", "regressed", "identity-broken"]);
     });
 
     it.skip("[US-040][AC1] unchanged defect → same id, still-failing; fixed → resolved; reappeared → regressed; unmatchable anchor → identity-broken (never silent resolved) (integration)", () => {});
