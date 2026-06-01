@@ -609,9 +609,15 @@ describe("synthesizeBacklog", () => {
       throw new Error(singleResult.error.message);
     }
 
-    expect(singleResult.value.entries).toEqual([
-      { findingId: "f_single", priority: singleResult.value.entries[0]?.priority, rank: 1 },
-    ]);
+    expect(singleResult.value.entries).toHaveLength(1);
+    expect(singleResult.value.entries[0]).toMatchObject({
+      findingId: "f_single",
+      priority: singleResult.value.entries[0]?.priority,
+      rank: 1,
+      title: singleFinding.title,
+      rationale: singleFinding.rationale,
+      location: singleFinding.location,
+    });
 
     const tieA = findingWith({ id: "f_a", issueType: "layout-a", title: "Layout issue A" });
     const tieB = findingWith({ id: "f_b", issueType: "layout-b", title: "Layout issue B" });

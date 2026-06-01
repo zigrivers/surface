@@ -19,6 +19,7 @@
   ],
   "dependencies": {
     "@noble/hashes": "catalog:",
+    "@octokit/rest": "catalog:",
     "pino": "catalog:",
     "proper-lockfile": "catalog:",
     "write-file-atomic": "catalog:",

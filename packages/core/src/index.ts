@@ -4,6 +4,7 @@ export * from "./config.js";
 export * from "./errors.js";
 export * from "./findings.js";
 export * from "./gate-evaluator.js";
+export * from "./github-issue-exporter.js";
 export * from "./identity.js";
 export * from "./logging.js";
 export * from "./model-provider.js";

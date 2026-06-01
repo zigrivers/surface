@@ -246,6 +246,11 @@ export type Finding = z.infer<typeof FindingSchema>;
 export const BacklogEntrySchema = z
   .object({
     findingId: nonEmptyStringSchema,
+    title: nonEmptyStringSchema.optional(),
+    rationale: nonEmptyStringSchema.optional(),
+    severityBand: SeverityBandSchema.optional(),
+    location: LocationSchema.optional(),
+    suggestedPatch: SuggestedPatchSchema.optional(),
     priority: z.number().nonnegative(),
     rank: z.number().int().positive(),
     demotedAsDuplicateOf: nonEmptyStringSchema.optional(),
@@ -631,6 +636,13 @@ export function synthesizeBacklog(runId: string, findings: readonly Finding[]): 
     .sort(comparePriorityThenId)
     .map((ranking, index) => ({
       findingId: ranking.finding.id,
+      title: ranking.finding.title,
+      rationale: ranking.finding.rationale,
+      severityBand: ranking.finding.severityBand,
+      location: ranking.finding.location,
+      ...(ranking.finding.suggestedPatch !== undefined
+        ? { suggestedPatch: ranking.finding.suggestedPatch }
+        : {}),
       priority: ranking.priority,
       rank: index + 1,
       ...(ranking.demotedAsDuplicateOf !== undefined

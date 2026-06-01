@@ -8,6 +8,7 @@ onlyBuiltDependencies:
 catalog:
   "@eslint/js": ^9.39.4
   "@noble/hashes": ^2.2.0
+  "@octokit/rest": ^22.0.1
   "@types/node": ^22.13.0
   "@types/proper-lockfile": ^4.1.4
   "@types/write-file-atomic": ^4.0.3
