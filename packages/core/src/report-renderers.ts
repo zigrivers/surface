@@ -3,7 +3,7 @@ import { z } from "zod";
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
 import {
   BacklogSchema,
-  FindingSchema,
+  FindingSchema as RuntimeFindingSchema,
   FindingsEnvelopeSchema,
   type Backlog,
   type BacklogEntry,
@@ -12,9 +12,29 @@ import {
   type FindingsEnvelope,
   type Location,
 } from "./findings.js";
-import type { PersistedArtifactRef, Report, ReportRenderer, StateStore } from "./interfaces.js";
+import type {
+  KnowledgeEntry,
+  KnowledgeSource,
+  PersistedArtifactRef,
+  Report,
+  ReportRenderer,
+  StateStore,
+} from "./interfaces.js";
 
 const TEXT_ENCODER = new TextEncoder();
+const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
+const ANSI_OSC_PATTERN = new RegExp(
+  `${String.fromCharCode(27)}\\][\\s\\S]*?(?:${String.fromCharCode(7)}|${String.fromCharCode(27)}\\\\)`,
+  "g",
+);
+const C1_CSI_PATTERN = new RegExp(`${String.fromCharCode(0x9b)}[0-?]*[ -/]*[@-~]`, "g");
+const C1_OSC_PATTERN = new RegExp(
+  `${String.fromCharCode(0x9d)}[\\s\\S]*?(?:${String.fromCharCode(0x9c)}|${String.fromCharCode(7)})`,
+  "g",
+);
+const DISALLOWED_CONTROL_PATTERN = /\p{Cc}/gu;
+const SINGLE_LINE_SEPARATOR_PATTERN = /[\t\r\n]+/g;
+const MAX_TERMINAL_SANITIZE_DEPTH = 32;
 
 export type FindingsJsonRendererOptions = {
   readonly generatedAt: string;
@@ -42,6 +62,16 @@ export type RenderAndWriteReportArtifactsOptions = {
   readonly findings: readonly Finding[];
   readonly backlog: Backlog;
   readonly specs?: readonly ReportArtifactSpec[];
+};
+
+export type ExplainRendererOptions = {
+  readonly findingId: string;
+  readonly knowledge?: KnowledgeSource;
+};
+
+type ExplanationContext = {
+  readonly finding: Finding;
+  readonly citedHeuristics: readonly KnowledgeEntry[];
 };
 
 export function createFindingsJsonRenderer(options: FindingsJsonRendererOptions): ReportRenderer {
@@ -76,6 +106,20 @@ export function createValidationReportMarkdownRenderer(): ReportRenderer {
   return {
     format: "validation-report",
     render: (findings, backlog) => renderValidationReportMarkdown(findings, backlog),
+  };
+}
+
+export function createExplainMarkdownRenderer(options: ExplainRendererOptions): ReportRenderer {
+  return {
+    format: "explain-md",
+    render: (findings) => renderExplainMarkdown(findings, options),
+  };
+}
+
+export function createExplainJsonRenderer(options: ExplainRendererOptions): ReportRenderer {
+  return {
+    format: "explain-json",
+    render: (findings) => renderExplainJson(findings, options),
   };
 }
 
@@ -228,6 +272,137 @@ function renderValidationReportMarkdown(
   });
 }
 
+async function renderExplainMarkdown(
+  findings: readonly Finding[],
+  options: ExplainRendererOptions,
+): Promise<Result<Report, SurfaceError>> {
+  const context = await buildExplanationContext(findings, options);
+
+  if (!context.ok) {
+    return context;
+  }
+
+  return ok({
+    format: "explain-md",
+    bytes: encodeText(markdownForExplanation(context.value)),
+    byteStable: true,
+  });
+}
+
+async function renderExplainJson(
+  findings: readonly Finding[],
+  options: ExplainRendererOptions,
+): Promise<Result<Report, SurfaceError>> {
+  const context = await buildExplanationContext(findings, options);
+
+  if (!context.ok) {
+    return context;
+  }
+
+  const { finding, citedHeuristics } = context.value;
+
+  return ok({
+    format: "explain-json",
+    bytes: encodeStableJson(
+      sanitizeTerminalControlValue({
+        schemaVersion: "1.0",
+        finding,
+        rationale: finding.rationale,
+        resolvedCitedHeuristics: citedHeuristics,
+        evidence: finding.evidence,
+      }),
+    ),
+    byteStable: true,
+  });
+}
+
+async function buildExplanationContext(
+  findings: readonly Finding[],
+  options: ExplainRendererOptions,
+): Promise<Result<ExplanationContext, SurfaceError>> {
+  const candidate = findings.find((entry) => entry.id === options.findingId);
+
+  if (candidate === undefined) {
+    return err(
+      createSurfaceError("finding_not_found", "Finding could not be explained.", {
+        details: { findingId: options.findingId },
+      }),
+    );
+  }
+
+  if (hasEmptyEvidence(candidate)) {
+    return err(
+      createSurfaceError("evidence_missing", "Finding has no verifiable evidence.", {
+        details: { findingId: candidateFindingId(candidate, options.findingId) },
+      }),
+    );
+  }
+
+  const parsedFinding = RuntimeFindingSchema.safeParse(candidate);
+
+  if (!parsedFinding.success) {
+    return reportRenderError("Explain finding is invalid.", parsedFinding.error);
+  }
+
+  const finding = parsedFinding.data;
+
+  const citedHeuristics = await resolveCitedHeuristics(finding, options.knowledge);
+
+  if (!citedHeuristics.ok) {
+    return citedHeuristics;
+  }
+
+  return ok({ finding, citedHeuristics: citedHeuristics.value });
+}
+
+async function resolveCitedHeuristics(
+  finding: Finding,
+  knowledge: KnowledgeSource | undefined,
+): Promise<Result<readonly KnowledgeEntry[], SurfaceError>> {
+  if (knowledge === undefined) {
+    return ok([]);
+  }
+
+  const entries: KnowledgeEntry[] = [];
+
+  for (const id of finding.citedHeuristics ?? []) {
+    const resolved = await knowledge.resolve(id);
+
+    if (!resolved.ok) {
+      return err(
+        createSurfaceError("config_invalid", "Cited heuristic could not be resolved.", {
+          cause: resolved.error,
+          details: { findingId: finding.id, knowledgeEntryId: id },
+        }),
+      );
+    }
+
+    entries.push(resolved.value);
+  }
+
+  return ok(entries);
+}
+
+function hasEmptyEvidence(value: unknown): boolean {
+  if (value === null || typeof value !== "object") {
+    return false;
+  }
+
+  const evidence = (value as { readonly evidence?: unknown }).evidence;
+
+  return Array.isArray(evidence) && evidence.length === 0;
+}
+
+function candidateFindingId(value: unknown, fallback: string): string {
+  if (value === null || typeof value !== "object") {
+    return fallback;
+  }
+
+  const id = (value as { readonly id?: unknown }).id;
+
+  return typeof id === "string" ? id : fallback;
+}
+
 function normalizeReportInputs(
   findings: readonly Finding[],
   backlog: Backlog,
@@ -240,7 +415,7 @@ function normalizeReportInputs(
   },
   SurfaceError
 > {
-  const parsedFindings = z.array(FindingSchema).safeParse(findings);
+  const parsedFindings = z.array(RuntimeFindingSchema).safeParse(findings);
 
   if (!parsedFindings.success) {
     return reportRenderError("Report findings are invalid.", parsedFindings.error);
@@ -344,11 +519,11 @@ function markdownForFindings(backlog: Backlog, orderedFindings: readonly Ordered
       );
     }
 
-    if (finding.citedHeuristics.length > 0) {
+    if ((finding.citedHeuristics ?? []).length > 0) {
       lines.push(
         "",
         "Cited heuristics:",
-        ...finding.citedHeuristics.map((id) => `- ${inlineCode(id)}`),
+        ...(finding.citedHeuristics ?? []).map((id) => `- ${inlineCode(id)}`),
       );
     }
 
@@ -457,82 +632,6 @@ function markdownForAgentPlan(
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-function formatValidationEvidence(
-  evidence: readonly Finding["evidence"][number][] | undefined,
-): string {
-  if (evidence === undefined || evidence.length === 0) {
-    return "none";
-  }
-
-  return evidence.map(formatValidationEvidenceEntry).join("; ");
-}
-
-function formatValidationEvidenceEntry(evidence: Finding["evidence"][number]): string {
-  switch (evidence.kind) {
-    case "tool-result":
-      return [
-        `tool ${inlineCode(String(evidence.tool))}`,
-        `rule ${inlineCode(String(evidence.rule))}`,
-        `measured ${inlineCode(String(evidence.measuredValue))}`,
-        evidence.threshold === undefined
-          ? undefined
-          : `threshold ${inlineCode(String(evidence.threshold))}`,
-      ]
-        .filter((part): part is string => part !== undefined)
-        .join("; ");
-    case "dom":
-      return [
-        `dom selector ${inlineCode(String(evidence.selector))}`,
-        evidence.elementRef === undefined
-          ? undefined
-          : `element ${inlineCode(String(evidence.elementRef))}`,
-      ]
-        .filter((part): part is string => part !== undefined)
-        .join("; ");
-    case "screenshot-region":
-      return `screenshot ${inlineCode(String(evidence.artifactId))} x:${evidence.rect.x}, y:${evidence.rect.y}, w:${evidence.rect.width}, h:${evidence.rect.height}`;
-    case "cited-heuristic":
-      return `heuristic ${inlineCode(String(evidence.knowledgeEntryId))}`;
-  }
-}
-
-function markdownForValidationReport(
-  backlog: Backlog,
-  orderedFindings: readonly OrderedFinding[],
-): string {
-  const lines = [
-    "# Surface Validation Report",
-    "",
-    `Run: ${inlineCode(backlog.runId)}`,
-    `Backlog: ${inlineCode(backlog.id)}`,
-    "Status: not run",
-    "",
-  ];
-
-  if (orderedFindings.length === 0) {
-    lines.push("No findings require validation.", "");
-    return lines.join("\n");
-  }
-
-  lines.push("## Required Checks", "");
-
-  for (let index = 0; index < orderedFindings.length; index += 1) {
-    const { finding, backlogEntry } = orderedFindings[index]!;
-
-    lines.push(
-      `### ${backlogEntry?.rank ?? index + 1}. ${escapeMarkdownLine(finding.title)}`,
-      "",
-      `- Finding: ${inlineCode(finding.id)}`,
-      `- Expected status: ${finding.gatedForHuman ? "human-reviewed" : "resolved-or-reported"}`,
-      `- Evidence to re-check: ${formatValidationEvidence(finding.evidence)}`,
-      `- Location: ${formatLocation(finding.location)}`,
-      "",
-    );
-  }
-
-  return `${lines.join("\n").trimEnd()}\n`;
-}
-
 function formatLocation(location: Location): string {
   return [
     location.file === undefined ? undefined : `file ${inlineCode(location.file)}`,
@@ -573,6 +672,98 @@ function formatEvidence(evidence: Evidence): string {
   }
 }
 
+function formatValidationEvidence(
+  evidence: readonly Finding["evidence"][number][] | undefined,
+): string {
+  if (evidence === undefined || evidence.length === 0) {
+    return "none";
+  }
+
+  return evidence.map(formatEvidence).join("; ");
+}
+
+function markdownForValidationReport(
+  backlog: Backlog,
+  orderedFindings: readonly OrderedFinding[],
+): string {
+  const lines = [
+    "# Surface Validation Report",
+    "",
+    `Run: ${inlineCode(backlog.runId)}`,
+    `Backlog: ${inlineCode(backlog.id)}`,
+    "Status: not run",
+    "",
+  ];
+
+  if (orderedFindings.length === 0) {
+    lines.push("No findings require validation.", "");
+    return lines.join("\n");
+  }
+
+  lines.push("## Required Checks", "");
+
+  for (let index = 0; index < orderedFindings.length; index += 1) {
+    const { finding, backlogEntry } = orderedFindings[index]!;
+
+    lines.push(
+      `### ${backlogEntry?.rank ?? index + 1}. ${escapeMarkdownLine(finding.title)}`,
+      "",
+      `- Finding: ${inlineCode(finding.id)}`,
+      `- Expected status: ${finding.gatedForHuman ? "human-reviewed" : "resolved-or-reported"}`,
+      `- Evidence to re-check: ${formatValidationEvidence(finding.evidence)}`,
+      `- Location: ${formatLocation(finding.location)}`,
+      "",
+    );
+  }
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
+function markdownForExplanation(context: ExplanationContext): string {
+  const { finding, citedHeuristics } = context;
+  const lines = [
+    "# Surface Explain",
+    "",
+    `Finding: ${inlineCode(finding.id)}`,
+    `Severity: ${escapeMarkdownLine(finding.severityBand)}`,
+    `Confidence: ${escapeMarkdownLine(finding.confidenceBand)}`,
+    `Method: ${escapeMarkdownLine(finding.method)}`,
+    `Location: ${formatLocation(finding.location)}`,
+    "",
+    `## ${escapeMarkdownLine(finding.title)}`,
+    "",
+    "Why it matters:",
+    escapeMarkdownBlock(finding.rationale),
+    "",
+    "Evidence you can verify:",
+    ...finding.evidence.map((evidence) => `- ${formatEvidence(evidence)}`),
+    "",
+  ];
+
+  if (citedHeuristics.length > 0) {
+    lines.push("Cited guidance:", "");
+
+    for (const entry of citedHeuristics) {
+      lines.push(
+        `- ${escapeMarkdownLine(entry.title)} (${inlineCode(entry.id)})`,
+        `  Summary: ${escapeMarkdownLine(entry.summary)}`,
+      );
+
+      if (entry.citation !== undefined) {
+        lines.push(`  Source: ${escapeMarkdownLine(entry.citation.source)}`);
+      }
+    }
+  } else if ((finding.citedHeuristics ?? []).length > 0) {
+    lines.push(
+      "Cited guidance:",
+      "",
+      ...(finding.citedHeuristics ?? []).map((id) => `- ${inlineCode(id)}`),
+    );
+  }
+
+  return `${lines.join("\n").trimEnd()}\n`;
+}
+
 function inlineCode(value: string): string {
   const normalized = normalizeSingleLine(value);
   const delimiter = "`".repeat(longestBacktickRun(normalized) + 1);
@@ -591,11 +782,15 @@ function fencedCodeBlock(value: string): string {
 }
 
 function escapeMarkdownLine(value: string): string {
-  return escapeMarkdown(value);
+  return escapeMarkdown(normalizeSingleLine(value));
 }
 
 function escapeMarkdownBlock(value: string): string {
-  return value.replace(/\r\n/g, "\n").split("\n").map(escapeMarkdown).join("\n");
+  return stripTerminalControlPreservingWhitespace(value)
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map(escapeMarkdown)
+    .join("\n");
 }
 
 function escapeMarkdown(value: string): string {
@@ -625,10 +820,78 @@ function longestBacktickRun(value: string): number {
 }
 
 function normalizeSingleLine(value: string): string {
-  return value.replace(/\r?\n/g, " ");
+  return stripTerminalControl(value.replace(SINGLE_LINE_SEPARATOR_PATTERN, " "));
+}
+
+function stripTerminalControl(value: string): string {
+  return value
+    .replace(ANSI_OSC_PATTERN, "")
+    .replace(C1_OSC_PATTERN, "")
+    .replace(ANSI_ESCAPE_PATTERN, "")
+    .replace(C1_CSI_PATTERN, "")
+    .replace(DISALLOWED_CONTROL_PATTERN, "");
+}
+
+function stripTerminalControlPreservingWhitespace(value: string): string {
+  return Array.from(
+    value
+      .replace(ANSI_OSC_PATTERN, "")
+      .replace(C1_OSC_PATTERN, "")
+      .replace(ANSI_ESCAPE_PATTERN, "")
+      .replace(C1_CSI_PATTERN, ""),
+  )
+    .filter((char) => {
+      const code = char.charCodeAt(0);
+      return (
+        code === 9 ||
+        code === 10 ||
+        code === 13 ||
+        (code >= 32 && code !== 127 && (code < 128 || code > 159))
+      );
+    })
+    .join("");
+}
+
+function sanitizeTerminalControlValue<T>(value: T): T {
+  return sanitizeTerminalControlUnknown(value) as T;
+}
+
+function sanitizeTerminalControlUnknown(value: unknown, depth = 0): unknown {
+  if (depth > MAX_TERMINAL_SANITIZE_DEPTH) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return stripTerminalControlPreservingWhitespace(value);
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((entry: unknown) => sanitizeTerminalControlUnknown(entry, depth + 1));
+  }
+
+  if (value !== null && typeof value === "object") {
+    const prototype: unknown = Object.getPrototypeOf(value);
+
+    if (prototype !== Object.prototype && prototype !== null) {
+      return value;
+    }
+
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, entry]) => [
+        stripTerminalControl(key.replace(SINGLE_LINE_SEPARATOR_PATTERN, " ")),
+        sanitizeTerminalControlUnknown(entry, depth + 1),
+      ]),
+    );
+  }
+
+  return value;
 }
 
 function encodeJson(value: FindingsEnvelope): Uint8Array {
+  return encodeStableJson(value);
+}
+
+function encodeStableJson(value: unknown): Uint8Array {
   return encodeText(`${JSON.stringify(toStableJsonValue(value), null, 2)}\n`);
 }
 

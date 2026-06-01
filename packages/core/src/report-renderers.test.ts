@@ -1,12 +1,15 @@
 import { describe, expect, it } from "vitest";
 
+import { createSurfaceError, err, isErr, isOk, ok } from "./errors.js";
 import { FindingsEnvelopeSchema, type Backlog, type Finding } from "./findings.js";
-import { isErr, isOk } from "./errors.js";
 import {
+  createExplainJsonRenderer,
+  createExplainMarkdownRenderer,
   createFindingsJsonRenderer,
   createFindingsMarkdownRenderer,
   defaultPlanningReportArtifactSpecs,
 } from "./report-renderers.js";
+import type { KnowledgeSource } from "./interfaces.js";
 
 const textDecoder = new TextDecoder();
 
@@ -79,6 +82,30 @@ const backlog = {
     { findingId: "f_a", priority: 0.5, rank: 2 },
   ],
 } satisfies Backlog;
+
+const knowledge = {
+  query: () => ok([]),
+  resolve: (id) =>
+    ok({
+      id,
+      title: "WCAG contrast minimum",
+      category: "accessibility",
+      summary: "Text contrast needs to meet AA thresholds.",
+      deepGuidance: "Compare foreground and background colors against WCAG thresholds.",
+      citation: {
+        source: "WCAG 2.2 Success Criterion 1.4.3",
+        retrievedAt: "2026-05-31T00:00:00.000Z",
+      },
+      freshness: {
+        volatility: "stable",
+        lastReviewed: "2026-05-31T00:00:00.000Z",
+      },
+      appliesToAppTypes: ["generic"],
+      appliesToLenses: ["accessibility"],
+      steps: ["evaluate"],
+      tags: ["contrast"],
+    }),
+} satisfies KnowledgeSource;
 
 describe("report renderers", () => {
   it("renders byte-stable findings.json ordered by backlog rank", async () => {
@@ -198,5 +225,184 @@ describe("report renderers", () => {
         kind: "IntegrationError",
       },
     });
+  });
+
+  it("renders byte-stable explain markdown and json with cited guidance and evidence", async () => {
+    const markdownRenderer = createExplainMarkdownRenderer({
+      findingId: findingA.id,
+      knowledge,
+    });
+    const jsonRenderer = createExplainJsonRenderer({
+      findingId: findingA.id,
+      knowledge,
+    });
+
+    const firstMarkdown = await markdownRenderer.render([findingA], backlog);
+    const secondMarkdown = await markdownRenderer.render([findingA], backlog);
+    const firstJson = await jsonRenderer.render([findingA], backlog);
+    const secondJson = await jsonRenderer.render([findingA], backlog);
+
+    expect(isOk(firstMarkdown)).toBe(true);
+    expect(isOk(secondMarkdown)).toBe(true);
+    expect(isOk(firstJson)).toBe(true);
+    expect(isOk(secondJson)).toBe(true);
+
+    if (!isOk(firstMarkdown) || !isOk(secondMarkdown) || !isOk(firstJson) || !isOk(secondJson)) {
+      return;
+    }
+
+    const markdown = textDecoder.decode(firstMarkdown.value.bytes);
+    const json: unknown = JSON.parse(textDecoder.decode(firstJson.value.bytes));
+
+    expect(firstMarkdown.value).toMatchObject({ format: "explain-md", byteStable: true });
+    expect(firstJson.value).toMatchObject({ format: "explain-json", byteStable: true });
+    expect(firstMarkdown.value.bytes).toEqual(secondMarkdown.value.bytes);
+    expect(firstJson.value.bytes).toEqual(secondJson.value.bytes);
+    expect(markdown).toContain("Why it matters:");
+    expect(markdown).toContain("Evidence you can verify:");
+    expect(markdown).toContain("tool `axe`; rule `color-contrast`");
+    expect(markdown).toContain("WCAG contrast minimum");
+    expect(markdown).not.toContain(`${String.fromCharCode(27)}[`);
+    expect(json).toMatchObject({
+      schemaVersion: "1.0",
+      finding: { id: findingA.id },
+      rationale: findingA.rationale,
+      resolvedCitedHeuristics: [{ id: "kb_wcag_143" }],
+      evidence: [{ kind: "tool-result" }],
+    });
+  });
+
+  it("strips terminal control sequences from explain markdown", async () => {
+    const escape = String.fromCharCode(27);
+    const c1Csi = String.fromCharCode(0x9b);
+    const c1Osc = String.fromCharCode(0x9d);
+    const c1StringTerminator = String.fromCharCode(0x9c);
+    const bell = String.fromCharCode(7);
+    const ansiFinding = {
+      ...findingA,
+      title: `${c1Csi}31mPrimary button contrast is below AA`,
+      rationale: `${escape}]8;;https://example.com${bell}The primary button text is difficult to read.${escape}]8;;${bell}`,
+      evidence: [
+        {
+          kind: "tool-result",
+          tool: "axe",
+          rule: "color-contrast",
+          measuredValue: `${escape}[33m3.1:1`,
+          threshold: "4.5:1",
+        },
+      ],
+    } satisfies Finding;
+    const ansiKnowledge = {
+      query: () => ok([]),
+      resolve: (id) =>
+        ok({
+          id,
+          title: `${c1Osc}2;ignored${c1StringTerminator}WCAG contrast minimum`,
+          summary: `${escape}[36mText contrast needs to meet AA thresholds.`,
+          citation: {
+            source: `${escape}[37mWCAG 2.2 Success Criterion 1.4.3`,
+            retrievedAt: "2026-05-31T00:00:00.000Z",
+          },
+        }),
+    } satisfies KnowledgeSource;
+
+    const result = await createExplainMarkdownRenderer({
+      findingId: ansiFinding.id,
+      knowledge: ansiKnowledge,
+    }).render([ansiFinding], backlog);
+
+    expect(isOk(result)).toBe(true);
+
+    if (!isOk(result)) {
+      return;
+    }
+
+    const markdown = textDecoder.decode(result.value.bytes);
+
+    expect(markdown).not.toContain(`${escape}[`);
+    expect(markdown).not.toContain(`${escape}]`);
+    expect(markdown).not.toContain(c1Csi);
+    expect(markdown).not.toContain(c1Osc);
+    expect(markdown).toContain("WCAG contrast minimum");
+    expect(markdown).toContain("3.1:1");
+  });
+
+  it("strips terminal control sequences from explain json", async () => {
+    const escape = String.fromCharCode(27);
+    const c1Csi = String.fromCharCode(0x9b);
+    const c1Osc = String.fromCharCode(0x9d);
+    const c1StringTerminator = String.fromCharCode(0x9c);
+    const controlledFinding = {
+      ...findingA,
+      title: `${c1Csi}31mPrimary button contrast is below AA`,
+      rationale: `${escape}[32mThe primary button text is difficult to read.`,
+    } satisfies Finding;
+    const controlledKnowledge = {
+      query: () => ok([]),
+      resolve: (id) =>
+        ok({
+          id,
+          title: `${c1Osc}2;ignored${c1StringTerminator}WCAG contrast minimum`,
+          summary: `${escape}]8;;https://example.com${String.fromCharCode(7)}Text contrast needs to meet AA thresholds.${escape}]8;;${String.fromCharCode(7)}`,
+          citation: {
+            source: `${escape}[37mWCAG 2.2 Success Criterion 1.4.3`,
+            retrievedAt: "2026-05-31T00:00:00.000Z",
+          },
+        }),
+    } satisfies KnowledgeSource;
+
+    const result = await createExplainJsonRenderer({
+      findingId: controlledFinding.id,
+      knowledge: controlledKnowledge,
+    }).render([controlledFinding], backlog);
+
+    expect(isOk(result)).toBe(true);
+
+    if (!isOk(result)) {
+      return;
+    }
+
+    const jsonText = textDecoder.decode(result.value.bytes);
+    const json: unknown = JSON.parse(jsonText);
+
+    expect(jsonText).not.toContain(escape);
+    expect(jsonText).not.toContain(c1Csi);
+    expect(jsonText).not.toContain(c1Osc);
+    expect(jsonText).toContain("Primary button contrast is below AA");
+    expect(jsonText).toContain("WCAG contrast minimum");
+    expect(json).toMatchObject({
+      finding: { title: "Primary button contrast is below AA" },
+      rationale: "The primary button text is difficult to read.",
+      resolvedCitedHeuristics: [{ title: "WCAG contrast minimum" }],
+    });
+  });
+
+  it("returns domain errors when explain cannot find a finding or cited heuristic", async () => {
+    const missingFinding = await createExplainMarkdownRenderer({
+      findingId: "missing",
+      knowledge,
+    }).render([findingA], backlog);
+    const missingEvidenceFinding = {
+      ...findingA,
+      evidence: [],
+    } as unknown as Finding;
+    const missingEvidence = await createExplainMarkdownRenderer({
+      findingId: missingEvidenceFinding.id,
+      knowledge,
+    }).render([missingEvidenceFinding], backlog);
+    const missingHeuristic = await createExplainMarkdownRenderer({
+      findingId: findingA.id,
+      knowledge: {
+        query: () => ok([]),
+        resolve: () => err(createSurfaceError("finding_not_found", "not found")),
+      },
+    }).render([findingA], backlog);
+
+    expect(isErr(missingFinding)).toBe(true);
+    expect(isErr(missingEvidence)).toBe(true);
+    expect(isErr(missingHeuristic)).toBe(true);
+    expect(missingFinding).toMatchObject({ error: { code: "finding_not_found" } });
+    expect(missingEvidence).toMatchObject({ error: { code: "evidence_missing" } });
+    expect(missingHeuristic).toMatchObject({ error: { code: "config_invalid" } });
   });
 });
