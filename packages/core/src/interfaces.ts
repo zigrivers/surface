@@ -53,6 +53,13 @@ export interface DegradationReport {
   readonly skippedReason: string;
 }
 
+export interface TargetVerification {
+  readonly authInjectedBeforeNavigation: boolean;
+  readonly isRequestedTarget: boolean;
+  readonly landedUrl: string;
+  readonly requestedUrl: string;
+}
+
 // Capture status is a closed lifecycle state machine owned by the Capture domain.
 export type CaptureStatus = "requested" | "completed" | "degraded" | "auth-failed" | "unreachable";
 
@@ -60,8 +67,10 @@ export interface Capture {
   readonly id: string;
   readonly target: Target;
   readonly backend: string;
+  readonly authUsed?: boolean;
   readonly artifacts: CaptureArtifact[];
   readonly degradation?: DegradationReport;
+  readonly verification?: TargetVerification;
   readonly capturedAt: string;
   readonly status: CaptureStatus;
 }
