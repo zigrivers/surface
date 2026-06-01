@@ -104,6 +104,11 @@ describe("lens registry", () => {
         reason: "model_unavailable",
         message: "No model configured.",
       },
+      {
+        lensId: "content",
+        reason: "live_dom_unavailable",
+        message: "Lens requires a live DOM snapshot, but this capture did not produce one.",
+      },
     ]);
   });
 
@@ -136,6 +141,11 @@ describe("lens registry", () => {
         lensId: "visual-hierarchy",
         reason: "model_unavailable",
         message: "Model availability was not provided.",
+      },
+      {
+        lensId: "content",
+        reason: "live_dom_unavailable",
+        message: "Lens requires a live DOM snapshot, but no capture was provided.",
       },
     ]);
   });
