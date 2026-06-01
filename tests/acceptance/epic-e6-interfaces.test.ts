@@ -7,6 +7,7 @@ import {
 } from "../../packages/mcp/src/index.js";
 import { runSurfaceCli } from "../../packages/cli/src/index.js";
 import { createSurfaceComposition, ok } from "../../packages/core/src/index.js";
+import type { Capture, Target } from "../../packages/core/src/index.js";
 
 describe("E6 Interfaces", () => {
   describe("US-050 POSIX-conformant CLI [gate]", () => {
@@ -60,6 +61,42 @@ describe("E6 Interfaces", () => {
           nextCommand: "surface --help",
           whatFailed: expect.stringContaining("unknown_step"),
         },
+      });
+    });
+
+    it("[US-050][AC4] core verbs accept target flags and preserve JSON envelopes (e2e)", async () => {
+      const stdout: string[] = [];
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "capture", "--dom", "<main>Acceptance</main>"],
+        composition: createSurfaceComposition({
+          captureBackends: [
+            {
+              id: "acceptance",
+              detect: () => true,
+              observe: (target: Target) =>
+                ok({
+                  artifacts: [],
+                  backend: "acceptance",
+                  capturedAt: "2026-06-01T00:00:00.000Z",
+                  id: "capture_acceptance",
+                  status: "requested",
+                  target,
+                } satisfies Capture),
+            },
+          ],
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        command: "capture",
+        data: {
+          backend: "acceptance",
+          captureId: "capture_acceptance",
+        },
+        ok: true,
+        schemaVersion: "1.0",
       });
     });
   });
