@@ -112,6 +112,31 @@ describe("file-system knowledge source", () => {
     });
   });
 
+  it("excludes draft entries unless the caller explicitly includes drafts", async () => {
+    const rootDir = await createKnowledgeRoot({
+      "accessibility/draft.md": contrastEntry.replace(
+        "tags: [contrast, readability]",
+        "tags: [contrast]\ndraft: true",
+      ),
+    });
+
+    const active = await loadKnowledgeEntries({ rootDir });
+    const withDrafts = await loadKnowledgeEntries({ rootDir, includeDrafts: true });
+    const source = createFileSystemKnowledgeSource({ rootDir });
+    const resolved = await source.resolve("kb_wcag_143");
+
+    expect(isOk(active)).toBe(true);
+    expect(isOk(withDrafts)).toBe(true);
+    expect(isOk(resolved)).toBe(false);
+
+    if (!isOk(active) || !isOk(withDrafts)) {
+      return;
+    }
+
+    expect(active.value).toHaveLength(0);
+    expect(withDrafts.value).toHaveLength(1);
+  });
+
   it("rejects entries missing required sections or citation metadata", async () => {
     const rootDir = await createKnowledgeRoot({
       "accessibility/invalid.md": `---
