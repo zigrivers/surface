@@ -23,6 +23,10 @@
     "gray-matter": "^4.0.3",
     "pino": "catalog:",
     "proper-lockfile": "catalog:",
+    "retext": "^9.0.0",
+    "retext-english": "^5.0.0",
+    "retext-equality": "^7.1.0",
+    "retext-readability": "^8.0.0",
     "write-file-atomic": "catalog:",
     "yaml": "catalog:",
     "zod": "catalog:"

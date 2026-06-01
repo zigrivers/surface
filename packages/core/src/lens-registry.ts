@@ -76,8 +76,8 @@ export const BUILT_IN_LENS_REGISTRY = [
   {
     id: "content",
     method: "judged",
-    requiresModel: true,
-    requiresLiveDom: false,
+    requiresModel: false,
+    requiresLiveDom: true,
     presets: ["standard", "deep"],
   },
   {

@@ -3,6 +3,7 @@ export const CORE_PACKAGE_NAME = "@surface/core";
 export * from "./app-type-overlays.js";
 export * from "./capture.js";
 export * from "./config.js";
+export * from "./content-lens.js";
 export * from "./discovery.js";
 export * from "./errors.js";
 export * from "./findings.js";

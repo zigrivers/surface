@@ -114,6 +114,18 @@ const rawAppTypeOverlays = {
           "Overlapping content",
         ],
       },
+      content: {
+        summary: "Task-critical copy is clear, concise, inclusive, and readable.",
+        checks: [
+          "Headings, labels, and instructions explain what users can do next.",
+          "Dense or complex copy stays within the configured reading target.",
+        ],
+        riskSignals: [
+          "Long jargon-heavy sentences",
+          "Ambiguous labels",
+          "Insensitive or exclusionary language",
+        ],
+      },
     },
   },
   "saas-dashboard": {

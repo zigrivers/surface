@@ -188,7 +188,10 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
         return;
       }
 
-      expect(activeResult.value).toHaveLength(0);
+      expect(activeResult.value.map((entry) => entry.id)).toEqual([
+        "kb_content_plain_language_readability",
+      ]);
+      expect(activeResult.value.every((entry) => entry.draft !== true)).toBe(true);
 
       const todoEntries = result.value.filter(
         (entry) => entry.tags?.includes("todo") === true && entry.sourcePath?.endsWith("todo.md"),
