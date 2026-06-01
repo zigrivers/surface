@@ -15,6 +15,12 @@ const completedCapture = {
   backend: "playwright",
   artifacts: [
     { id: "dom", type: "dom-snapshot", path: ".surface/captures/dom.html", redacted: false },
+    {
+      id: "computed-styles",
+      type: "computed-styles",
+      path: ".surface/captures/computed-styles.json",
+      redacted: false,
+    },
   ],
   capturedAt: "2026-05-31T00:00:00.000Z",
   status: "completed",
@@ -101,8 +107,8 @@ describe("lens registry", () => {
       },
       {
         lensId: "visual-hierarchy",
-        reason: "model_unavailable",
-        message: "No model configured.",
+        reason: "live_dom_unavailable",
+        message: "Lens requires a live DOM snapshot, but this capture did not produce one.",
       },
       {
         lensId: "content",
@@ -139,13 +145,60 @@ describe("lens registry", () => {
       },
       {
         lensId: "visual-hierarchy",
-        reason: "model_unavailable",
-        message: "Model availability was not provided.",
+        reason: "live_dom_unavailable",
+        message: "Lens requires a live DOM snapshot, but no capture was provided.",
       },
       {
         lensId: "content",
         reason: "live_dom_unavailable",
         message: "Lens requires a live DOM snapshot, but no capture was provided.",
+      },
+    ]);
+  });
+
+  it("skips visual hierarchy when live DOM capture lacks computed styles", () => {
+    const config = resolveSurfaceConfig({
+      cli: {
+        evaluation: {
+          appType: "generic",
+          depth: 3,
+          preset: "standard",
+        },
+      },
+    });
+    const domOnlyCapture = {
+      ...completedCapture,
+      artifacts: [
+        {
+          id: "dom",
+          type: "dom-snapshot",
+          path: ".surface/captures/dom.html",
+          redacted: false,
+        },
+      ],
+    } satisfies Capture;
+
+    const plan = selectLensExecutionPlan({
+      capture: domOnlyCapture,
+      config,
+      modelAvailability: {
+        available: false,
+        reason: "no-model-configured",
+        message: "No model configured.",
+      },
+    });
+
+    expect(plan.selected.map((lens) => lens.id)).toEqual(["accessibility", "content"]);
+    expect(plan.skipped).toEqual([
+      {
+        lensId: "usability",
+        reason: "model_unavailable",
+        message: "No model configured.",
+      },
+      {
+        lensId: "visual-hierarchy",
+        reason: "live_dom_unavailable",
+        message: "Lens requires computed styles, but this capture did not produce them.",
       },
     ]);
   });
