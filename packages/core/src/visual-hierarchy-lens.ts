@@ -16,6 +16,7 @@ export type VisualHierarchyLensOptions = {
 const DEFAULT_MAX_FONT_SIZE_STEPS = 4;
 const DEFAULT_MIN_HEADING_SCALE_RATIO = 1.25;
 const VISUAL_HIERARCHY_LENS_ID = "visual-hierarchy";
+const VISUAL_HIERARCHY_TYPE_SCALE_KB_ID = "kb_visual_hierarchy_type_scale";
 
 const ComputedStyleEntrySchema = z
   .object({
@@ -167,7 +168,9 @@ async function visualHierarchyKnowledge(
     return err(result.error);
   }
 
-  const entry = result.value[0];
+  const entry =
+    result.value.find((candidate) => candidate.id === VISUAL_HIERARCHY_TYPE_SCALE_KB_ID) ??
+    result.value[0];
 
   if (entry === undefined) {
     return err(

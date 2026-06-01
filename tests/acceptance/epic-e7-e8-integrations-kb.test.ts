@@ -6,6 +6,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import {
+  BUILT_IN_LENS_REGISTRY,
   createFileSystemKnowledgeSource,
   createGitHubIssueExporter,
   loadKnowledgeEntries,
@@ -172,7 +173,7 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
       });
     });
 
-    it("[US-070][AC2] shipped KB scaffold has one valid cited TODO entry per gate category (structure)", async () => {
+    it("[US-070][AC2] shipped KB content covers every gate category with authored, cited entries (structure)", async () => {
       const result = await loadKnowledgeEntries({
         rootDir: path.join(process.cwd(), "content", "knowledge"),
         includeDrafts: true,
@@ -188,23 +189,6 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
         return;
       }
 
-      const expectedActiveIds = [
-        "kb_content_plain_language_readability",
-        "kb_responsiveness_reflow",
-        "kb_states_recovery_actions",
-        "kb_usability_nielsen_heuristics",
-        "kb_visual_hierarchy_type_scale",
-      ];
-
-      expect(activeResult.value.map((entry) => entry.id)).toEqual(
-        expect.arrayContaining(expectedActiveIds),
-      );
-      expect(activeResult.value).toHaveLength(expectedActiveIds.length);
-      expect(activeResult.value.every((entry) => entry.draft !== true)).toBe(true);
-
-      const todoEntries = result.value.filter(
-        (entry) => entry.tags?.includes("todo") === true && entry.sourcePath?.endsWith("todo.md"),
-      );
       const requiredCategories = [
         "accessibility",
         "agent-implementation",
@@ -217,18 +201,34 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
         "states",
         "visual-content",
       ];
-      const categories = new Set(todoEntries.map((entry) => entry.category));
 
-      expect(todoEntries).toHaveLength(requiredCategories.length);
-      expect(categories).toEqual(new Set(requiredCategories));
+      expect(activeResult.value.map((entry) => entry.category)).toEqual(
+        expect.arrayContaining(requiredCategories),
+      );
+      const supportedLensIds = new Set(BUILT_IN_LENS_REGISTRY.map((lens) => lens.id));
 
-      for (const entry of todoEntries) {
-        expect(entry.citation?.source).toMatch(/^TODO:/);
-        expect(entry.freshness?.volatility).toBe("evolving");
-        expect(entry.summary).toContain("TODO:");
-        expect(entry.deepGuidance).toContain("TODO:");
+      const placeholderEntries = result.value.filter(
+        (entry) =>
+          entry.draft === true ||
+          entry.tags?.includes("todo") === true ||
+          entry.sourcePath?.endsWith("todo.md") === true ||
+          (entry.title ?? "").includes("placeholder"),
+      );
+
+      expect(placeholderEntries).toEqual([]);
+
+      for (const entry of activeResult.value) {
+        expect(entry.draft).not.toBe(true);
+        expect(entry.tags ?? []).not.toContain("todo");
+        expect(entry.sourcePath).not.toMatch(/todo\.md$/);
+        expect(entry.title ?? "").not.toContain("placeholder");
+        expect(entry.citation?.source).not.toMatch(/^TODO:/);
+        expect(entry.summary).not.toContain("TODO:");
+        expect(entry.deepGuidance).not.toContain("TODO:");
         expect(entry.appliesToLenses?.length).toBeGreaterThan(0);
-        expect(entry.draft).toBe(true);
+        for (const lensId of entry.appliesToLenses ?? []) {
+          expect(supportedLensIds).toContain(lensId);
+        }
       }
     });
   });

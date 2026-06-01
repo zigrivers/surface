@@ -125,6 +125,13 @@ export const BUILT_IN_LENS_REGISTRY = [
     presets: ["standard", "deep", "agent-ready"],
   },
   {
+    id: "agent-implementation",
+    method: "judged",
+    requiresModel: true,
+    requiresLiveDom: false,
+    presets: ["deep", "agent-ready"],
+  },
+  {
     id: "data-density",
     method: "judged",
     requiresModel: true,
