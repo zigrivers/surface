@@ -1,5 +1,6 @@
 export const CORE_PACKAGE_NAME = "@surface/core";
 
+export { createAccessibilityLens } from "./accessibility-lens.js";
 export * from "./app-type-overlays.js";
 export * from "./capture.js";
 export * from "./config.js";
@@ -11,6 +12,7 @@ export * from "./gate-evaluator.js";
 export * from "./github-issue-exporter.js";
 export * from "./identity.js";
 export * from "./knowledge-source.js";
+export { LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS } from "./lighthouse-audits.js";
 export * from "./lens-registry.js";
 export * from "./logging.js";
 export * from "./model-provider.js";

@@ -11,6 +11,7 @@ import {
   createNoopPipelineHandlers,
   createPipelineOrchestrator,
   createFileStateStore,
+  createAccessibilityLens,
   getAppTypeOverlay,
   isOk,
   listAppTypeOverlays,
@@ -21,7 +22,11 @@ import {
   selectLensExecutionPlan,
   synthesizeMeasuredWinsDecision,
 } from "../../packages/core/src/index.js";
-import { createAxeGroundingTool } from "../../packages/grounding/src/index.js";
+import type { Capture } from "../../packages/core/src/interfaces.js";
+import {
+  createAxeGroundingTool,
+  createLighthouseGroundingTool,
+} from "../../packages/grounding/src/index.js";
 
 describe("E2 Evaluation Pipeline & Lenses", () => {
   describe("US-010 classify app type [gate]", () => {
@@ -77,7 +82,129 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
     it.skip("[US-010][AC1] discovery assigns an app type (or `generic`); chosen overlay recorded in .surface/state.json (integration)", () => {});
   });
   describe("US-011 measured accessibility audit [gate]", () => {
-    it.skip("[US-011][AC1] each a11y violation produced/confirmed by Axe/Lighthouse, method:measured, with selector + measured value (integration)", () => {});
+    it("[US-011][AC1] each a11y violation produced/confirmed by Axe/Lighthouse, method:measured, with selector + measured value (integration)", async () => {
+      const projectRoot = await mkdtemp(path.join(os.tmpdir(), "surface-a11y-pipeline-"));
+      const capture = {
+        id: "cap_a11y_acceptance",
+        target: { kind: "url", ref: "http://localhost:3000" },
+        backend: "playwright",
+        artifacts: [
+          {
+            id: "dom",
+            type: "dom-snapshot",
+            path: ".surface/captures/dom.html",
+            redacted: false,
+          },
+        ],
+        capturedAt: "2026-05-31T18:00:00.000Z",
+        status: "completed",
+      } satisfies Capture;
+      const axe = createAxeGroundingTool({
+        runAxe: () =>
+          Promise.resolve({
+            violations: [
+              {
+                id: "color-contrast",
+                nodes: [
+                  {
+                    target: [".cta"],
+                    failureSummary:
+                      "Element has insufficient color contrast of 3.1. Expected contrast ratio of 4.5:1",
+                  },
+                ],
+              },
+            ],
+          }),
+      });
+      const lighthouse = createLighthouseGroundingTool({
+        runLighthouse: () =>
+          Promise.resolve({
+            lhr: {
+              categories: { accessibility: { auditRefs: [{ id: "button-name" }] } },
+              audits: {
+                "button-name": {
+                  score: 0,
+                  title: "Buttons do not have an accessible name",
+                  details: { items: [{ node: { selector: "button.icon" } }] },
+                },
+              },
+            },
+          }),
+      });
+      let findings: unknown = [];
+
+      try {
+        const orchestrator = createPipelineOrchestrator({
+          handlers: createNoopPipelineHandlers({
+            accessibility: async ({ config }) => {
+              const axeResult = await axe.run(capture);
+              if (!isOk(axeResult)) {
+                return axeResult;
+              }
+
+              const lighthouseResult = await lighthouse.run(capture);
+              if (!isOk(lighthouseResult)) {
+                return lighthouseResult;
+              }
+
+              const result = await createAccessibilityLens().evaluate({
+                capture,
+                config,
+                evidence: [...axeResult.value, ...lighthouseResult.value].flatMap(
+                  (toolResult) => toolResult.evidence,
+                ),
+                knowledge: {
+                  query: () => Promise.resolve({ ok: true as const, value: [] }),
+                  resolve: (id: string) =>
+                    Promise.resolve({ ok: true as const, value: { id, summary: id, title: id } }),
+                },
+              });
+
+              if (isOk(result)) {
+                findings = result.value;
+              }
+
+              return result;
+            },
+          }),
+          stateStore: createFileStateStore({ projectRoot }),
+        });
+        const pipelineResult = await orchestrator.run({
+          config: resolveSurfaceConfig(),
+          runId: "run_acceptance_a11y",
+        });
+
+        expect(isOk(pipelineResult)).toBe(true);
+        expect(findings).toMatchObject([
+          {
+            evidence: [
+              { kind: "tool-result", measuredValue: ".cta: 3.1:1", tool: "axe" },
+              { kind: "dom", selector: ".cta" },
+            ],
+            issueType: "contrast-insufficient",
+            lens: "accessibility",
+            location: { selector: ".cta" },
+            method: "measured",
+          },
+          {
+            evidence: [
+              {
+                kind: "tool-result",
+                measuredValue: "button.icon: Buttons do not have an accessible name (score 0)",
+                tool: "lighthouse",
+              },
+              { kind: "dom", selector: "button.icon" },
+            ],
+            issueType: "accessible-name-missing",
+            lens: "accessibility",
+            location: { selector: "button.icon" },
+            method: "measured",
+          },
+        ]);
+      } finally {
+        await rm(projectRoot, { force: true, recursive: true });
+      }
+    });
     it("[US-011][AC2] contrast violation includes measured ratio + WCAG 2.2 AA threshold (unit)", async () => {
       const tool = createAxeGroundingTool({
         runAxe: () =>

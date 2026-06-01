@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS } from "@surface/core";
 import type { Capture } from "@surface/core/interfaces";
 
 import {
@@ -137,6 +138,25 @@ describe("lighthouse grounding", () => {
     expect(
       lighthouseResultToToolResults({ lhr: { audits: null } } as unknown as LighthouseRunnerResult),
     ).toEqual([]);
+  });
+
+  it("uses the shared core accessibility audit ids as the canonical Lighthouse set", () => {
+    const result = lighthouseResultToToolResults({
+      lhr: {
+        categories: {
+          accessibility: {
+            auditRefs: LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS.map((id) => ({ id })),
+          },
+        },
+        audits: Object.fromEntries(
+          LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS.map((id) => [id, { score: 0, title: id }]),
+        ),
+      },
+    });
+
+    expect(new Set(result[0]?.evidence.map((entry) => entry.rule))).toEqual(
+      new Set(LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS),
+    );
   });
 
   it("lazy-loads the lighthouse runner only when the default runner executes", async () => {

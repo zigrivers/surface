@@ -317,6 +317,38 @@ describe("lens registry", () => {
     expect(instantiatedUsability?.registration.id).toBe("usability");
   });
 
+  it("creates the built-in measured accessibility lens when live DOM is available", () => {
+    const config = resolveSurfaceConfig({
+      cli: {
+        evaluation: {
+          appType: "generic",
+          depth: 3,
+          preset: "standard",
+        },
+      },
+    });
+    const plan = selectLensExecutionPlan({
+      capture: completedCapture,
+      config,
+      modelAvailability: {
+        available: false,
+        reason: "no-model-configured",
+        message: "No model configured.",
+      },
+    });
+    const accessibility = plan.selected.find((lens) => lens.id === "accessibility");
+
+    expect(accessibility?.create?.()).toMatchObject({
+      id: "accessibility",
+      method: "measured",
+      requiresLiveDom: true,
+      requiresModel: false,
+    });
+    expect(instantiateLensExecutionPlan(plan).map((entry) => entry.lens.id)).toContain(
+      "accessibility",
+    );
+  });
+
   it("keeps measured-wins synthesis decisions auditable", () => {
     expect(
       synthesizeMeasuredWinsDecision({
