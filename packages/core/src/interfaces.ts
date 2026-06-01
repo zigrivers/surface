@@ -1,12 +1,14 @@
 import type { SurfaceConfig } from "./config.js";
 import type { Result, SurfaceError } from "./errors.js";
 import type {
+  Backlog as FindingsBacklog,
   Evidence,
   EvaluationMethod,
   Finding,
   FindingDraft,
   ToolResultEvidence,
 } from "./findings.js";
+export type { Backlog, BacklogEntry } from "./findings.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -129,19 +131,6 @@ export type BuiltInReportFormat =
 
 export type ReportFormat = string;
 
-export interface BacklogEntry {
-  readonly findingId: string;
-  readonly priority: number;
-  readonly rank: number;
-  readonly demotedAsDuplicateOf?: string;
-}
-
-export interface Backlog {
-  readonly id: string;
-  readonly runId: string;
-  readonly entries: BacklogEntry[];
-}
-
 export interface Report {
   readonly format: ReportFormat;
   readonly bytes: Uint8Array;
@@ -152,7 +141,7 @@ export interface ReportRenderer {
   readonly format: ReportFormat;
   render(
     findings: readonly Finding[],
-    backlog: Backlog,
+    backlog: FindingsBacklog,
   ): MaybePromise<Result<Report, SurfaceError>>;
 }
 

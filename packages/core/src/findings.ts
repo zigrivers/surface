@@ -235,6 +235,76 @@ export const FindingSchema = z
   });
 export type Finding = z.infer<typeof FindingSchema>;
 
+/**
+ * A single backlog row produced from a scored finding.
+ *
+ * Priority is an internal ordering value, not a headline product score. Duplicate
+ * findings remain visible, but rows that match a prior finding by issue type and
+ * precise anchor, or by issue type plus high title-token similarity on precise
+ * anchors, are demoted and point at the highest-priority canonical finding.
+ */
+export const BacklogEntrySchema = z
+  .object({
+    findingId: nonEmptyStringSchema,
+    priority: z.number().nonnegative(),
+    rank: z.number().int().positive(),
+    demotedAsDuplicateOf: nonEmptyStringSchema.optional(),
+  })
+  .strict();
+export type BacklogEntry = z.infer<typeof BacklogEntrySchema>;
+
+/**
+ * Ordered implementation backlog for a run.
+ *
+ * Entries are ranked in list order by descending priority. The schema rejects
+ * duplicate finding IDs and any extra scalar summary fields such as
+ * `score`/`overallScore`.
+ */
+export const BacklogSchema = z
+  .object({
+    id: nonEmptyStringSchema,
+    runId: nonEmptyStringSchema,
+    entries: z.array(BacklogEntrySchema),
+  })
+  .strict()
+  .superRefine((backlog, context) => {
+    const findingIds = new Set<string>();
+
+    for (let index = 0; index < backlog.entries.length; index += 1) {
+      const entry = backlog.entries[index];
+      const nextEntry = backlog.entries[index + 1];
+
+      if (entry !== undefined && entry.rank !== index + 1) {
+        context.addIssue({
+          code: "custom",
+          message: "backlog entries must be ranked in list order",
+          path: ["entries", index, "rank"],
+        });
+      }
+
+      if (entry !== undefined && findingIds.has(entry.findingId)) {
+        context.addIssue({
+          code: "custom",
+          message: "backlog entries must reference unique findings",
+          path: ["entries", index, "findingId"],
+        });
+      }
+
+      if (entry !== undefined) {
+        findingIds.add(entry.findingId);
+      }
+
+      if (entry !== undefined && nextEntry !== undefined && entry.priority < nextEntry.priority) {
+        context.addIssue({
+          code: "custom",
+          message: "backlog entries must be ordered by descending priority",
+          path: ["entries", index + 1, "priority"],
+        });
+      }
+    }
+  });
+export type Backlog = z.infer<typeof BacklogSchema>;
+
 const DEFAULT_DIMENSIONS = {
   severity: 0.5,
   confidence: 0.5,
@@ -320,6 +390,268 @@ function shouldGateForHuman(draft: FindingDraft, severityBand: SeverityBand): bo
     draftMatchesHumanGateCategory(draft) ||
     isJudgedFindingAboveHumanGateThreshold(draft.method, severityBand)
   );
+}
+
+type RankedFinding = {
+  readonly finding: Finding;
+  readonly basePriority: number;
+  readonly titleTokens: ReadonlySet<string>;
+};
+
+type DemotedFinding = RankedFinding & {
+  readonly priority: number;
+  readonly demotedAsDuplicateOf?: string;
+};
+
+const DUPLICATE_PRIORITY_PENALTY = 0.4;
+const TOKEN_SIMILARITY_DUPLICATE_CUTOFF = 0.7;
+const A11Y_LEGAL_RISK_BOOST = 0.25;
+
+// US-021 keeps duplicates visible for trust, but makes diverse fixes win the next-action slot.
+// These fixed weights are deterministic placeholders until scoring policy becomes configurable.
+
+function effortWeight(effort: number): number {
+  return 0.25 + effort * 0.75;
+}
+
+function priorityForFinding(finding: Finding): number {
+  const dimensions = finding.dimensions;
+  const basePriority =
+    (dimensions.severity *
+      dimensions.userImpact *
+      dimensions.businessImpact *
+      dimensions.confidence) /
+    effortWeight(dimensions.effort);
+  const a11yBoost = 1 + (dimensions.a11yLegalRisk ?? 0) * A11Y_LEGAL_RISK_BOOST;
+
+  return basePriority * a11yBoost;
+}
+
+/**
+ * Precise duplicate anchors, in precedence order.
+ *
+ * File-only locations are intentionally ignored because a file can contain many
+ * unrelated issues. Element refs/selectors/components are stable enough to
+ * support duplicate demotion.
+ */
+function locationAnchorKey(finding: Finding): string {
+  const location = finding.location;
+
+  if (location === undefined) {
+    return "";
+  }
+
+  if (location.elementRef !== undefined) {
+    return `el:${location.elementRef}`;
+  }
+
+  if (location.selector !== undefined) {
+    return `sel:${location.selector}`;
+  }
+
+  if (location.component !== undefined) {
+    return `comp:${location.component}|file:${location.file ?? ""}`;
+  }
+
+  return "";
+}
+
+function tokenSet(value: string): ReadonlySet<string> {
+  return new Set(
+    value
+      .toLowerCase()
+      .split(/[^\p{L}\p{N}]+/gu)
+      .filter((token) => token.length > 2),
+  );
+}
+
+function tokenSimilarity(
+  leftTokens: ReadonlySet<string>,
+  rightTokens: ReadonlySet<string>,
+): number {
+  if (leftTokens.size === 0 || rightTokens.size === 0) {
+    return 0;
+  }
+
+  const smallerSet = leftTokens.size <= rightTokens.size ? leftTokens : rightTokens;
+  const largerSet = smallerSet === leftTokens ? rightTokens : leftTokens;
+  let intersectionSize = 0;
+
+  for (const token of smallerSet) {
+    if (largerSet.has(token)) {
+      intersectionSize += 1;
+    }
+  }
+
+  const unionSize = leftTokens.size + rightTokens.size - intersectionSize;
+
+  return intersectionSize / unionSize;
+}
+
+function areNearDuplicateFindings(left: RankedFinding, right: RankedFinding): boolean {
+  if (left.finding.issueType !== right.finding.issueType) {
+    return false;
+  }
+
+  const leftAnchor = locationAnchorKey(left.finding);
+  const rightAnchor = locationAnchorKey(right.finding);
+
+  if (leftAnchor.length > 0 && leftAnchor === rightAnchor) {
+    return true;
+  }
+
+  if (leftAnchor.length === 0 || rightAnchor.length === 0) {
+    return false;
+  }
+
+  return tokenSimilarity(left.titleTokens, right.titleTokens) >= TOKEN_SIMILARITY_DUPLICATE_CUTOFF;
+}
+
+function comparePriorityThenId(left: DemotedFinding, right: DemotedFinding): number {
+  if (left.priority !== right.priority) {
+    return right.priority - left.priority;
+  }
+
+  return left.finding.id.localeCompare(right.finding.id);
+}
+
+function demoteNearDuplicates(rankings: readonly RankedFinding[]): DemotedFinding[] {
+  const seenFindingsByIssueType = new Map<string, RankedFinding[]>();
+  const canonicalByFindingId = new Map<string, string>();
+
+  return rankings.map((ranking) => {
+    const seenFindings = seenFindingsByIssueType.get(ranking.finding.issueType) ?? [];
+    const duplicateOf = seenFindings.find((candidate) =>
+      areNearDuplicateFindings(ranking, candidate),
+    );
+
+    seenFindings.push(ranking);
+    seenFindingsByIssueType.set(ranking.finding.issueType, seenFindings);
+
+    if (duplicateOf !== undefined) {
+      const canonicalId = canonicalByFindingId.get(duplicateOf.finding.id)!;
+      canonicalByFindingId.set(ranking.finding.id, canonicalId);
+
+      return {
+        ...ranking,
+        priority: ranking.basePriority * DUPLICATE_PRIORITY_PENALTY,
+        demotedAsDuplicateOf: canonicalId,
+      };
+    }
+
+    canonicalByFindingId.set(ranking.finding.id, ranking.finding.id);
+
+    return {
+      ...ranking,
+      priority: ranking.basePriority,
+    };
+  });
+}
+
+function roundPriority(priority: number): number {
+  return Number(priority.toFixed(6));
+}
+
+function duplicateFindingIds(findings: readonly Finding[]): string[] {
+  const seenIds = new Set<string>();
+  const duplicateIds = new Set<string>();
+
+  for (const finding of findings) {
+    if (seenIds.has(finding.id)) {
+      duplicateIds.add(finding.id);
+    }
+
+    seenIds.add(finding.id);
+  }
+
+  return [...duplicateIds].sort();
+}
+
+/**
+ * Builds the implementation backlog for a run.
+ *
+ * Findings are ranked by severity, user impact, business impact, confidence,
+ * effort, and accessibility/legal risk. Near duplicates are detected within the
+ * same issue type by matching precise anchors or, when both findings have
+ * precise anchors, title-token similarity of at least 0.7. Duplicate chains point
+ * to the highest-priority canonical finding. The returned backlog intentionally
+ * has no scalar `score` or `overallScore` field.
+ */
+export function synthesizeBacklog(runId: string, findings: readonly Finding[]): Result<Backlog> {
+  const parsedRunId = nonEmptyStringSchema.safeParse(runId);
+
+  if (!parsedRunId.success) {
+    return err(
+      createSurfaceError("backlog_synthesis_failed", "Backlog run id is invalid.", {
+        cause: parsedRunId.error,
+      }),
+    );
+  }
+
+  const parsedFindings = z.array(FindingSchema).safeParse(findings);
+
+  if (!parsedFindings.success) {
+    return err(
+      createSurfaceError("backlog_synthesis_failed", "Backlog findings are invalid.", {
+        cause: parsedFindings.error,
+      }),
+    );
+  }
+
+  const duplicatedIds = duplicateFindingIds(parsedFindings.data);
+
+  if (duplicatedIds.length > 0) {
+    return err(
+      createSurfaceError("backlog_synthesis_failed", "Backlog findings contain duplicate IDs.", {
+        details: {
+          duplicateIds: duplicatedIds,
+        },
+      }),
+    );
+  }
+
+  const rankedFindings = parsedFindings.data
+    .map((finding) => ({
+      finding,
+      basePriority: priorityForFinding(finding),
+      titleTokens: tokenSet(finding.title),
+    }))
+    .sort((left, right) => {
+      if (left.basePriority !== right.basePriority) {
+        return right.basePriority - left.basePriority;
+      }
+
+      return left.finding.id.localeCompare(right.finding.id);
+    });
+  const entries = demoteNearDuplicates(rankedFindings)
+    .map((ranking) => ({
+      ...ranking,
+      priority: roundPriority(ranking.priority),
+    }))
+    .sort(comparePriorityThenId)
+    .map((ranking, index) => ({
+      findingId: ranking.finding.id,
+      priority: ranking.priority,
+      rank: index + 1,
+      ...(ranking.demotedAsDuplicateOf !== undefined
+        ? { demotedAsDuplicateOf: ranking.demotedAsDuplicateOf }
+        : {}),
+    }));
+  const backlog = BacklogSchema.safeParse({
+    id: `backlog_${parsedRunId.data}`,
+    runId: parsedRunId.data,
+    entries,
+  });
+
+  if (!backlog.success) {
+    return err(
+      createSurfaceError("backlog_synthesis_failed", "Backlog synthesis produced invalid output.", {
+        cause: backlog.error,
+      }),
+    );
+  }
+
+  return ok(backlog.data);
 }
 
 /**

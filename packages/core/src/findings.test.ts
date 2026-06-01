@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  BacklogSchema,
   DimensionsSchema,
   FindingDraftSchema,
   FindingSchema,
@@ -8,6 +9,7 @@ import {
   LocationSchema,
   ToolResultEvidenceSchema,
   scoreFinding,
+  synthesizeBacklog,
   type Finding,
   type FindingDraft,
 } from "./findings.js";
@@ -521,5 +523,408 @@ describe("scoreFinding", () => {
     }
 
     expect(result.value.dimensions.severity).toBe(0.5);
+  });
+});
+
+describe("synthesizeBacklog", () => {
+  const baseFinding = validFinding;
+
+  type FindingOverrides = Omit<Partial<Finding>, "dimensions" | "location"> & {
+    readonly dimensions?: Partial<Finding["dimensions"]>;
+    readonly location?: Partial<Finding["location"]>;
+  };
+
+  function findingWith(overrides: FindingOverrides): Finding {
+    return FindingSchema.parse({
+      ...baseFinding,
+      ...overrides,
+      dimensions: {
+        ...baseFinding.dimensions,
+        ...overrides.dimensions,
+      },
+      location: overrides.location ?? baseFinding.location,
+    });
+  }
+
+  it("orders backlog entries by internal priority without emitting a headline score", () => {
+    const highPriority = findingWith({
+      id: "f_high",
+      issueType: "focus-order-broken",
+      title: "Focus order blocks checkout",
+      dimensions: {
+        severity: 0.9,
+        confidence: 0.95,
+        effort: 0.2,
+        userImpact: 0.9,
+        businessImpact: 0.9,
+        a11yLegalRisk: 0.7,
+      },
+      location: { selector: "#checkout" },
+    });
+    const lowPriority = findingWith({
+      id: "f_low",
+      issueType: "spacing-minor",
+      title: "Card spacing is slightly uneven",
+      dimensions: {
+        severity: 0.3,
+        confidence: 0.9,
+        effort: 0.6,
+        userImpact: 0.2,
+        businessImpact: 0.2,
+        a11yLegalRisk: 0,
+      },
+      location: { selector: ".card" },
+    });
+
+    const result = synthesizeBacklog("run_1", [lowPriority, highPriority]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.entries.map((entry) => entry.findingId)).toEqual(["f_high", "f_low"]);
+    expect(result.value.entries.map((entry) => entry.rank)).toEqual([1, 2]);
+    expect(result.value).not.toHaveProperty("overallScore");
+    expect(result.value).not.toHaveProperty("score");
+  });
+
+  it("handles empty, single-finding, and priority-tie backlogs deterministically", () => {
+    const emptyResult = synthesizeBacklog("run_empty", []);
+
+    expect(emptyResult).toMatchObject({
+      ok: true,
+      value: {
+        entries: [],
+      },
+    });
+
+    const singleFinding = findingWith({ id: "f_single" });
+    const singleResult = synthesizeBacklog("run_single", [singleFinding]);
+
+    expect(singleResult.ok).toBe(true);
+
+    if (!singleResult.ok) {
+      throw new Error(singleResult.error.message);
+    }
+
+    expect(singleResult.value.entries).toEqual([
+      { findingId: "f_single", priority: singleResult.value.entries[0]?.priority, rank: 1 },
+    ]);
+
+    const tieA = findingWith({ id: "f_a", issueType: "layout-a", title: "Layout issue A" });
+    const tieB = findingWith({ id: "f_b", issueType: "layout-b", title: "Layout issue B" });
+    const tieResult = synthesizeBacklog("run_tie", [tieB, tieA]);
+
+    expect(tieResult.ok).toBe(true);
+
+    if (!tieResult.ok) {
+      throw new Error(tieResult.error.message);
+    }
+
+    expect(tieResult.value.entries.map((entry) => entry.findingId)).toEqual(["f_a", "f_b"]);
+  });
+
+  it("demotes near-duplicate findings without dropping their evidence trail", () => {
+    const firstDuplicate = findingWith({
+      id: "f_primary_contrast",
+      issueType: "contrast-insufficient",
+      title: "Primary button contrast is below AA",
+      dimensions: {
+        severity: 0.9,
+        confidence: 1,
+        effort: 0.1,
+        userImpact: 0.9,
+        businessImpact: 0.9,
+      },
+      location: { selector: ".btn-primary" },
+    });
+    const nearDuplicate = findingWith({
+      id: "f_primary_contrast_duplicate",
+      issueType: "contrast-insufficient",
+      title: "Primary button contrast fails AA",
+      dimensions: {
+        severity: 0.88,
+        confidence: 1,
+        effort: 0.1,
+        userImpact: 0.9,
+        businessImpact: 0.9,
+      },
+      location: { selector: ".btn-primary" },
+    });
+    const distinctFinding = findingWith({
+      id: "f_focus_trap",
+      issueType: "focus-trap",
+      title: "Modal traps keyboard focus",
+      dimensions: {
+        severity: 0.7,
+        confidence: 0.95,
+        effort: 0.2,
+        userImpact: 0.8,
+        businessImpact: 0.6,
+      },
+      location: { selector: "#modal" },
+    });
+
+    const result = synthesizeBacklog("run_1", [nearDuplicate, distinctFinding, firstDuplicate]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.entries).toHaveLength(3);
+    const canonicalEntry = result.value.entries.find(
+      (entry) => entry.findingId === firstDuplicate.id,
+    );
+    const duplicateEntry = result.value.entries.find(
+      (entry) => entry.findingId === nearDuplicate.id,
+    );
+
+    expect(duplicateEntry).toMatchObject({
+      demotedAsDuplicateOf: firstDuplicate.id,
+    });
+    expect(duplicateEntry?.priority).toBeLessThan(canonicalEntry?.priority ?? 0);
+    expect((duplicateEntry?.rank ?? 0) > (canonicalEntry?.rank ?? 0)).toBe(true);
+  });
+
+  it("demotes title-similar duplicates even when anchors differ", () => {
+    const firstDuplicate = findingWith({
+      id: "f_button_copy",
+      issueType: "copy-clarity",
+      title: "Primary button copy lacks clarity",
+      location: { selector: ".hero button" },
+    });
+    const titleDuplicate = findingWith({
+      id: "f_button_copy_other_anchor",
+      issueType: "copy-clarity",
+      title: "Primary button copy lacks clarity",
+      location: { selector: ".checkout button" },
+    });
+
+    const result = synthesizeBacklog("run_1", [firstDuplicate, titleDuplicate]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(
+      result.value.entries.find((entry) => entry.findingId === titleDuplicate.id),
+    ).toMatchObject({
+      demotedAsDuplicateOf: firstDuplicate.id,
+    });
+  });
+
+  it("does not treat file-only anchors as precise duplicate locations", () => {
+    const firstFinding = findingWith({
+      id: "f_file_only_1",
+      issueType: "contrast-insufficient",
+      title: "Primary button contrast fails",
+      location: { file: "src/App.tsx" },
+    });
+    const secondFinding = findingWith({
+      id: "f_file_only_2",
+      issueType: "contrast-insufficient",
+      title: "Footer link contrast fails",
+      location: { file: "src/App.tsx" },
+    });
+
+    const result = synthesizeBacklog("run_1", [firstFinding, secondFinding]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.entries).not.toContainEqual(
+      expect.objectContaining({ demotedAsDuplicateOf: firstFinding.id }),
+    );
+    expect(result.value.entries).not.toContainEqual(
+      expect.objectContaining({ demotedAsDuplicateOf: secondFinding.id }),
+    );
+  });
+
+  it("does not demote title-similar findings without precise anchors", () => {
+    const firstFinding = findingWith({
+      id: "f_no_anchor_1",
+      issueType: "contrast-insufficient",
+      title: "Primary button contrast fails AA",
+      location: { file: "src/App.tsx" },
+    });
+    const secondFinding = findingWith({
+      id: "f_no_anchor_2",
+      issueType: "contrast-insufficient",
+      title: "Primary button contrast fails AA",
+      location: { file: "src/App.tsx" },
+    });
+
+    const result = synthesizeBacklog("run_1", [firstFinding, secondFinding]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.entries).not.toContainEqual(
+      expect.objectContaining({ demotedAsDuplicateOf: firstFinding.id }),
+    );
+    expect(result.value.entries).not.toContainEqual(
+      expect.objectContaining({ demotedAsDuplicateOf: secondFinding.id }),
+    );
+  });
+
+  it("points transitive duplicate chains at the canonical highest-priority root", () => {
+    const canonical = findingWith({
+      id: "f_chain_a",
+      issueType: "copy-clarity",
+      title: "Primary button copy lacks clarity",
+      location: { selector: ".hero button" },
+    });
+    const firstDuplicate = findingWith({
+      id: "f_chain_b",
+      issueType: "copy-clarity",
+      title: "Primary button copy lacks clarity",
+      location: { selector: ".checkout button" },
+    });
+    const secondDuplicate = findingWith({
+      id: "f_chain_c",
+      issueType: "copy-clarity",
+      title: "Primary button copy lacks clarity",
+      location: { selector: ".settings button" },
+    });
+
+    const result = synthesizeBacklog("run_1", [canonical, firstDuplicate, secondDuplicate]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(
+      result.value.entries.find((entry) => entry.findingId === firstDuplicate.id),
+    ).toMatchObject({
+      demotedAsDuplicateOf: canonical.id,
+    });
+    expect(
+      result.value.entries.find((entry) => entry.findingId === secondDuplicate.id),
+    ).toMatchObject({
+      demotedAsDuplicateOf: canonical.id,
+    });
+  });
+
+  it("validates backlog shape and rejects unordered or scalar-score payloads", () => {
+    expect(() =>
+      BacklogSchema.parse({
+        id: "backlog_run_1",
+        runId: "run_1",
+        entries: [
+          { findingId: "f_low", priority: 0.1, rank: 1 },
+          { findingId: "f_high", priority: 0.9, rank: 2 },
+        ],
+      }),
+    ).toThrow(/ordered/);
+
+    expect(() =>
+      BacklogSchema.parse({
+        id: "backlog_run_1",
+        runId: "run_1",
+        entries: [],
+        overallScore: 0.8,
+      }),
+    ).toThrow();
+
+    expect(() =>
+      BacklogSchema.parse({
+        id: "backlog_run_1",
+        runId: "run_1",
+        entries: [
+          { findingId: "f_duplicate", priority: 0.9, rank: 1 },
+          { findingId: "f_duplicate", priority: 0.8, rank: 2 },
+        ],
+      }),
+    ).toThrow(/unique/);
+  });
+
+  it("returns backlog-specific errors for invalid inputs", () => {
+    expect(synthesizeBacklog("   ", [])).toMatchObject({
+      ok: false,
+      error: {
+        code: "backlog_synthesis_failed",
+        kind: "StateError",
+      },
+    });
+
+    expect(
+      synthesizeBacklog("run_1", [{ id: "not-a-finding" } as unknown as Finding]),
+    ).toMatchObject({
+      ok: false,
+      error: {
+        code: "backlog_synthesis_failed",
+        kind: "StateError",
+      },
+    });
+
+    expect(synthesizeBacklog("run_1", [baseFinding, baseFinding])).toMatchObject({
+      ok: false,
+      error: {
+        code: "backlog_synthesis_failed",
+        message: "Backlog findings contain duplicate IDs.",
+        details: {
+          duplicateIds: [baseFinding.id],
+        },
+      },
+    });
+  });
+
+  it("sorts backlog rows with rounded priorities before validating order", () => {
+    const firstFinding = findingWith({
+      id: "f_close_a",
+      issueType: "close-priority-a",
+      title: "Close priority A",
+      dimensions: {
+        severity: 0.5000004,
+        confidence: 1,
+        effort: 1,
+        userImpact: 1,
+        businessImpact: 1,
+        a11yLegalRisk: 0,
+      },
+      location: { selector: "#a" },
+    });
+    const secondFinding = findingWith({
+      id: "f_close_b",
+      issueType: "close-priority-b",
+      title: "Close priority B",
+      dimensions: {
+        severity: 0.5000003,
+        confidence: 1,
+        effort: 1,
+        userImpact: 1,
+        businessImpact: 1,
+        a11yLegalRisk: 0,
+      },
+      location: { selector: "#b" },
+    });
+
+    const result = synthesizeBacklog("run_close", [secondFinding, firstFinding]);
+
+    expect(result.ok).toBe(true);
+
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    expect(result.value.entries.map((entry) => entry.priority)).toEqual([0.5, 0.5]);
+    expect(result.value.entries.map((entry) => entry.findingId)).toEqual([
+      "f_close_a",
+      "f_close_b",
+    ]);
   });
 });
