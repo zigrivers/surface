@@ -2,6 +2,7 @@ import { pathToFileURL } from "node:url";
 
 import {
   DEFAULT_SURFACE_CONFIG,
+  createTrackedFinding,
   createSurfaceComposition,
   createSurfaceError,
   err,
@@ -12,15 +13,18 @@ import {
   selectLensExecutionPlan,
   synthesizeBacklog,
   toMcpError,
+  transitionTrackedFinding,
   type Evidence,
   type Finding,
+  type TrackedFinding,
+  type ValidationCheck,
   type Result,
   type SurfaceConfig,
   type SurfaceComposition,
   type SurfaceCompositionOptions,
   type SurfaceError,
 } from "@surface/core";
-import type { Backlog, Capture, IssueExport, Target } from "@surface/core/interfaces";
+import type { Backlog, Capture, GateResult, IssueExport, Target } from "@surface/core/interfaces";
 import { z } from "zod";
 
 export const SURFACE_MCP_SERVER_NAME = "surface";
@@ -120,19 +124,58 @@ export type SurfaceMcpStatusOutput = {
   }[];
 };
 
+export type SurfaceMcpValidationOutput = {
+  readonly checks: readonly {
+    readonly id: string;
+    readonly findingId?: string;
+    readonly passed: boolean;
+    readonly validation: ValidationCheck;
+  }[];
+};
+
+export type SurfaceMcpBaselineOutput = {
+  readonly baselineId: string;
+  readonly count: number;
+  readonly reason?: string;
+};
+
+export type SurfaceMcpVerdictOutput = {
+  readonly findingId: string;
+  readonly decision: "accept" | "reject" | "correct" | "defer";
+  readonly rationale: string;
+};
+
+export type SurfaceMcpDiffOutput = {
+  readonly resolved: readonly SurfaceMcpDiffEntry[];
+  readonly regressed: readonly SurfaceMcpDiffEntry[];
+  readonly introduced: readonly SurfaceMcpDiffEntry[];
+  readonly stillFailing: readonly SurfaceMcpDiffEntry[];
+  readonly identityBroken: readonly SurfaceMcpDiffEntry[];
+};
+
+export type SurfaceMcpDiffEntry = {
+  readonly findingId?: string;
+  readonly identityKey: string;
+  readonly status: TrackedFinding["status"];
+};
+
+export type SurfaceMcpTraceOutput = {
+  readonly trackedFinding: TrackedFinding;
+};
+
 export type SurfaceMcpToolOutputMap = {
   readonly surface_capture: Capture;
   readonly surface_audit: SurfaceMcpAuditOutput;
   readonly surface_explain: SurfaceMcpExplainOutput;
   readonly surface_backlog: Backlog | IssueExport;
   readonly surface_status: SurfaceMcpStatusOutput;
-  readonly surface_gate: never;
-  readonly surface_validate: never;
-  readonly surface_baseline: never;
-  readonly surface_verdict: never;
-  readonly surface_diff: never;
+  readonly surface_gate: GateResult;
+  readonly surface_validate: SurfaceMcpValidationOutput;
+  readonly surface_baseline: SurfaceMcpBaselineOutput;
+  readonly surface_verdict: SurfaceMcpVerdictOutput;
+  readonly surface_diff: SurfaceMcpDiffOutput;
   readonly surface_alternatives: never;
-  readonly surface_trace: never;
+  readonly surface_trace: SurfaceMcpTraceOutput;
   readonly surface_run: never;
   readonly surface_next: never;
 };
@@ -368,8 +411,13 @@ export function assertMcpToolSchemaCompatibility(
 }
 
 type SurfaceMcpSessionState = {
+  readonly baselines: Map<string, SurfaceMcpBaselineRecord>;
+  readonly baselineOrder: string[];
   readonly runs: Map<string, SurfaceMcpRunRecord>;
   readonly runOrder: string[];
+  readonly trackedByIdentity: Map<string, TrackedFinding>;
+  readonly verdicts: Map<string, SurfaceMcpVerdictOutput>;
+  nextBaselineSequence: number;
   nextRunSequence: number;
 };
 
@@ -380,6 +428,13 @@ type SurfaceMcpRunRecord = {
   readonly capture: Capture;
   readonly findings: readonly Finding[];
   readonly skippedLenses: SurfaceMcpAuditOutput["skippedLenses"];
+  readonly trackedFindings: readonly TrackedFinding[];
+};
+
+type SurfaceMcpBaselineRecord = {
+  readonly baselineId: string;
+  readonly identityKeys: ReadonlySet<string>;
+  readonly reason?: string;
 };
 
 type CallSurfaceMcpToolInput = {
@@ -391,8 +446,13 @@ type CallSurfaceMcpToolInput = {
 
 function createSurfaceMcpSessionState(): SurfaceMcpSessionState {
   return {
+    baselines: new Map(),
+    baselineOrder: [],
     runs: new Map(),
     runOrder: [],
+    trackedByIdentity: new Map(),
+    verdicts: new Map(),
+    nextBaselineSequence: 1,
     nextRunSequence: 1,
   };
 }
@@ -409,15 +469,21 @@ async function callSurfaceMcpTool(
       return callSurfaceExplain(input.session, input.input);
     case "surface_backlog":
       return await callSurfaceBacklog(input.composition, input.session, input.input);
+    case "surface_gate":
+      return await callSurfaceGate(input.composition, input.session, input.input);
+    case "surface_validate":
+      return callSurfaceValidate(input.session, input.input);
+    case "surface_baseline":
+      return callSurfaceBaseline(input.session, input.input);
+    case "surface_verdict":
+      return callSurfaceVerdict(input.session, input.input);
+    case "surface_diff":
+      return callSurfaceDiff(input.session, input.input);
+    case "surface_trace":
+      return callSurfaceTrace(input.session, input.input);
     case "surface_status":
       return callSurfaceStatus(input.session);
-    case "surface_gate":
-    case "surface_validate":
-    case "surface_baseline":
-    case "surface_verdict":
-    case "surface_diff":
     case "surface_alternatives":
-    case "surface_trace":
     case "surface_run":
     case "surface_next":
       return err(
@@ -494,6 +560,8 @@ async function callSurfaceAudit(
     return backlog;
   }
 
+  const trackedFindings = trackedFindingsForRun(session, runId, findings.value);
+
   const record: SurfaceMcpRunRecord = {
     backlog: backlog.value,
     capture: capture.value,
@@ -501,6 +569,7 @@ async function callSurfaceAudit(
     runId,
     skippedLenses: plan.skipped,
     status: "completed",
+    trackedFindings,
   };
   session.runs.set(runId, record);
   session.runOrder.push(runId);
@@ -618,6 +687,209 @@ async function callSurfaceBacklog(
   }
 
   return ok(exported.value);
+}
+
+async function callSurfaceGate(
+  composition: SurfaceComposition,
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Promise<Result<GateResult>> {
+  const parsed = parseToolInput("surface_gate", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const record = runRecordFor(session, parsed.value.runId);
+
+  if (record === undefined) {
+    return err(
+      createSurfaceError("run_not_found", "No stored MCP run matched the requested gate.", {
+        details: { runId: parsed.value.runId ?? null },
+      }),
+    );
+  }
+
+  const baseline = latestBaseline(session);
+  const baselineIdentityKeys = baseline?.identityKeys ?? new Set<string>();
+  const findings = record.findings.filter((finding) => {
+    const tracked = trackedFindingForRunFinding(record, finding.id);
+
+    return tracked === undefined || !baselineIdentityKeys.has(tracked.identityKey);
+  });
+  const policy =
+    parsed.value.policy === undefined
+      ? DEFAULT_SURFACE_CONFIG.reporting.gatePolicy
+      : (parsed.value.policy as SurfaceConfig["reporting"]["gatePolicy"]);
+
+  return await composition.gateEvaluator.evaluate(findings, policy);
+}
+
+function callSurfaceValidate(
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Result<SurfaceMcpValidationOutput> {
+  const parsed = parseToolInput("surface_validate", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const record = runRecordFor(session, parsed.value.runId);
+
+  if (record === undefined) {
+    return err(
+      createSurfaceError("run_not_found", "No stored MCP run matched the requested validation.", {
+        details: { runId: parsed.value.runId },
+      }),
+    );
+  }
+
+  return ok({
+    checks: record.trackedFindings.map((trackedFinding) => ({
+      id: trackedFinding.identityKey,
+      passed: trackedFinding.status !== "identity-broken",
+      validation: trackedFinding.validation,
+      ...(trackedFinding.currentFindingId === undefined
+        ? {}
+        : { findingId: trackedFinding.currentFindingId }),
+    })),
+  });
+}
+
+function callSurfaceBaseline(
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Result<SurfaceMcpBaselineOutput> {
+  const parsed = parseToolInput("surface_baseline", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const record = runRecordFor(session, undefined);
+
+  if (record === undefined || record.trackedFindings.length === 0) {
+    return err(
+      createSurfaceError("no_findings_to_baseline", "No MCP findings are available to baseline."),
+    );
+  }
+
+  const baselineId = nextBaselineId(session);
+  const baseline: SurfaceMcpBaselineRecord = {
+    baselineId,
+    identityKeys: new Set(
+      record.trackedFindings.map((trackedFinding) => trackedFinding.identityKey),
+    ),
+    ...(parsed.value.reason === undefined ? {} : { reason: parsed.value.reason }),
+  };
+  session.baselines.set(baselineId, baseline);
+  session.baselineOrder.push(baselineId);
+
+  return ok({
+    baselineId,
+    count: baseline.identityKeys.size,
+    ...(baseline.reason === undefined ? {} : { reason: baseline.reason }),
+  });
+}
+
+function callSurfaceVerdict(
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Result<SurfaceMcpVerdictOutput> {
+  const parsed = parseToolInput("surface_verdict", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const finding = findStoredFinding(session, parsed.value.findingId);
+
+  if (finding === undefined) {
+    return err(
+      createSurfaceError("finding_not_found", "No stored MCP finding matched the verdict.", {
+        details: { findingId: parsed.value.findingId },
+      }),
+    );
+  }
+
+  const verdict = {
+    decision: parsed.value.decision,
+    findingId: parsed.value.findingId,
+    rationale: parsed.value.rationale,
+  } satisfies SurfaceMcpVerdictOutput;
+  session.verdicts.set(parsed.value.findingId, verdict);
+
+  return ok(verdict);
+}
+
+function callSurfaceDiff(
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Result<SurfaceMcpDiffOutput> {
+  const parsed = parseToolInput("surface_diff", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const before = runRecordFor(session, parsed.value.before.runId);
+  const after = runRecordFor(session, parsed.value.after.runId);
+
+  if (before === undefined || after === undefined) {
+    return err(
+      createSurfaceError("run_not_found", "Both MCP diff runs must exist.", {
+        details: { after: parsed.value.after.runId, before: parsed.value.before.runId },
+      }),
+    );
+  }
+
+  const beforeByIdentity = trackedByIdentityForRun(before);
+  const afterByIdentity = trackedByIdentityForRun(after);
+  const resolved = [...beforeByIdentity]
+    .filter(([identityKey]) => !afterByIdentity.has(identityKey))
+    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "resolved"));
+  const introduced = [...afterByIdentity]
+    .filter(([identityKey]) => !beforeByIdentity.has(identityKey))
+    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "new"));
+  const stillFailing = [...afterByIdentity]
+    .filter(([identityKey]) => beforeByIdentity.has(identityKey))
+    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "still-failing"));
+
+  return ok({
+    identityBroken: after.trackedFindings
+      .filter((trackedFinding) => trackedFinding.status === "identity-broken")
+      .map((trackedFinding) => diffEntryFor(trackedFinding, "identity-broken")),
+    introduced,
+    regressed: after.trackedFindings
+      .filter((trackedFinding) => trackedFinding.status === "regressed")
+      .map((trackedFinding) => diffEntryFor(trackedFinding, "regressed")),
+    resolved,
+    stillFailing,
+  });
+}
+
+function callSurfaceTrace(
+  session: SurfaceMcpSessionState,
+  rawInput: unknown,
+): Result<SurfaceMcpTraceOutput> {
+  const parsed = parseToolInput("surface_trace", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const trackedFinding = findStoredTrackedFinding(session, parsed.value.findingId);
+
+  if (trackedFinding === undefined) {
+    return err(
+      createSurfaceError("finding_not_found", "No tracked MCP finding matched the requested id.", {
+        details: { findingId: parsed.value.findingId },
+      }),
+    );
+  }
+
+  return ok({ trackedFinding });
 }
 
 function callSurfaceStatus(session: SurfaceMcpSessionState): Result<SurfaceMcpStatusOutput> {
@@ -771,6 +1043,13 @@ function nextRunId(session: SurfaceMcpSessionState): string {
   return runId;
 }
 
+function nextBaselineId(session: SurfaceMcpSessionState): string {
+  const baselineId = `baseline_mcp_${session.nextBaselineSequence.toString().padStart(4, "0")}`;
+  session.nextBaselineSequence += 1;
+
+  return baselineId;
+}
+
 function runRecordFor(
   session: SurfaceMcpSessionState,
   runId: string | undefined,
@@ -794,6 +1073,107 @@ function findStoredFinding(
 
     if (finding !== undefined) {
       return finding;
+    }
+  }
+
+  return undefined;
+}
+
+function trackedFindingsForRun(
+  session: SurfaceMcpSessionState,
+  runId: string,
+  findings: readonly Finding[],
+): readonly TrackedFinding[] {
+  return findings.map((finding) => {
+    const initial = createTrackedFinding({
+      finding,
+      runId,
+      validation: validationForFinding(finding),
+    });
+    const previous = session.trackedByIdentity.get(initial.identityKey);
+    const trackedFinding =
+      previous === undefined
+        ? initial
+        : transitionTrackedFinding(previous, { finding, kind: "detected", runId });
+
+    session.trackedByIdentity.set(trackedFinding.identityKey, trackedFinding);
+
+    return trackedFinding;
+  });
+}
+
+function validationForFinding(finding: Finding): ValidationCheck {
+  if (finding.method === "measured") {
+    const toolEvidence = finding.evidence.find((entry) => entry.kind === "tool-result");
+
+    return {
+      expectation:
+        toolEvidence === undefined
+          ? `${finding.lens}/${finding.issueType} remains resolved.`
+          : `${toolEvidence.tool} ${toolEvidence.rule} passes for ${locationLabelFor(finding)}.`,
+      kind: "measured-rule",
+    };
+  }
+
+  return {
+    expectation: `${finding.lens}/${finding.issueType} should be re-evaluated at ${locationLabelFor(
+      finding,
+    )}.`,
+    kind: "re-evaluate-lens",
+  };
+}
+
+function locationLabelFor(finding: Finding): string {
+  return (
+    finding.location.elementRef ??
+    finding.location.selector ??
+    finding.location.component ??
+    finding.location.file ??
+    finding.id
+  );
+}
+
+function latestBaseline(session: SurfaceMcpSessionState): SurfaceMcpBaselineRecord | undefined {
+  const baselineId = session.baselineOrder.at(-1);
+
+  return baselineId === undefined ? undefined : session.baselines.get(baselineId);
+}
+
+function trackedFindingForRunFinding(
+  record: SurfaceMcpRunRecord,
+  findingId: string,
+): TrackedFinding | undefined {
+  return record.trackedFindings.find(
+    (trackedFinding) => trackedFinding.currentFindingId === findingId,
+  );
+}
+
+function trackedByIdentityForRun(record: SurfaceMcpRunRecord): ReadonlyMap<string, TrackedFinding> {
+  return new Map(
+    record.trackedFindings.map((trackedFinding) => [trackedFinding.identityKey, trackedFinding]),
+  );
+}
+
+function diffEntryFor(
+  trackedFinding: TrackedFinding,
+  status: TrackedFinding["status"],
+): SurfaceMcpDiffEntry {
+  return {
+    ...(trackedFinding.currentFindingId === undefined
+      ? {}
+      : { findingId: trackedFinding.currentFindingId }),
+    identityKey: trackedFinding.identityKey,
+    status,
+  };
+}
+
+function findStoredTrackedFinding(
+  session: SurfaceMcpSessionState,
+  findingId: string,
+): TrackedFinding | undefined {
+  for (const trackedFinding of session.trackedByIdentity.values()) {
+    if (trackedFinding.currentFindingId === findingId) {
+      return trackedFinding;
     }
   }
 
