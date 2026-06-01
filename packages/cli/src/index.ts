@@ -42,12 +42,41 @@ type Capture = {
     readonly skippedReason: string;
   };
 };
+type Finding = {
+  readonly id: string;
+  readonly citedHeuristics?: readonly string[];
+  readonly evidence: readonly unknown[];
+  readonly gatedForHuman?: boolean;
+  readonly method?: "measured" | "judged";
+  readonly rationale: string;
+  readonly severityBand?: "P0" | "P1" | "P2" | "P3";
+  readonly title?: string;
+};
+type Backlog = {
+  readonly id: string;
+  readonly runId: string;
+  readonly entries: readonly unknown[];
+};
+type TrackedFinding = {
+  readonly identityKey: string;
+  readonly currentFindingId?: string | undefined;
+  readonly status: string;
+  readonly validation: unknown;
+};
+type GateResult = {
+  readonly passed: boolean;
+  readonly failingFindingIds: readonly string[];
+  readonly exitCode: 0 | 1 | 2;
+};
 type ProjectStateSnapshot = {
   readonly version: string;
   readonly currentStage?: string;
+  readonly backlog?: Backlog;
+  readonly findings?: readonly Finding[];
   readonly pipeline?: {
     readonly lastCompletedStage?: string | undefined;
   };
+  readonly trackedFindings?: readonly TrackedFinding[];
 };
 type SurfaceComposition = {
   readonly captureService: {
@@ -58,6 +87,12 @@ type SurfaceComposition = {
         readonly authStateRef?: string;
       },
     ): Promise<Result<Capture>>;
+  };
+  readonly gateEvaluator: {
+    evaluate(
+      findings: readonly Finding[],
+      policy: SurfaceConfig["reporting"]["gatePolicy"],
+    ): MaybePromise<Result<GateResult>>;
   };
   readonly lensRegistry: readonly {
     readonly id: string;
@@ -140,9 +175,47 @@ type AuditOutput = {
   readonly backlogId: string;
   readonly topFinding?: unknown;
 };
+type ExplainOutput = {
+  readonly finding: Finding;
+  readonly rationale: string;
+  readonly citedHeuristics: readonly string[];
+  readonly evidence: readonly unknown[];
+};
+type BacklogOutput = {
+  readonly backlog: readonly unknown[];
+  readonly backlogId: string;
+  readonly runId: string;
+};
+type ValidateOutput = {
+  readonly checks: readonly {
+    readonly id: string;
+    readonly findingId?: string;
+    readonly passed: boolean;
+    readonly validation: unknown;
+  }[];
+};
+type GateOutput = {
+  readonly gateResult: GateResult;
+};
+type TraceOutput = {
+  readonly trackedFinding: TrackedFinding;
+};
 type ConfigCommandOptions = {
   readonly preset?: string;
   readonly depth?: string;
+};
+type BacklogCommandOptions = {
+  readonly all?: boolean;
+  readonly export?: string;
+  readonly run?: string;
+};
+type GateCommandOptions = {
+  readonly ci?: boolean;
+  readonly policy?: string;
+  readonly run?: string;
+};
+type ValidateCommandOptions = {
+  readonly run?: string;
 };
 type TargetCommandOptions = ConfigCommandOptions & {
   readonly all?: boolean;
@@ -298,6 +371,86 @@ export function createSurfaceCliProgram(input: {
 
       emitResult({
         command: "audit",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  program
+    .command("explain")
+    .description("Explain a stored Surface finding.")
+    .argument("<finding-id>", "finding id")
+    .action(async (findingId: string) => {
+      const result = await explainFinding(input.composition, findingId);
+
+      emitResult({
+        command: "explain",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  program
+    .command("backlog")
+    .description("Read or export the Surface implementation backlog.")
+    .option("--export <target>", "issue export target")
+    .option("--run <runId>", "run id")
+    .option("--all", "include all backlog details in human output")
+    .action(async (options: BacklogCommandOptions) => {
+      const result = await readBacklog(input.composition, options);
+
+      emitResult({
+        command: "backlog",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  program
+    .command("validate")
+    .description("Run validation checks for tracked findings.")
+    .option("--run <runId>", "run id")
+    .action(async (options: ValidateCommandOptions) => {
+      const result = await validateRun(input.composition, options);
+
+      emitResult({
+        command: "validate",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  program
+    .command("gate")
+    .description("Evaluate the Surface quality gate.")
+    .option("--ci", "use CI-oriented exit codes")
+    .option("--policy <file>", "gate policy file")
+    .option("--run <runId>", "run id")
+    .action(async (options: GateCommandOptions) => {
+      const result = await evaluateGate(input.composition, options);
+
+      emitResult({
+        command: "gate",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+        ...(result.ok ? { successExitCode: result.value.gateResult.exitCode } : {}),
+      });
+    });
+
+  program
+    .command("trace")
+    .description("Trace a tracked finding through closed-loop state.")
+    .argument("<finding-id>", "finding id or identity key")
+    .action(async (findingId: string) => {
+      const result = await traceFinding(input.composition, findingId);
+
+      emitResult({
+        command: "trace",
         io,
         json: program.opts<{ json?: boolean }>().json === true,
         result,
@@ -483,11 +636,156 @@ async function auditTarget(
   });
 }
 
+async function explainFinding(
+  composition: SurfaceComposition,
+  findingId: string,
+): Promise<Result<ExplainOutput>> {
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const finding = findStoredFinding(state.value, findingId);
+
+  if (finding === undefined) {
+    return resultErr(
+      createSurfaceError("finding_not_found", "No stored finding matched the requested id.", {
+        details: { findingId },
+      }),
+    );
+  }
+
+  if (finding.evidence.length === 0) {
+    return resultErr(
+      createSurfaceError("evidence_missing", "Stored finding has no evidence to explain.", {
+        details: { findingId },
+      }),
+    );
+  }
+
+  return resultOk({
+    citedHeuristics: finding.citedHeuristics ?? [],
+    evidence: finding.evidence,
+    finding,
+    rationale: finding.rationale,
+  });
+}
+
+async function readBacklog(
+  composition: SurfaceComposition,
+  options: BacklogCommandOptions,
+): Promise<Result<BacklogOutput>> {
+  if (options.export !== undefined) {
+    return resultErr(
+      createSurfaceError("unknown_export_target", "No CLI issue exporter matched the target.", {
+        details: { exportTarget: options.export },
+      }),
+    );
+  }
+
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const backlog = backlogForState(state.value, options.run);
+
+  if (backlog === undefined) {
+    return resultErr(
+      createSurfaceError("run_not_found", "No stored run matched the requested backlog.", {
+        details: { runId: options.run ?? null },
+      }),
+    );
+  }
+
+  return resultOk({
+    backlog: backlog.entries,
+    backlogId: backlog.id,
+    runId: backlog.runId,
+  });
+}
+
+async function validateRun(
+  composition: SurfaceComposition,
+  options: ValidateCommandOptions,
+): Promise<Result<ValidateOutput>> {
+  void options;
+
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const trackedFindings = state.value.trackedFindings ?? [];
+
+  return resultOk({
+    checks: trackedFindings.map((trackedFinding) => ({
+      id: trackedFinding.identityKey,
+      passed: trackedFinding.status !== "identity-broken",
+      validation: trackedFinding.validation,
+      ...(trackedFinding.currentFindingId === undefined
+        ? {}
+        : { findingId: trackedFinding.currentFindingId }),
+    })),
+  });
+}
+
+async function evaluateGate(
+  composition: SurfaceComposition,
+  options: GateCommandOptions,
+): Promise<Result<GateOutput>> {
+  void options;
+
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const gateResult = await composition.gateEvaluator.evaluate(
+    state.value.findings ?? [],
+    DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
+  );
+
+  if (!isResultOk(gateResult)) {
+    return gateResult;
+  }
+
+  return resultOk({ gateResult: gateResult.value });
+}
+
+async function traceFinding(
+  composition: SurfaceComposition,
+  findingId: string,
+): Promise<Result<TraceOutput>> {
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const trackedFinding = findStoredTrackedFinding(state.value, findingId);
+
+  if (trackedFinding === undefined) {
+    return resultErr(
+      createSurfaceError("finding_not_found", "No tracked finding matched the requested id.", {
+        details: { findingId },
+      }),
+    );
+  }
+
+  return resultOk({ trackedFinding });
+}
+
 function emitResult<T>(input: {
   readonly command: string;
   readonly io: SurfaceCliIo;
   readonly json: boolean;
   readonly result: Result<T>;
+  readonly successExitCode?: CliExitCode;
 }): void {
   const write = input.result.ok ? input.io.stdout : input.io.stderr;
   const fallback = input.result.ok
@@ -500,6 +798,10 @@ function emitResult<T>(input: {
     sink(
       input.json ? `${JSON.stringify(envelope)}\n` : humanizeSuccess(input.command, envelope.data),
     );
+
+    if (input.successExitCode !== undefined && input.successExitCode !== 0) {
+      throw new CliHandledError(input.successExitCode);
+    }
 
     return;
   }
@@ -662,6 +964,47 @@ function eligibleStagesAfter(lastCompletedStage: string): readonly ExecutablePip
 
 function inputLensExists(composition: SurfaceComposition, lens: string): boolean {
   return composition.lensRegistry.some((registration) => registration.id === lens);
+}
+
+function findStoredFinding(state: ProjectStateSnapshot, findingId: string): Finding | undefined {
+  return state.findings?.find((finding) => finding.id === findingId);
+}
+
+function findStoredTrackedFinding(
+  state: ProjectStateSnapshot,
+  findingId: string,
+): TrackedFinding | undefined {
+  return state.trackedFindings?.find(
+    (trackedFinding) =>
+      trackedFinding.currentFindingId === findingId || trackedFinding.identityKey === findingId,
+  );
+}
+
+function backlogForState(
+  state: ProjectStateSnapshot,
+  runId: string | undefined,
+): Backlog | undefined {
+  if (state.backlog !== undefined && (runId === undefined || state.backlog.runId === runId)) {
+    return state.backlog;
+  }
+
+  if (state.backlog !== undefined && runId !== undefined && state.backlog.runId !== runId) {
+    return undefined;
+  }
+
+  const effectiveRunId = runId ?? "current";
+  const findings = state.findings ?? [];
+
+  return {
+    entries: findings.map((finding, index) => ({
+      findingId: finding.id,
+      rank: index + 1,
+      severityBand: finding.severityBand ?? "P3",
+      title: finding.title ?? finding.rationale,
+    })),
+    id: `backlog_${effectiveRunId}`,
+    runId: effectiveRunId,
+  };
 }
 
 function nextCliRunId(): string {
