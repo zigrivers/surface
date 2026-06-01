@@ -6,6 +6,7 @@ allowBuilds:
 onlyBuiltDependencies:
   - esbuild
 catalog:
+  "@modelcontextprotocol/sdk": ^1.29.0
   "@eslint/js": ^9.39.4
   "@noble/hashes": ^2.2.0
   "@octokit/rest": ^22.0.1
