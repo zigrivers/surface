@@ -7,9 +7,13 @@ import type { Capture, GroundingTool, SourceFileRef, ToolResult } from "@surface
 
 export const AXE_GROUNDING_ID = "axe";
 export const JSX_A11Y_GROUNDING_ID = "eslint-jsx-a11y";
+export const LIGHTHOUSE_GROUNDING_ID = "lighthouse";
 const AXE_WCAG_AA_THRESHOLD = "WCAG 2.2 AA";
 const JSX_A11Y_THRESHOLD = "eslint-plugin-jsx-a11y recommended";
 const JSX_A11Y_RULE_PREFIX = "jsx-a11y/";
+const LIGHTHOUSE_AUDIT_THRESHOLD = "Lighthouse audit score 1";
+const LIGHTHOUSE_GROUNDING_CATEGORIES = ["accessibility", "performance"] as const;
+const HTTP_URL_SCHEME_PATTERN = /^https?:\/\//iu;
 const SOURCE_EXTENSIONS = [".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx", ".mts", ".cts"] as const;
 const CONTRAST_MEASURED_PATTERN = /color contrast of\s+(\d+(?:\.\d+)?)/iu;
 const CONTRAST_THRESHOLD_PATTERN = /expected contrast ratio of\s+(\d+(?:\.\d+)?)\s*:1/iu;
@@ -59,6 +63,46 @@ export interface JsxA11yGroundingOptions {
   readonly sources: readonly SourceFileRef[];
 }
 
+export interface LighthouseRunnerResult {
+  readonly lhr?: LighthouseResult;
+}
+
+export interface LighthouseResult {
+  readonly audits?: Readonly<Record<string, unknown>>;
+  readonly categories?: Readonly<Record<string, unknown>>;
+}
+
+export interface LighthouseGroundingTool extends GroundingTool {
+  readonly id: typeof LIGHTHOUSE_GROUNDING_ID;
+}
+
+export interface LighthouseGroundingOptions {
+  readonly runLighthouse?: (capture: Capture) => MaybePromise<LighthouseRunnerResult | undefined>;
+  readonly chromeLaunchOptions?: Readonly<Record<string, unknown>>;
+  readonly importLighthouse?: () => Promise<LighthouseModule>;
+  readonly importChromeLauncher?: () => Promise<ChromeLauncherModule>;
+  readonly lighthouseOptions?: Readonly<Record<string, unknown>>;
+}
+
+interface ChromeLauncherModule {
+  readonly launch?: (options?: Readonly<Record<string, unknown>>) => Promise<ChromeInstance>;
+}
+
+interface ChromeInstance {
+  readonly port: number;
+  kill(): MaybePromise<void>;
+}
+
+interface LighthouseModule {
+  readonly default?: LighthouseRunner;
+  readonly lighthouse?: LighthouseRunner;
+}
+
+type LighthouseRunner = (
+  url: string,
+  options?: Readonly<Record<string, unknown>>,
+) => MaybePromise<LighthouseRunnerResult | undefined>;
+
 export function createAxeGroundingTool(options: AxeGroundingOptions): AxeGroundingTool {
   return {
     id: AXE_GROUNDING_ID,
@@ -69,6 +113,31 @@ export function createAxeGroundingTool(options: AxeGroundingOptions): AxeGroundi
         return {
           ok: false,
           error: createSurfaceError("step_failed", "Failed to run axe grounding.", { cause }),
+        };
+      }
+    },
+  };
+}
+
+export function createLighthouseGroundingTool(
+  options: LighthouseGroundingOptions = {},
+): LighthouseGroundingTool {
+  return {
+    id: LIGHTHOUSE_GROUNDING_ID,
+    async run(capture: Capture): Promise<Result<ToolResult[], SurfaceError>> {
+      try {
+        const result =
+          options.runLighthouse === undefined
+            ? await runLighthouseCapture(capture, options)
+            : await options.runLighthouse(capture);
+
+        return { ok: true, value: lighthouseResultToToolResults(result) };
+      } catch (cause) {
+        return {
+          ok: false,
+          error: createSurfaceError("step_failed", "Failed to run lighthouse grounding.", {
+            cause,
+          }),
         };
       }
     },
@@ -91,6 +160,33 @@ export function axeResultToToolResults(result: AxeRunResult | null | undefined):
   return evidence.length === 0 ? [] : [{ tool: AXE_GROUNDING_ID, evidence }];
 }
 
+export function lighthouseResultToToolResults(
+  result: LighthouseRunnerResult | null | undefined,
+): ToolResult[] {
+  const lhr = isRecord(result?.lhr) ? result.lhr : undefined;
+  const audits = recordOrUndefined(lhr?.audits);
+  if (lhr === undefined || audits === undefined) {
+    return [];
+  }
+
+  const evidence = lighthouseAuditIds(lhr)
+    .flatMap((id) => {
+      const audit = recordOrUndefined(audits[id]);
+      return audit === undefined ? [] : evidenceForLighthouseAudit(id, audit);
+    })
+    .map((item, index) => ({ index, item }))
+    .sort(
+      (left, right) =>
+        compareStableStrings(
+          `${left.item.rule}\0${left.item.measuredValue}`,
+          `${right.item.rule}\0${right.item.measuredValue}`,
+        ) || left.index - right.index,
+    )
+    .map(({ item }) => item);
+
+  return evidence.length === 0 ? [] : [{ tool: LIGHTHOUSE_GROUNDING_ID, evidence }];
+}
+
 export function createJsxA11yGroundingTool(options: JsxA11yGroundingOptions): JsxA11yGroundingTool {
   const sources = [...options.sources];
 
@@ -98,6 +194,68 @@ export function createJsxA11yGroundingTool(options: JsxA11yGroundingOptions): Js
     id: JSX_A11Y_GROUNDING_ID,
     run: (): Promise<Result<ToolResult[], SurfaceError>> => runJsxA11yStaticPass(sources),
   };
+}
+
+async function runLighthouseCapture(
+  capture: Capture,
+  options: LighthouseGroundingOptions,
+): Promise<LighthouseRunnerResult | undefined> {
+  const url = lighthouseUrlForCapture(capture);
+  if (url === undefined) {
+    throw new Error("Lighthouse grounding requires an HTTP(S) URL or localhost capture target.");
+  }
+
+  const module = await (options.importLighthouse ?? defaultImportLighthouse)();
+  const lighthouse = module.default ?? module.lighthouse;
+  if (typeof lighthouse !== "function") {
+    throw new Error("lighthouse module did not expose a callable runner.");
+  }
+
+  const chromeLauncher = await (options.importChromeLauncher ?? defaultImportChromeLauncher)();
+  if (typeof chromeLauncher.launch !== "function") {
+    throw new Error("chrome-launcher module did not expose a launch function.");
+  }
+
+  const chrome = await chromeLauncher.launch(options.chromeLaunchOptions);
+  try {
+    return await lighthouse(url, { ...options.lighthouseOptions, port: chrome.port });
+  } finally {
+    await killChromeSafely(chrome);
+  }
+}
+
+async function defaultImportLighthouse(): Promise<LighthouseModule> {
+  return (await importOptionalModule("lighthouse")) as LighthouseModule;
+}
+
+async function defaultImportChromeLauncher(): Promise<ChromeLauncherModule> {
+  return (await importOptionalModule("chrome-launcher")) as ChromeLauncherModule;
+}
+
+async function importOptionalModule(specifier: string): Promise<unknown> {
+  return import(specifier);
+}
+
+async function killChromeSafely(chrome: ChromeInstance): Promise<void> {
+  try {
+    await chrome.kill();
+  } catch {
+    // Do not discard a successful Lighthouse result because best-effort cleanup failed.
+  }
+}
+
+function lighthouseUrlForCapture(capture: Capture): string | undefined {
+  if (capture.target.kind === "url") {
+    return HTTP_URL_SCHEME_PATTERN.test(capture.target.ref) ? capture.target.ref : undefined;
+  }
+
+  if (capture.target.kind === "localhost") {
+    return HTTP_URL_SCHEME_PATTERN.test(capture.target.ref)
+      ? capture.target.ref
+      : `http://${capture.target.ref}`;
+  }
+
+  return undefined;
 }
 
 function evidenceForAxeViolation(violation: AxeViolation): ToolResult["evidence"] {
@@ -121,6 +279,26 @@ function evidenceForAxeViolation(violation: AxeViolation): ToolResult["evidence"
       ...(threshold === undefined ? {} : { threshold }),
     };
   });
+}
+
+function evidenceForLighthouseAudit(
+  id: string,
+  audit: Readonly<Record<string, unknown>>,
+): ToolResult["evidence"] {
+  const score = lighthouseAuditScore(audit);
+  if (score === undefined || score >= 1) {
+    return [];
+  }
+
+  const measured = lighthouseAuditMeasuredValue(id, audit, score);
+
+  return lighthouseAuditAnchors(id, audit).map((anchor) => ({
+    kind: "tool-result" as const,
+    tool: LIGHTHOUSE_GROUNDING_ID,
+    rule: id,
+    measuredValue: `${anchor}: ${measured}`,
+    threshold: LIGHTHOUSE_AUDIT_THRESHOLD,
+  }));
 }
 
 function selectorForAxeNode(node: AxeNodeResult): string {
@@ -174,6 +352,86 @@ function contrastResult(value: string): {
     .filter(isString);
 
   return { measured: ratios[0], threshold: ratios[1] };
+}
+
+function lighthouseAuditIds(lhr: LighthouseResult): readonly string[] {
+  const categories = recordOrUndefined(lhr.categories);
+  const fromCategories =
+    categories === undefined
+      ? []
+      : LIGHTHOUSE_GROUNDING_CATEGORIES.flatMap((categoryId) => {
+          const category = recordOrUndefined(categories[categoryId]);
+          const auditRefs = arrayOrEmpty(category?.["auditRefs"]);
+
+          return auditRefs
+            .map((auditRef) => stringOrUndefined(recordOrUndefined(auditRef)?.["id"]))
+            .filter(isString);
+        });
+
+  if (fromCategories.length > 0) {
+    return uniqueStrings(fromCategories);
+  }
+
+  return Object.keys(recordOrUndefined(lhr.audits) ?? {});
+}
+
+function lighthouseAuditScore(audit: Readonly<Record<string, unknown>>): number | undefined {
+  const score = audit["score"];
+
+  return typeof score === "number" && Number.isFinite(score) ? score : undefined;
+}
+
+function lighthouseAuditAnchors(id: string, audit: Readonly<Record<string, unknown>>): string[] {
+  const details = recordOrUndefined(audit["details"]);
+  const items = arrayOrEmpty(details?.["items"]);
+  const selectors = items.map(anchorForLighthouseDetailItem).filter(isNonEmptyString);
+
+  return selectors.length === 0 ? [id] : uniqueStrings(selectors);
+}
+
+function anchorForLighthouseDetailItem(item: unknown): string | undefined {
+  const itemRecord = recordOrUndefined(item);
+  const node = recordOrUndefined(itemRecord?.["node"]) ?? itemRecord;
+
+  return (
+    stringOrUndefined(node?.["selector"]) ??
+    stringOrUndefined(node?.["path"]) ??
+    stringOrUndefined(node?.["snippet"]) ??
+    stringOrUndefined(node?.["nodeLabel"]) ??
+    rectAnchor(recordOrUndefined(node?.["boundingRect"]))
+  );
+}
+
+function rectAnchor(rect: Readonly<Record<string, unknown>> | undefined): string | undefined {
+  if (rect === undefined) {
+    return undefined;
+  }
+
+  const x = finiteNumberOrUndefined(rect["left"] ?? rect["x"]);
+  const y = finiteNumberOrUndefined(rect["top"] ?? rect["y"]);
+  const width = finiteNumberOrUndefined(rect["width"]);
+  const height = finiteNumberOrUndefined(rect["height"]);
+
+  return x === undefined || y === undefined || width === undefined || height === undefined
+    ? undefined
+    : `rect(${formatLighthouseScore(x)},${formatLighthouseScore(y)} ${formatLighthouseScore(width)}x${formatLighthouseScore(height)})`;
+}
+
+function lighthouseAuditMeasuredValue(
+  id: string,
+  audit: Readonly<Record<string, unknown>>,
+  score: number,
+): string {
+  const display =
+    stringOrUndefined(audit["displayValue"]) ?? stringOrUndefined(audit["title"]) ?? id;
+
+  return `${normalizeWhitespace(display)} (score ${formatLighthouseScore(score)})`;
+}
+
+function formatLighthouseScore(score: number): string {
+  return Number.isInteger(score)
+    ? String(score)
+    : score.toFixed(3).replace(/0+$/u, "").replace(/\.$/u, "");
 }
 
 function normalizeWhitespace(value: string): string {
@@ -292,6 +550,14 @@ function isString(value: unknown): value is string {
   return typeof value === "string";
 }
 
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim().length > 0;
+}
+
+function finiteNumberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
 function axeViolations(result: AxeRunResult | null | undefined): readonly AxeViolation[] {
   if (!isRecord(result) || !Array.isArray(result.violations)) {
     return [];
@@ -312,8 +578,20 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null;
 }
 
+function recordOrUndefined(value: unknown): Readonly<Record<string, unknown>> | undefined {
+  return isRecord(value) ? value : undefined;
+}
+
+function arrayOrEmpty(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? (value as readonly unknown[]) : [];
+}
+
 function stringOrUndefined(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values)];
 }
 
 function compareStableStrings(left: string, right: string): number {
