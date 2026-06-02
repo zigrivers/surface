@@ -305,6 +305,60 @@ describe("@surface/cli findings and loop verbs", () => {
     });
   });
 
+  it("summarizes backlog human output by default and reveals details with --all", async () => {
+    const createStateStore = () =>
+      new MemoryStateStore({
+        backlog: {
+          entries: [
+            {
+              findingId: "finding_button_contrast",
+              rank: 1,
+              severityBand: "P1",
+              title: "Fix button contrast",
+            },
+            {
+              findingId: "finding_focus_state",
+              rank: 2,
+              severityBand: "P2",
+              title: "Restore focus state",
+            },
+          ],
+          id: "backlog_run_eval",
+          runId: "run_eval",
+        },
+        version: "1.0",
+      });
+    const summarizedStdout: string[] = [];
+    const allStdout: string[] = [];
+
+    const summarizedExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "backlog"],
+      composition: createSurfaceComposition({ stateStore: createStateStore() }),
+      io: { stdout: (chunk) => summarizedStdout.push(chunk) },
+    });
+    const allExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "backlog", "--all"],
+      composition: createSurfaceComposition({ stateStore: createStateStore() }),
+      io: { stdout: (chunk) => allStdout.push(chunk) },
+    });
+
+    const summarized = summarizedStdout.join("");
+    const all = allStdout.join("");
+
+    expect(summarizedExitCode).toBe(0);
+    expect(allExitCode).toBe(0);
+    expect(summarized).toContain("surface backlog: 2 entries");
+    expect(summarized).toContain("Top backlog item:");
+    expect(summarized).toContain("[P1] Fix button contrast");
+    expect(summarized).toContain("Hidden backlog items: 1. Use --all to show every item.");
+    expect(summarized).not.toContain("Restore focus state");
+    expect(summarized).not.toContain(`${String.fromCharCode(27)}[`);
+    expect(all).toContain("All backlog items:");
+    expect(all).toContain("[P1] Fix button contrast");
+    expect(all).toContain("[P2] Restore focus state");
+    expect(all).not.toContain(`${String.fromCharCode(27)}[`);
+  });
+
   it("validates tracked findings for a run", async () => {
     const stdout: string[] = [];
     const exitCode = await runSurfaceCli({

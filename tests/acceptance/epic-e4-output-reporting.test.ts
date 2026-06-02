@@ -6,6 +6,7 @@ import path from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+  createSurfaceComposition,
   createFileStateStore,
   createExplainJsonRenderer,
   createExplainMarkdownRenderer,
@@ -19,6 +20,7 @@ import {
   type Finding,
   type KnowledgeSource,
 } from "../../packages/core/src/index.js";
+import { runSurfaceCli } from "../../packages/cli/src/index.js";
 
 const finding = {
   id: "f_accessibility_contrast",
@@ -267,6 +269,20 @@ describe("E4 Output & Reporting", () => {
 
       const markdown = new TextDecoder().decode(markdownFirst.value.bytes);
       const json = JSON.parse(new TextDecoder().decode(jsonFirst.value.bytes));
+      const cliStdout: string[] = [];
+      const cliExitCode = await runSurfaceCli({
+        argv: ["node", "surface", "explain", finding.id],
+        composition: createSurfaceComposition({
+          stateStore: {
+            readState: () => ok({ findings: [finding], version: "1.0" }),
+            writeArtifact: () =>
+              Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+            writeState: (state) => ok(state),
+          },
+        }),
+        io: { stdout: (chunk) => cliStdout.push(chunk) },
+      });
+      const cliText = cliStdout.join("");
 
       expect(markdownFirst.value.bytes).toEqual(markdownSecond.value.bytes);
       expect(jsonFirst.value.bytes).toEqual(jsonSecond.value.bytes);
@@ -278,6 +294,12 @@ describe("E4 Output & Reporting", () => {
         finding: { id: "f_accessibility_contrast" },
         evidence: [{ kind: "tool-result" }],
       });
+      expect(cliExitCode).toBe(0);
+      expect(cliText).not.toContain(`${String.fromCharCode(27)}[`);
+      expect(cliText).toContain("Finding: [P1] Primary button contrast is below AA");
+      expect(cliText).toContain("Method: measured");
+      expect(cliText).toContain("Why it matters: The primary button text is hard to read");
+      expect(cliText).toContain("Evidence: 1 item");
     });
   });
   describe("US-032 CI-native reporters: SARIF + PR annotations [committed]", () => {

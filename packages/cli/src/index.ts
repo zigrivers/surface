@@ -187,6 +187,7 @@ type AuditOutput = {
   readonly runId: string;
   readonly findingCount: number;
   readonly backlogId: string;
+  readonly findings?: readonly Finding[];
   readonly topFinding?: unknown;
 };
 type ExplainOutput = {
@@ -389,6 +390,9 @@ export function createSurfaceCliProgram(input: {
 
       emitResult({
         command: "audit",
+        humanAll:
+          options.all === true ||
+          program.opts<{ json?: boolean; verbose?: boolean }>().verbose === true,
         io,
         json: program.opts<{ json?: boolean }>().json === true,
         result,
@@ -421,6 +425,9 @@ export function createSurfaceCliProgram(input: {
 
       emitResult({
         command: "backlog",
+        humanAll:
+          options.all === true ||
+          program.opts<{ json?: boolean; verbose?: boolean }>().verbose === true,
         io,
         json: program.opts<{ json?: boolean }>().json === true,
         result,
@@ -674,6 +681,7 @@ async function auditTarget(
   return resultOk({
     backlogId: backlog.id,
     findingCount: findings.length,
+    ...(options.all === true ? { findings } : {}),
     runId,
     ...(findings[0] === undefined ? {} : { topFinding: findings[0] }),
   });
@@ -825,6 +833,7 @@ async function traceFinding(
 
 function emitResult<T>(input: {
   readonly command: string;
+  readonly humanAll?: boolean;
   readonly io: SurfaceCliIo;
   readonly json: boolean;
   readonly result: Result<T>;
@@ -839,7 +848,9 @@ function emitResult<T>(input: {
   if (input.result.ok) {
     const envelope = successEnvelope(input.command, input.result.value);
     sink(
-      input.json ? `${JSON.stringify(envelope)}\n` : humanizeSuccess(input.command, envelope.data),
+      input.json
+        ? `${JSON.stringify(envelope)}\n`
+        : humanizeSuccess(input.command, envelope.data, { all: input.humanAll === true }),
     );
 
     if (input.successExitCode !== undefined && input.successExitCode !== 0) {
@@ -903,8 +914,168 @@ function writeEnvelope(write: (chunk: string) => void, envelope: CliEnvelope<nev
   write(`${JSON.stringify(envelope)}\n`);
 }
 
-function humanizeSuccess<T>(command: string, data: T): string {
+function humanizeSuccess<T>(command: string, data: T, options: { readonly all: boolean }): string {
+  if (command === "audit") {
+    return humanizeAudit(data, options);
+  }
+
+  if (command === "backlog") {
+    return humanizeBacklog(data, options);
+  }
+
+  if (command === "explain") {
+    return humanizeExplain(data);
+  }
+
   return `surface ${command}: ${JSON.stringify(data)}\n`;
+}
+
+function humanizeAudit(data: unknown, options: { readonly all: boolean }): string {
+  if (!isRecord(data)) {
+    return `surface audit: ${JSON.stringify(data)}\n`;
+  }
+
+  const findingCount = numberValue(data.findingCount) ?? 0;
+  const runId = stringValue(data.runId);
+  const topFinding = data.topFinding;
+  const findings = arrayValue(data.findings);
+  const visibleFindings =
+    options.all && findings.length > 0 ? findings : [topFinding].filter(Boolean);
+  const lines = [
+    `surface audit: ${findingCount} ${plural(findingCount, "finding")}${
+      runId === undefined ? "" : ` (run ${runId})`
+    }`,
+  ];
+
+  if (findingCount === 0) {
+    lines.push("No findings were reported.");
+
+    return `${lines.join("\n")}\n`;
+  }
+
+  lines.push(options.all ? "All findings:" : "Top finding:");
+  for (const finding of visibleFindings) {
+    lines.push(formatFindingLine(finding));
+  }
+
+  if (!options.all) {
+    lines.push(
+      `Hidden findings: ${Math.max(0, findingCount - 1)}. Use --all to show every finding.`,
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function humanizeBacklog(data: unknown, options: { readonly all: boolean }): string {
+  if (!isRecord(data)) {
+    return `surface backlog: ${JSON.stringify(data)}\n`;
+  }
+
+  const backlog = arrayValue(data.backlog);
+  const runId = stringValue(data.runId);
+  const lines = [
+    `surface backlog: ${backlog.length} ${plural(backlog.length, "entry", "entries")}${
+      runId === undefined ? "" : ` (run ${runId})`
+    }`,
+  ];
+
+  if (backlog.length === 0) {
+    lines.push("No backlog items are currently stored.");
+
+    return `${lines.join("\n")}\n`;
+  }
+
+  const visibleBacklog = options.all ? backlog : backlog.slice(0, 1);
+  lines.push(options.all ? "All backlog items:" : "Top backlog item:");
+  for (const entry of visibleBacklog) {
+    lines.push(formatBacklogLine(entry));
+  }
+
+  if (!options.all) {
+    lines.push(
+      `Hidden backlog items: ${Math.max(0, backlog.length - 1)}. Use --all to show every item.`,
+    );
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function humanizeExplain(data: unknown): string {
+  if (!isRecord(data)) {
+    return `surface explain: ${JSON.stringify(data)}\n`;
+  }
+
+  const finding = isRecord(data.finding) ? data.finding : {};
+  const id = stringValue(finding.id);
+  const title = stringValue(finding.title) ?? stringValue(data.rationale) ?? "Untitled finding";
+  const severity = stringValue(finding.severityBand) ?? "P?";
+  const method = stringValue(finding.method) ?? "unknown";
+  const evidence = arrayValue(data.evidence);
+  const citedHeuristics = arrayValue(data.citedHeuristics)
+    .map((heuristic) => (typeof heuristic === "string" ? heuristic : undefined))
+    .filter((heuristic): heuristic is string => heuristic !== undefined);
+  const lines = [
+    `Finding: [${severity}] ${title}`,
+    ...(id === undefined ? [] : [`ID: ${id}`]),
+    `Method: ${method}`,
+    `Why it matters: ${stringValue(data.rationale) ?? "No rationale was stored."}`,
+    `Evidence: ${evidence.length} ${plural(evidence.length, "item")}`,
+  ];
+
+  if (citedHeuristics.length > 0) {
+    lines.splice(4, 0, `Heuristics: ${citedHeuristics.join(", ")}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function formatFindingLine(value: unknown): string {
+  if (!isRecord(value)) {
+    return `- ${JSON.stringify(value)}`;
+  }
+
+  const id = stringValue(value.id);
+  const title = stringValue(value.title) ?? stringValue(value.rationale) ?? "Untitled finding";
+  const severity = stringValue(value.severityBand) ?? "P?";
+  const method = stringValue(value.method) ?? "unknown";
+  const evidence = arrayValue(value.evidence);
+
+  return `- [${severity}] ${title}${id === undefined ? "" : ` (${id})`} - Method: ${method}; Evidence: ${evidence.length} ${plural(evidence.length, "item")}`;
+}
+
+function formatBacklogLine(value: unknown): string {
+  if (!isRecord(value)) {
+    return `- ${JSON.stringify(value)}`;
+  }
+
+  const rank = numberValue(value.rank);
+  const findingId = stringValue(value.findingId);
+  const title = stringValue(value.title) ?? findingId ?? "Untitled backlog item";
+  const severity = stringValue(value.severityBand) ?? "P?";
+  const prefix = rank === undefined ? "-" : `${rank}.`;
+
+  return `${prefix} [${severity}] ${title}${findingId === undefined ? "" : ` (${findingId})`}`;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function arrayValue(value: unknown): readonly unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+function stringValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function numberValue(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function plural(count: number, singular: string, pluralValue = `${singular}s`): string {
+  return count === 1 ? singular : pluralValue;
 }
 
 function configFromOptions(options: ConfigCommandOptions): Result<SurfaceConfig> {
