@@ -9,6 +9,7 @@
     "@surface/adapters-agnostic#lint": { "dependsOn": ["^build"] },
     "@surface/adapters-react#lint": { "dependsOn": ["^build"] },
     "@surface/adapters-svelte#lint": { "dependsOn": ["^build"] },
+    "@surface/adapters-vue#lint": { "dependsOn": ["^build"] },
     "@surface/cli#lint": { "dependsOn": ["^build"] },
     "@surface/grounding#lint": { "dependsOn": ["^build"] },
     "@surface/mcp#lint": { "dependsOn": ["^build"] },
