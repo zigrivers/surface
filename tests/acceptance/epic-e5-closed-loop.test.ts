@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   assignFindingIdentities,
+  createSurfaceComposition,
   createNoopPipelineHandlers,
   createGateEvaluator,
   createPipelineOrchestrator,
@@ -18,6 +19,7 @@ import {
   type ProjectStateSnapshot,
   type StateStore,
 } from "../../packages/core/src/index.js";
+import { runSurfaceCli } from "../../packages/cli/src/index.js";
 
 const identityFinding = {
   id: "f_a1",
@@ -333,7 +335,65 @@ describe("E5 Closed Loop, State & Baselines", () => {
       });
     });
 
-    it.skip("[US-042][AC1] `surface baseline` → snapshot; `gate` thereafter fails only on net-new/expired findings (integration)", () => {});
+    it("[US-042][AC1] `surface baseline` → snapshot; `gate` thereafter fails only on net-new/expired findings (integration)", async () => {
+      const stdout: string[] = [];
+      let state = {
+        findings: [findingWith({ id: "f_current_debt", severityBand: "P1" })],
+        trackedFindings: [
+          {
+            currentFindingId: "f_current_debt",
+            identityKey: "identity_current_debt",
+            status: "still-failing",
+            validation: { expectation: "contrast passes", kind: "measured-rule" },
+          },
+        ],
+        version: "1.0",
+      };
+      const composition = createSurfaceComposition({
+        stateStore: {
+          readState: () => ok(state),
+          writeArtifact: () =>
+            Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+          writeState: (nextState) => {
+            state = nextState as typeof state;
+
+            return ok(nextState);
+          },
+        },
+      });
+
+      const baselineExitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "baseline", "--reason", "accepted current debt"],
+        composition,
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+      const gateExitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "gate", "--ci"],
+        composition,
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(baselineExitCode).toBe(0);
+      expect(gateExitCode).toBe(0);
+      expect(JSON.parse(stdout[0] ?? "")).toMatchObject({
+        command: "baseline",
+        data: { count: 1, reason: "accepted current debt" },
+        ok: true,
+      });
+      expect(JSON.parse(stdout[1] ?? "")).toMatchObject({
+        command: "gate",
+        data: { gateResult: { failingFindingIds: [], passed: true } },
+        ok: true,
+      });
+      expect(state).toMatchObject({
+        baselines: [
+          {
+            identityKeys: ["identity_current_debt"],
+            reason: "accepted current debt",
+          },
+        ],
+      });
+    });
     it.skip("[US-042][AC2] waiver with expiry → on expiry the finding re-activates; gateDisposition returns to active (unit)", () => {});
   });
 });

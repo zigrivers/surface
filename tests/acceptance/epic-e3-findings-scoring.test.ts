@@ -1,6 +1,8 @@
 // Acceptance skeletons — Epic E3: Findings, Scoring & Trust (US-020..023).
 import { describe, expect, it } from "vitest";
 
+import { createSurfaceComposition, ok } from "../../packages/core/src/index.js";
+import { runSurfaceCli } from "../../packages/cli/src/index.js";
 import {
   scoreFinding,
   synthesizeBacklog,
@@ -268,6 +270,70 @@ describe("E3 Findings, Scoring & Trust", () => {
   });
   describe("US-023 self-grounding accuracy & verdict loop [should]", () => {
     it.skip("[US-023][AC1] measured ground truth + human verdicts → surface reports its judged false-positive rate (integration)", () => {});
-    it.skip("[US-023][AC2] `verdict <id> --reject --reason` → verdict persists and feeds future prioritization (integration)", () => {});
+    it("[US-023][AC2] `verdict <id> --reject --reason` → verdict persists and feeds future prioritization (integration)", async () => {
+      const stdout: string[] = [];
+      let state = {
+        findings: [
+          {
+            citedHeuristics: ["kb_wcag_143"],
+            evidence: [{ kind: "tool-result", rule: "color-contrast", tool: "axe" }],
+            gatedForHuman: false,
+            id: "finding_false_positive",
+            method: "measured",
+            rationale: "Reviewer confirmed this measured result is not applicable.",
+            severityBand: "P1",
+            title: "Button contrast is below AA",
+          },
+        ],
+        version: "1.0",
+      };
+      const exitCode = await runSurfaceCli({
+        argv: [
+          "node",
+          "surface",
+          "--json",
+          "verdict",
+          "finding_false_positive",
+          "--reject",
+          "--reason",
+          "False positive in dark theme override",
+        ],
+        composition: createSurfaceComposition({
+          stateStore: {
+            readState: () => ok(state),
+            writeArtifact: () =>
+              Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+            writeState: (nextState) => {
+              state = nextState as typeof state;
+
+              return ok(nextState);
+            },
+          },
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        command: "verdict",
+        data: {
+          verdict: {
+            decision: "reject",
+            findingId: "finding_false_positive",
+            rationale: "False positive in dark theme override",
+          },
+        },
+        ok: true,
+      });
+      expect(state).toMatchObject({
+        verdicts: [
+          {
+            decision: "reject",
+            findingId: "finding_false_positive",
+            rationale: "False positive in dark theme override",
+          },
+        ],
+      });
+    });
   });
 });

@@ -18,6 +18,11 @@ type ParsedErrorEnvelope = {
 };
 type TestProjectStateSnapshot = {
   readonly version: string;
+  readonly baselines?: readonly {
+    readonly baselineId: string;
+    readonly identityKeys: readonly string[];
+    readonly reason?: string;
+  }[];
   readonly currentStage?: string;
   readonly backlog?: {
     readonly id: string;
@@ -25,7 +30,16 @@ type TestProjectStateSnapshot = {
     readonly entries: readonly unknown[];
   };
   readonly findings?: readonly TestFinding[];
+  readonly runRecords?: readonly {
+    readonly runId: string;
+    readonly trackedFindings: readonly TestTrackedFinding[];
+  }[];
   readonly trackedFindings?: readonly TestTrackedFinding[];
+  readonly verdicts?: readonly {
+    readonly decision: string;
+    readonly findingId: string;
+    readonly rationale: string;
+  }[];
 };
 type TestTarget = {
   readonly kind: "url" | "localhost" | "route" | "screenshot" | "component" | "dom";
@@ -440,6 +454,160 @@ describe("@surface/cli findings and loop verbs", () => {
       ok: true,
     });
   });
+
+  it("baselines current findings and makes gate fail only on net-new findings", async () => {
+    const stdout: string[] = [];
+    const stateStore = new MemoryStateStore({
+      findings: [testFinding()],
+      trackedFindings: [testTrackedFinding()],
+      version: "1.0",
+    });
+    const baselineExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "baseline", "--reason", "accepted current debt"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+    const gateExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "gate", "--ci"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(baselineExitCode).toBe(0);
+    expect(gateExitCode).toBe(0);
+    expect(stateStore.state.baselines?.[0]).toMatchObject({
+      identityKeys: ["identity_button_contrast"],
+      reason: "accepted current debt",
+    });
+    expect(JSON.parse(stdout[0] ?? "")).toMatchObject({
+      command: "baseline",
+      data: { count: 1, reason: "accepted current debt" },
+      ok: true,
+    });
+    expect(JSON.parse(stdout[1] ?? "")).toMatchObject({
+      command: "gate",
+      data: { gateResult: { failingFindingIds: [], passed: true } },
+      ok: true,
+    });
+  });
+
+  it("records verdicts for stored findings", async () => {
+    const stdout: string[] = [];
+    const stateStore = new MemoryStateStore({
+      findings: [testFinding()],
+      version: "1.0",
+    });
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "verdict",
+        "finding_button_contrast",
+        "--reject",
+        "--reason",
+        "False positive in reviewed theme",
+      ],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stateStore.state.verdicts).toEqual([
+      {
+        decision: "reject",
+        findingId: "finding_button_contrast",
+        rationale: "False positive in reviewed theme",
+      },
+    ]);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "verdict",
+      data: {
+        verdict: {
+          decision: "reject",
+          findingId: "finding_button_contrast",
+          rationale: "False positive in reviewed theme",
+        },
+      },
+      ok: true,
+    });
+  });
+
+  it("diffs tracked findings between two stored runs", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "diff", "run_before", "run_after"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          runRecords: [
+            { runId: "run_before", trackedFindings: [testTrackedFinding()] },
+            {
+              runId: "run_after",
+              trackedFindings: [
+                testTrackedFinding({
+                  currentFindingId: "finding_focus_state",
+                  identityKey: "identity_focus_state",
+                }),
+              ],
+            },
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "diff",
+      data: {
+        introduced: [{ findingId: "finding_focus_state", identityKey: "identity_focus_state" }],
+        resolved: [
+          { findingId: "finding_button_contrast", identityKey: "identity_button_contrast" },
+        ],
+      },
+      ok: true,
+    });
+  });
+
+  it("returns bounded alternatives for a target", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "alternatives", "--dom", "<main>Checkout</main>"],
+      composition: createSurfaceComposition(),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join("")) as CliEnvelope<{
+      readonly alternatives: {
+        readonly proposals: readonly {
+          readonly id: string;
+          readonly rationale: string;
+          readonly title: string;
+        }[];
+        readonly target: TestTarget;
+      };
+    }>;
+
+    expect(parsed).toMatchObject({
+      command: "alternatives",
+      data: {
+        alternatives: {
+          target: { kind: "dom", ref: "<main>Checkout</main>" },
+        },
+      },
+      ok: true,
+    });
+    if (!parsed.ok) {
+      throw new Error("Expected alternatives to emit a success envelope.");
+    }
+    const proposal = parsed.data.alternatives.proposals.find(
+      (candidate) => candidate.id === "alt_preserve_structure",
+    );
+
+    expect(proposal?.rationale).toContain("Bounded to the captured view");
+  });
 });
 
 class MemoryStateStore {
@@ -503,7 +671,7 @@ function testFinding(): TestFinding {
   };
 }
 
-function testTrackedFinding(): TestTrackedFinding {
+function testTrackedFinding(overrides: Partial<TestTrackedFinding> = {}): TestTrackedFinding {
   return {
     currentFindingId: "finding_button_contrast",
     firstSeenRunId: "run_eval",
@@ -523,5 +691,6 @@ function testTrackedFinding(): TestTrackedFinding {
       expectation: "axe color-contrast passes",
       kind: "measured-rule",
     },
+    ...overrides,
   };
 }

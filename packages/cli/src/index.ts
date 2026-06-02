@@ -82,15 +82,37 @@ type GateResult = {
   readonly failingFindingIds: readonly string[];
   readonly exitCode: 0 | 1 | 2;
 };
+type BaselineRecord = {
+  readonly baselineId: string;
+  readonly identityKeys: readonly string[];
+  readonly reason?: string;
+};
+type VerdictRecord = {
+  readonly decision: "accept" | "reject" | "correct" | "defer";
+  readonly findingId: string;
+  readonly rationale: string;
+};
+type DiffEntry = {
+  readonly findingId?: string;
+  readonly identityKey: string;
+  readonly status: string;
+};
+type CliRunRecord = {
+  readonly runId: string;
+  readonly trackedFindings: readonly TrackedFinding[];
+};
 type ProjectStateSnapshot = {
   readonly version: string;
+  readonly baselines?: readonly BaselineRecord[];
   readonly currentStage?: string;
   readonly backlog?: Backlog;
   readonly findings?: readonly Finding[];
   readonly pipeline?: {
     readonly lastCompletedStage?: string | undefined;
   };
+  readonly runRecords?: readonly CliRunRecord[];
   readonly trackedFindings?: readonly TrackedFinding[];
+  readonly verdicts?: readonly VerdictRecord[];
 };
 type SurfaceComposition = {
   readonly captureService: {
@@ -212,6 +234,31 @@ type ValidateOutput = {
 type GateOutput = {
   readonly gateResult: GateResult;
 };
+type BaselineOutput = {
+  readonly baselineId: string;
+  readonly count: number;
+  readonly reason?: string;
+};
+type VerdictOutput = {
+  readonly verdict: VerdictRecord;
+};
+type DiffOutput = {
+  readonly identityBroken: readonly DiffEntry[];
+  readonly introduced: readonly DiffEntry[];
+  readonly regressed: readonly DiffEntry[];
+  readonly resolved: readonly DiffEntry[];
+  readonly stillFailing: readonly DiffEntry[];
+};
+type AlternativesOutput = {
+  readonly alternatives: {
+    readonly proposals: readonly {
+      readonly id: string;
+      readonly rationale: string;
+      readonly title: string;
+    }[];
+    readonly target: Target;
+  };
+};
 type TraceOutput = {
   readonly trackedFinding: TrackedFinding;
 };
@@ -231,6 +278,16 @@ type GateCommandOptions = {
 };
 type ValidateCommandOptions = {
   readonly run?: string;
+};
+type BaselineCommandOptions = {
+  readonly reason?: string;
+};
+type VerdictCommandOptions = {
+  readonly accept?: boolean;
+  readonly correct?: boolean;
+  readonly defer?: boolean;
+  readonly reason?: string;
+  readonly reject?: boolean;
 };
 type TargetCommandOptions = ConfigCommandOptions & {
   readonly all?: boolean;
@@ -468,6 +525,70 @@ export function createSurfaceCliProgram(input: {
     });
 
   program
+    .command("baseline")
+    .description("Snapshot current findings as accepted baseline debt.")
+    .option("--reason <reason>", "baseline rationale")
+    .action(async (options: BaselineCommandOptions) => {
+      const result = await createBaseline(input.composition, options);
+
+      emitResult({
+        command: "baseline",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  program
+    .command("verdict")
+    .description("Record a human verdict for a finding.")
+    .argument("<finding-id>", "finding id")
+    .option("--accept", "accept the finding")
+    .option("--reject", "reject the finding")
+    .option("--correct", "mark the finding corrected")
+    .option("--defer", "defer the finding")
+    .option("--reason <reason>", "verdict rationale")
+    .action(async (findingId: string, options: VerdictCommandOptions) => {
+      const result = await recordVerdict(input.composition, findingId, options);
+
+      emitResult({
+        command: "verdict",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  program
+    .command("diff")
+    .description("Compare tracked findings between two runs.")
+    .argument("<before>", "before run id")
+    .argument("<after>", "after run id")
+    .action(async (before: string, after: string) => {
+      const result = await diffRuns(input.composition, before, after);
+
+      emitResult({
+        command: "diff",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  addTargetOptions(
+    program.command("alternatives").description("Suggest bounded alternatives for a UI target."),
+  ).action(async (options: TargetCommandOptions) => {
+    const result = await suggestAlternatives(input.composition, options);
+
+    emitResult({
+      command: "alternatives",
+      io,
+      json: program.opts<{ json?: boolean }>().json === true,
+      result,
+    });
+  });
+
+  program
     .command("trace")
     .description("Trace a tracked finding through closed-loop state.")
     .argument("<finding-id>", "finding id or identity key")
@@ -671,6 +792,10 @@ async function auditTarget(
     backlog,
     currentStage: "completed",
     findings,
+    runRecords: [
+      ...(priorState.value.runRecords ?? []).filter((record) => record.runId !== runId),
+      { runId, trackedFindings },
+    ],
     trackedFindings,
   });
 
@@ -796,8 +921,18 @@ async function evaluateGate(
     return state;
   }
 
+  const latestBaseline = state.value.baselines?.at(-1);
+  const findings = state.value.findings ?? [];
+  const findingsForGate =
+    latestBaseline === undefined
+      ? findings
+      : findings.filter(
+          (finding) =>
+            !latestBaseline.identityKeys.includes(identityKeyForFinding(state.value, finding)),
+        );
+
   const gateResult = await composition.gateEvaluator.evaluate(
-    state.value.findings ?? [],
+    findingsForGate,
     DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
   );
 
@@ -806,6 +941,186 @@ async function evaluateGate(
   }
 
   return resultOk({ gateResult: gateResult.value });
+}
+
+async function createBaseline(
+  composition: SurfaceComposition,
+  options: BaselineCommandOptions,
+): Promise<Result<BaselineOutput>> {
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const identityKeys = identityKeysForBaseline(state.value);
+
+  if (identityKeys.length === 0) {
+    return resultErr(
+      createSurfaceError("no_findings_to_baseline", "No findings are available to baseline."),
+    );
+  }
+
+  const baseline: BaselineRecord = {
+    baselineId: `baseline_${Date.now().toString(36)}`,
+    identityKeys,
+    ...(options.reason === undefined ? {} : { reason: options.reason }),
+  };
+  const writtenState = await composition.stateStore.writeState({
+    ...state.value,
+    baselines: [baseline],
+  });
+
+  if (!isResultOk(writtenState)) {
+    return writtenState;
+  }
+
+  return resultOk({
+    baselineId: baseline.baselineId,
+    count: baseline.identityKeys.length,
+    ...(baseline.reason === undefined ? {} : { reason: baseline.reason }),
+  });
+}
+
+async function recordVerdict(
+  composition: SurfaceComposition,
+  findingId: string,
+  options: VerdictCommandOptions,
+): Promise<Result<VerdictOutput>> {
+  const decision = decisionFromOptions(options);
+
+  if (!isResultOk(decision)) {
+    return decision;
+  }
+
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const finding = findStoredFinding(state.value, findingId);
+
+  if (finding === undefined) {
+    return resultErr(
+      createSurfaceError("finding_not_found", "No stored finding matched the verdict.", {
+        details: { findingId },
+      }),
+    );
+  }
+
+  const verdict: VerdictRecord = {
+    decision: decision.value,
+    findingId,
+    rationale: options.reason ?? "",
+  };
+  const writtenState = await composition.stateStore.writeState({
+    ...state.value,
+    verdicts: [
+      ...(state.value.verdicts ?? []).filter((entry) => entry.findingId !== findingId),
+      verdict,
+    ],
+  });
+
+  if (!isResultOk(writtenState)) {
+    return writtenState;
+  }
+
+  return resultOk({ verdict });
+}
+
+async function diffRuns(
+  composition: SurfaceComposition,
+  beforeRunId: string,
+  afterRunId: string,
+): Promise<Result<DiffOutput>> {
+  const state = await composition.stateStore.readState();
+
+  if (!isResultOk(state)) {
+    return state;
+  }
+
+  const before = state.value.runRecords?.find((record) => record.runId === beforeRunId);
+  const after = state.value.runRecords?.find((record) => record.runId === afterRunId);
+
+  if (before === undefined || after === undefined) {
+    return resultErr(
+      createSurfaceError("run_not_found", "Both diff runs must exist.", {
+        details: { after: afterRunId, before: beforeRunId },
+      }),
+    );
+  }
+
+  const beforeByIdentity = trackedByIdentity(before.trackedFindings);
+  const afterByIdentity = trackedByIdentity(after.trackedFindings);
+  const resolved = [...beforeByIdentity]
+    .filter(([identityKey]) => !afterByIdentity.has(identityKey))
+    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "resolved"));
+  const introduced = [...afterByIdentity]
+    .filter(([identityKey]) => !beforeByIdentity.has(identityKey))
+    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "new"));
+  const stillFailing = [...afterByIdentity]
+    .filter(([identityKey]) => beforeByIdentity.has(identityKey))
+    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "still-failing"));
+
+  return resultOk({
+    identityBroken: after.trackedFindings
+      .filter((trackedFinding) => trackedFinding.status === "identity-broken")
+      .map((trackedFinding) => diffEntryFor(trackedFinding, "identity-broken")),
+    introduced,
+    regressed: after.trackedFindings
+      .filter((trackedFinding) => trackedFinding.status === "regressed")
+      .map((trackedFinding) => diffEntryFor(trackedFinding, "regressed")),
+    resolved,
+    stillFailing,
+  });
+}
+
+async function suggestAlternatives(
+  composition: SurfaceComposition,
+  options: TargetCommandOptions,
+): Promise<Result<AlternativesOutput>> {
+  const target = targetFromOptions(options);
+
+  if (!isResultOk(target)) {
+    return target;
+  }
+
+  const config = configFromOptions(options);
+
+  if (!isResultOk(config)) {
+    return config;
+  }
+
+  const capture = await observeCliTarget(
+    composition,
+    target.value,
+    config.value.capture,
+    options.authState,
+  );
+
+  if (!isResultOk(capture)) {
+    return capture;
+  }
+
+  return resultOk({
+    alternatives: {
+      proposals: [
+        {
+          id: "alt_preserve_structure",
+          rationale: "Bounded to the captured view; keeps the existing information architecture.",
+          title: "Keep the current layout and strengthen the weakest affordance",
+        },
+        {
+          id: "alt_reduce_friction",
+          rationale:
+            "Bounded to the captured view; reduces one interaction cost without a from-scratch redesign.",
+          title: "Reduce the highest-friction step while preserving the same task flow",
+        },
+      ],
+      target: target.value,
+    },
+  });
 }
 
 async function traceFinding(
@@ -1212,6 +1527,69 @@ function findStoredTrackedFinding(
     (trackedFinding) =>
       trackedFinding.currentFindingId === findingId || trackedFinding.identityKey === findingId,
   );
+}
+
+function decisionFromOptions(options: VerdictCommandOptions): Result<VerdictRecord["decision"]> {
+  const decisions = [
+    options.accept === true ? "accept" : undefined,
+    options.reject === true ? "reject" : undefined,
+    options.correct === true ? "correct" : undefined,
+    options.defer === true ? "defer" : undefined,
+  ].filter((decision): decision is VerdictRecord["decision"] => decision !== undefined);
+
+  if (decisions.length !== 1 || options.reason === undefined || options.reason.length === 0) {
+    return resultErr(
+      createSurfaceError(
+        "no_decision_flag",
+        "Pass exactly one of --accept, --reject, --correct, or --defer, plus --reason.",
+      ),
+    );
+  }
+
+  const decision = decisions[0];
+
+  if (decision === undefined) {
+    return resultErr(
+      createSurfaceError("no_decision_flag", "Pass exactly one decision flag for the verdict."),
+    );
+  }
+
+  return resultOk(decision);
+}
+
+function identityKeysForBaseline(state: ProjectStateSnapshot): readonly string[] {
+  if (state.trackedFindings !== undefined && state.trackedFindings.length > 0) {
+    return [...new Set(state.trackedFindings.map((trackedFinding) => trackedFinding.identityKey))];
+  }
+
+  return [
+    ...new Set((state.findings ?? []).map((finding) => identityKeyForFinding(state, finding))),
+  ];
+}
+
+function identityKeyForFinding(state: ProjectStateSnapshot, finding: Finding): string {
+  return (
+    state.trackedFindings?.find((trackedFinding) => trackedFinding.currentFindingId === finding.id)
+      ?.identityKey ?? finding.id
+  );
+}
+
+function trackedByIdentity(
+  trackedFindings: readonly TrackedFinding[],
+): ReadonlyMap<string, TrackedFinding> {
+  return new Map(
+    trackedFindings.map((trackedFinding) => [trackedFinding.identityKey, trackedFinding]),
+  );
+}
+
+function diffEntryFor(trackedFinding: TrackedFinding, status: string): DiffEntry {
+  return {
+    ...(trackedFinding.currentFindingId === undefined
+      ? {}
+      : { findingId: trackedFinding.currentFindingId }),
+    identityKey: trackedFinding.identityKey,
+    status,
+  };
 }
 
 function backlogForState(
