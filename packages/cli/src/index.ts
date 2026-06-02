@@ -6,10 +6,15 @@ import {
   DEFAULT_SURFACE_CONFIG,
   DepthSchema,
   PresetSchema,
+  SurfaceSarifLogSchema,
   createSurfaceComposition,
   createSurfaceError,
+  createSarifRenderer,
   exitCodeForSurfaceError,
   toCliErrorEnvelope,
+  type Backlog as CoreBacklog,
+  type Finding as CoreFinding,
+  type SurfaceSarifLog,
 } from "@surface/core";
 import { Command, CommanderError } from "commander";
 
@@ -222,6 +227,9 @@ type BacklogOutput = {
   readonly backlog: readonly unknown[];
   readonly backlogId: string;
   readonly runId: string;
+};
+type SarifExportOutput = {
+  readonly sarif: SurfaceSarifLog;
 };
 type ValidateOutput = {
   readonly checks: readonly {
@@ -851,8 +859,8 @@ async function explainFinding(
 async function readBacklog(
   composition: SurfaceComposition,
   options: BacklogCommandOptions,
-): Promise<Result<BacklogOutput>> {
-  if (options.export !== undefined) {
+): Promise<Result<BacklogOutput | SarifExportOutput>> {
+  if (options.export !== undefined && options.export !== "sarif") {
     return resultErr(
       createSurfaceError("unknown_export_target", "No CLI issue exporter matched the target.", {
         details: { exportTarget: options.export },
@@ -874,6 +882,41 @@ async function readBacklog(
         details: { runId: options.run ?? null },
       }),
     );
+  }
+
+  if (options.export === "sarif") {
+    const rendered = await createSarifRenderer().render(
+      (state.value.findings ?? []) as readonly CoreFinding[],
+      backlog as CoreBacklog,
+    );
+
+    if (!isResultOk(rendered)) {
+      return rendered;
+    }
+
+    let decoded: unknown;
+
+    try {
+      decoded = JSON.parse(new TextDecoder().decode(rendered.value.bytes)) as unknown;
+    } catch (cause) {
+      return resultErr(
+        createSurfaceError("export_failed", "SARIF export could not be decoded.", { cause }),
+      );
+    }
+
+    const sarif = SurfaceSarifLogSchema.safeParse(decoded);
+
+    if (!sarif.success) {
+      return resultErr(
+        createSurfaceError("export_failed", "SARIF export produced invalid output.", {
+          cause: sarif.error,
+        }),
+      );
+    }
+
+    return resultOk({
+      sarif: sarif.data,
+    });
   }
 
   return resultOk({
