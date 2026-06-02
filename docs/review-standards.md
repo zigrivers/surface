@@ -27,7 +27,7 @@ Anchored in `coding-standards.md` + `tdd.md` + the ADRs:
 2. **Determinism (SC-4):** does a new measured producer have a determinism test?
 3. **Errors (ADR-014):** `Result<T, SurfaceError>` at boundaries; no swallowed errors; actionable
    messages (US-050); throw only at the CLI/MCP edge.
-4. **Boundaries (ADR-002):** published-entry-point imports only (no `@surface/core/src/*`); `core`
+4. **Boundaries (ADR-002):** published-entry-point imports only (no `@zigrivers/surface-core/src/*`); `core`
    imports no leaf; `StateStore` is the sole `.surface` writer.
 5. **Security (security-review.md):** execa array-args (no `shell:true`); SSRF allow/deny; no
    secrets/captured-content in logs.

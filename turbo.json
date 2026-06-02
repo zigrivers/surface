@@ -1,19 +1,48 @@
 {
   "$schema": "https://turbo.build/schema.json",
   "tasks": {
-    "build": { "dependsOn": ["^build"], "outputs": ["dist/**"] },
-    "build:smoke": { "dependsOn": ["build"], "outputs": [] },
-    "test": { "dependsOn": ["^build"] },
-    "test:watch": { "cache": false, "persistent": true },
+    "build": {
+      "dependsOn": ["^build"],
+      "outputs": ["dist/**"]
+    },
+    "build:smoke": {
+      "dependsOn": ["build"],
+      "outputs": []
+    },
+    "test": {
+      "dependsOn": ["^build"]
+    },
+    "test:watch": {
+      "cache": false,
+      "persistent": true
+    },
     "lint": {},
-    "@surface/adapters-agnostic#lint": { "dependsOn": ["^build"] },
-    "@surface/adapters-react#lint": { "dependsOn": ["^build"] },
-    "@surface/adapters-svelte#lint": { "dependsOn": ["^build"] },
-    "@surface/adapters-vue#lint": { "dependsOn": ["^build"] },
-    "@surface/cli#lint": { "dependsOn": ["^build"] },
-    "@surface/grounding#lint": { "dependsOn": ["^build"] },
-    "@surface/mcp#lint": { "dependsOn": ["^build"] },
-    "typecheck": { "dependsOn": ["^build"] },
-    "clean": { "cache": false }
+    "typecheck": {
+      "dependsOn": ["^build"]
+    },
+    "clean": {
+      "cache": false
+    },
+    "@zigrivers/surface-adapter-agnostic#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@zigrivers/surface-adapter-react#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@zigrivers/surface-adapter-svelte#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@zigrivers/surface-adapter-vue#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@zigrivers/surface#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@zigrivers/surface-grounding#lint": {
+      "dependsOn": ["^build"]
+    },
+    "@zigrivers/surface-mcp#lint": {
+      "dependsOn": ["^build"]
+    }
   }
 }

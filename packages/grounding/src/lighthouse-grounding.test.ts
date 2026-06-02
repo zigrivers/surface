@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS } from "@surface/core";
-import type { Capture } from "@surface/core/interfaces";
+import { LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS } from "@zigrivers/surface-core";
+import type { Capture } from "@zigrivers/surface-core/interfaces";
 
 import {
   createLighthouseGroundingTool,

@@ -104,7 +104,7 @@ importers:
 
   packages/adapters/agnostic:
     dependencies:
-      '@surface/core':
+      '@zigrivers/surface-core':
         specifier: workspace:*
         version: link:../../core
       parse5:
@@ -132,7 +132,7 @@ importers:
       '@babel/parser':
         specifier: ^7.29.7
         version: 7.29.7
-      '@surface/core':
+      '@zigrivers/surface-core':
         specifier: workspace:*
         version: link:../../core
     devDependencies:
@@ -154,7 +154,7 @@ importers:
 
   packages/adapters/svelte:
     dependencies:
-      '@surface/core':
+      '@zigrivers/surface-core':
         specifier: workspace:*
         version: link:../../core
       svelte:
@@ -179,7 +179,7 @@ importers:
 
   packages/adapters/vue:
     dependencies:
-      '@surface/core':
+      '@zigrivers/surface-core':
         specifier: workspace:*
         version: link:../../core
       '@vue/compiler-sfc':
@@ -204,7 +204,7 @@ importers:
 
   packages/cli:
     dependencies:
-      '@surface/core':
+      '@zigrivers/surface-core':
         specifier: workspace:*
         version: link:../core
       commander:
@@ -296,7 +296,7 @@ importers:
 
   packages/grounding:
     dependencies:
-      '@surface/core':
+      '@zigrivers/surface-core':
         specifier: workspace:*
         version: link:../core
       eslint:
@@ -327,7 +327,7 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: 'catalog:'
         version: 1.29.0(zod@4.4.3)
-      '@surface/core':
+      '@zigrivers/surface-core':
         specifier: workspace:*
         version: link:../core
       zod:

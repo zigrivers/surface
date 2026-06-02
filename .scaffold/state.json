@@ -762,9 +762,15 @@
       "completed_by": "user",
       "depth": 3,
       "artifacts_verified": true
+    },
+    "materialize-plan-to-beads": {
+      "status": "pending",
+      "source": "pipeline",
+      "produces": []
     }
   },
   "next_eligible": [
+    "materialize-plan-to-beads",
     "single-agent-start",
     "single-agent-resume",
     "multi-agent-start",
@@ -773,6 +779,6 @@
     "new-enhancement"
   ],
   "extra-steps": [],
-  "save_counter": 107,
-  "next_eligible_hash": "b0f96612b7489b4407a2f088950aeae539aca5bb924eab64281c9be389457d2e"
+  "save_counter": 108,
+  "next_eligible_hash": "eb5354445d12f42319ae555e039ad5a610d643368d6df61616bc944bad1b2a8b"
 }

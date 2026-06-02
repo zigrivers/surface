@@ -33,7 +33,7 @@ describe("eval:structure", () => {
     }
   });
 
-  it.skip("[pending build] no deep cross-package imports (@surface/<pkg>/src/*) — lint-enforced", () => {
+  it.skip("[pending build] no deep cross-package imports (@zigrivers/<pkg>/src/*) — lint-enforced", () => {
     // Once code exists: assert no source imports another package's src/* (published entry points only).
   });
 });

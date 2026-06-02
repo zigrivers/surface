@@ -1,7 +1,6 @@
 {
-  "name": "@surface/adapters-svelte",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@zigrivers/surface-adapter-svelte",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,11 +11,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "@surface/core": "workspace:*",
-    "svelte": "^5.0.0"
+    "svelte": "^5.0.0",
+    "@zigrivers/surface-core": "workspace:*"
   },
   "scripts": {
     "build": "tsup",
@@ -33,5 +34,25 @@
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "description": "Svelte adapter for Surface audits",
+  "license": "MIT",
+  "homepage": "https://github.com/zigrivers/surface#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigrivers/surface.git",
+    "directory": "packages/adapters/svelte"
+  },
+  "bugs": {
+    "url": "https://github.com/zigrivers/surface/issues"
+  },
+  "keywords": [
+    "surface",
+    "adapter",
+    "svelte"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

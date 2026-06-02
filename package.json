@@ -13,14 +13,17 @@
     "test": "turbo run test",
     "test:watch": "turbo run test:watch",
     "test:evals": "vitest run tests/evals",
-    "test:e2e": "pnpm --filter @surface/cli build && vitest run tests/e2e",
-    "benchmark:sc6": "pnpm --filter @surface/cli build && vitest run tests/benchmark",
+    "test:e2e": "pnpm --filter @zigrivers/surface build && vitest run tests/e2e",
+    "benchmark:sc6": "pnpm --filter @zigrivers/surface build && vitest run tests/benchmark",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm run format:check && turbo run lint typecheck test build:smoke && pnpm run test:e2e && pnpm run benchmark:sc6",
-    "clean": "turbo run clean && rm -rf node_modules/.cache .turbo"
+    "check": "pnpm run format:check && turbo run lint typecheck test build:smoke && pnpm run test:e2e && pnpm run benchmark:sc6 && pnpm run test:release",
+    "clean": "turbo run clean && rm -rf node_modules/.cache .turbo",
+    "test:release": "vitest run tests/release",
+    "release:pack": "node scripts/validate-release-artifacts.mjs --pack-only",
+    "release:verify": "node scripts/validate-release-artifacts.mjs"
   },
   "devDependencies": {
     "@eslint/js": "catalog:",

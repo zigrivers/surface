@@ -6,8 +6,8 @@ import type {
   ComponentMapEntry,
   FrameworkAdapter,
   SourceFileRef,
-} from "@surface/core/interfaces";
-import { createSurfaceError, type Result, type SurfaceError } from "@surface/core";
+} from "@zigrivers/surface-core/interfaces";
+import { createSurfaceError, type Result, type SurfaceError } from "@zigrivers/surface-core";
 
 export const REACT_ADAPTER_ID = "react";
 

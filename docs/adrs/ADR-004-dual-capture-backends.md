@@ -17,7 +17,7 @@ prefers agent-browser's deterministic element refs (`@e1`) as evidence/identity 
 
 ## Decision
 
-Define the **`CaptureBackend` interface in `@surface/core`** (alongside the other plugin
+Define the **`CaptureBackend` interface in `@zigrivers/surface-core`** (alongside the other plugin
 interfaces, so the orchestrator depends only on the abstraction — see system-architecture
 "Composition root"); implement three backends behind it in `@surface/capture` — `playwright`,
 `agent-browser` (invoked as an external CLI via `execa`), and `static`. Backend selection is a

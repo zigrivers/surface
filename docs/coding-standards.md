@@ -37,7 +37,7 @@
   that normalize failures to `SurfaceError` with a `cause`.
 
 ## Imports & Structure
-- Import order (enforced): node builtins → external → workspace `@surface/*` → relative.
+- Import order (enforced): node builtins → external → workspace `@zigrivers/*` → relative.
 - No deep cross-package imports — packages talk through their published entry points.
 - One responsibility per module; files target ≤ ~300 lines (soft).
 

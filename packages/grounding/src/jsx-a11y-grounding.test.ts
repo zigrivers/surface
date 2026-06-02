@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { Capture } from "@surface/core/interfaces";
+import type { Capture } from "@zigrivers/surface-core/interfaces";
 
 import { createJsxA11yGroundingTool } from "./index.js";
 

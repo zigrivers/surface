@@ -54,24 +54,24 @@ pnpm run check      # the full local gate, identical to CI
 Once `packages/cli` exists and has been built, expose the `surface` binary globally:
 
 ```bash
-pnpm --filter @surface/cli build
-pnpm --filter @surface/cli exec npm link    # or: cd packages/cli && pnpm link --global
+pnpm --filter @zigrivers/surface build
+pnpm --filter @zigrivers/surface exec npm link    # or: cd packages/cli && pnpm link --global
 surface --help                              # now resolves to your local build
 ```
 
 During iteration, skip the link and run straight from source with tsx:
 
 ```bash
-pnpm --filter @surface/cli exec tsx src/index.ts audit http://localhost:3000
+pnpm --filter @zigrivers/surface exec tsx src/index.ts audit http://localhost:3000
 ```
 
-To remove the global link later: `pnpm --filter @surface/cli exec npm unlink -g surface`.
+To remove the global link later: `pnpm --filter @zigrivers/surface exec npm unlink -g surface`.
 
 ### Running the MCP server locally
 
 ```bash
-pnpm --filter @surface/mcp build
-pnpm --filter @surface/mcp exec node dist/index.js   # speaks MCP over stdio
+pnpm --filter @zigrivers/surface-mcp build
+pnpm --filter @zigrivers/surface-mcp exec node dist/index.js   # speaks MCP over stdio
 ```
 
 Point your MCP client (e.g. Claude Code) at that command to test the tool surface.
@@ -95,7 +95,7 @@ SURFACE_LOG_LEVEL=debug surface audit …   # pino level control
 | Build everything once | `pnpm build` |
 | Run all tests | `pnpm test` |
 | Watch tests | `pnpm test:watch` |
-| Test one package | `pnpm --filter @surface/core test` |
+| Test one package | `pnpm --filter @zigrivers/surface-core test` |
 | Lint | `pnpm lint` |
 | Type-check | `pnpm typecheck` |
 | Format (write) | `pnpm format` |
@@ -135,7 +135,7 @@ After setup, confirm each of these passes:
 | `pnpm: command not found` | Corepack not enabled | `corepack enable && corepack prepare pnpm@11.0.0 --activate` |
 | `turbo: command not found` | deps not installed | `pnpm install` (turbo is a root devDependency) |
 | `pnpm dev` does nothing | no package defines a `build` task yet | expected on the skeleton; tasks appear as packages land |
-| `surface: command not found` after link | CLI not built, or link not run | `pnpm --filter @surface/cli build` then re-link |
+| `surface: command not found` after link | CLI not built, or link not run | `pnpm --filter @zigrivers/surface build` then re-link |
 | File changes not picked up (WSL) | working under `/mnt/c` | move the repo into the WSL Linux home |
 | Stale build / mystery failures | cached artifacts | `pnpm clean` then rebuild |
 

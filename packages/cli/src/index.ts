@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
@@ -30,13 +31,13 @@ import {
   type SurfaceError,
   type TrackedFinding,
   type TrackedFindingsDiffEntry,
-} from "@surface/core";
+} from "@zigrivers/surface-core";
 import type {
   Capture,
   GateResult,
   ProjectStateSnapshot as CoreProjectStateSnapshot,
   Target,
-} from "@surface/core/interfaces";
+} from "@zigrivers/surface-core/interfaces";
 import { Command, CommanderError } from "commander";
 
 type SurfaceConfig = typeof DEFAULT_SURFACE_CONFIG;
@@ -1896,6 +1897,18 @@ class CliHandledError extends Error {
   }
 }
 
-if (process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isDirectCliInvocation(argvEntry: string | undefined): boolean {
+  if (argvEntry === undefined) {
+    return false;
+  }
+
+  try {
+    return realpathSync(new URL(import.meta.url)) === realpathSync(argvEntry);
+  } catch {
+    return import.meta.url === pathToFileURL(argvEntry).href;
+  }
+}
+
+if (isDirectCliInvocation(process.argv[1])) {
   process.exitCode = await runSurfaceCli();
 }

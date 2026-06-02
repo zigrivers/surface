@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { createSurfaceComposition, ok } from "@surface/core";
+import { createSurfaceComposition, ok } from "@zigrivers/surface-core";
 
 import { runSurfaceCli, type CliEnvelope } from "./index.js";
 
@@ -113,7 +113,7 @@ type TestTrackedFinding = {
   };
 };
 
-describe("@surface/cli bootstrap", () => {
+describe("@zigrivers/surface bootstrap", () => {
   it("emits a machine-readable success envelope for --json commands", async () => {
     const stdout: string[] = [];
     const exitCode = await runSurfaceCli({
@@ -163,7 +163,7 @@ describe("@surface/cli bootstrap", () => {
   });
 });
 
-describe("@surface/cli core verbs", () => {
+describe("@zigrivers/surface core verbs", () => {
   it("initializes Surface state and emits config metadata", async () => {
     const stdout: string[] = [];
     const stateStore = new MemoryStateStore();
@@ -290,7 +290,7 @@ describe("@surface/cli core verbs", () => {
   });
 });
 
-describe("@surface/cli findings and loop verbs", () => {
+describe("@zigrivers/surface findings and loop verbs", () => {
   it("explains a stored finding with rationale and evidence", async () => {
     const stdout: string[] = [];
     const exitCode = await runSurfaceCli({

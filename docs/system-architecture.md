@@ -14,7 +14,7 @@ surface is a **locally-run, modular-monorepo CLI + MCP tool** (ADR-001, ADR-002,
 hosted service, no database (ADR-003), no REST API. The shape is a **pipeline core wrapped by
 thin interface adapters**, with pluggable backends at the edges:
 
-- A **pure domain core** (`@surface/core`) owns the canonical schema, scoring, identity, state,
+- A **pure domain core** (`@zigrivers/surface-core`) owns the canonical schema, scoring, identity, state,
   and the pipeline orchestrator. It depends on nothing in the workspace.
 - **Interface adapters** (`cli`, `mcp`) are thin layers over `core` (ADR-007, ADR-008); the
   runner skill is a conversational adapter over them (ADR-008).
@@ -25,12 +25,12 @@ thin interface adapters**, with pluggable backends at the edges:
 
 ```
                     ┌────────────────────── interface adapters ──────────────────────┐
-                    │   @surface/cli (commander, POSIX)     @surface/mcp (MCP SDK)     │
+                    │   @zigrivers/surface (commander, POSIX)     @zigrivers/surface-mcp (MCP SDK)     │
                     │   + runner skill (NL→command)         versioned tool schema      │
                     └───────────────┬─────────────────────────────┬───────────────────┘
                                     │  domain commands (Result<T, SurfaceError>)        │
                     ┌───────────────▼───────────────────────────────────────────────┐
-                    │                       @surface/core                            │
+                    │                       @zigrivers/surface-core                            │
                     │  PipelineOrchestrator · Finding/Backlog schema (zod) · scoring │
                     │  /MMR · FindingIdentity · TrackedFinding/closed-loop · State   │
                     │  layer (atomic+lock) · SurfaceConfig · interfaces for plugins  │
@@ -56,7 +56,7 @@ thin interface adapters**, with pluggable backends at the edges:
 | Capture | `@surface/capture` | backends behind the capture interface (ADR-004) |
 | Knowledge Base | `@surface/knowledge` | entries (`content/knowledge/`) + loader; relevance + `resolve(id)` |
 | Reporting & Integrations | `@surface/reporters` | md/json/sarif/github reporters + gate evaluator (ADR-016) |
-| Interfaces (adapters, not a domain) | `@surface/cli`, `@surface/mcp` | thin over `core`; runner skill maps NL→command (ADR-008) |
+| Interfaces (adapters, not a domain) | `@zigrivers/surface`, `@zigrivers/surface-mcp` | thin over `core`; runner skill maps NL→command (ADR-008) |
 
 `core` owns the canonical schema and every plugin interface; all other packages depend on
 `core`, never the reverse (ADR-002 boundary rule). Adapters/reporters/capture/grounding are
@@ -76,8 +76,8 @@ a single **composition root**:
   store) and injects them into `core`'s `PipelineOrchestrator` via a typed **registry**
   (constructor injection). `core` sees only the interfaces.
 - **Published-export imports only (review: Codex P2).** Leaf packages import interfaces through
-  the package's published entry points — `@surface/core/interfaces`, `@surface/core/schema` —
-  **never** `@surface/core/src/*`. A lint rule bans deep `src/*` imports (coding-standards
+  the package's published entry points — `@zigrivers/surface-core/interfaces`, `@zigrivers/surface-core/schema` —
+  **never** `@zigrivers/surface-core/src/*`. A lint rule bans deep `src/*` imports (coding-standards
   "published entry points only"); this is what keeps boundaries clean and merge-conflict-free.
 - This DI seam is also why new backends/adapters/lenses/reporters are additive leaf packages:
   they implement an interface and register at the root; nothing in `core` changes.
@@ -198,7 +198,7 @@ CLI/MCP ─ audit --component/--screenshot/--dom + --persona/--task/--scaffold-d
 This covers the release-gate static/source/screenshot/context inputs without a running server
 (review: Codex P1 — non-live and context-heavy paths made explicit).
 
-## 5. Module structure (file-level, `@surface/core`)
+## 5. Module structure (file-level, `@zigrivers/surface-core`)
 
 ```
 core/src/
@@ -207,12 +207,12 @@ core/src/
 ├── closed-loop/       # FindingIdentity (hash+collision), TrackedFinding state machine, Baseline, Waiver, Verdict
 ├── pipeline/          # PipelineOrchestrator, PipelineStage transitions, stage skip rules, lens registry
 ├── state/             # ProjectState aggregate + StateStore (sole .surface writer), atomic write (write-file-atomic), lock (proper-lockfile), config slices, migration (PS-I7)
-├── interfaces/        # published plugin interfaces (exported as @surface/core/interfaces): CaptureBackend, FrameworkAdapter, GroundingTool, Lens, ReportRenderer, GateEvaluator, IssueExporter, KnowledgeSource, StateStore
+├── interfaces/        # published plugin interfaces (exported as @zigrivers/surface-core/interfaces): CaptureBackend, FrameworkAdapter, GroundingTool, Lens, ReportRenderer, GateEvaluator, IssueExporter, KnowledgeSource, StateStore
 ├── result/            # Result<T, SurfaceError> + SurfaceError taxonomy (ADR-014)
 └── logging/           # pino logger factory, privacy-safe fields (ADR-018)
 ```
 
-Leaf packages implement `@surface/core/interfaces` (via published exports, never deep `src/*`
+Leaf packages implement `@zigrivers/surface-core/interfaces` (via published exports, never deep `src/*`
 imports): `capture/src/{playwright,agent-browser,static}`, `adapters/{react,vue,svelte,agnostic}/src`,
 `grounding/src/{axe,lighthouse,jsx-a11y}`, `lenses/<lens>/src` (each lens its own package —
 review: Gemini P1), `reporters/src/{md,json,sarif,github}`, `knowledge/src/loader`. They are
@@ -224,7 +224,7 @@ wired into the orchestrator at the composition root (§2a).
 |---|---|---|---|
 | **Capture backend** | `CaptureBackend { detect(): bool; observe(target, opts): Result<Capture> }` | new module in `@surface/capture` | must report `DegradationReport`; must not transmit captures (ADR-013); deterministic backend choice recorded |
 | **Framework adapter** | `FrameworkAdapter { supports(file): bool; introspect(src): ComponentMap }` | new `adapters/<fw>` package | uses the framework's real compiler (ADR-009); leaf package, no cross-adapter deps; ships a fixture suite (NFR-FW-1) |
-| **Grounding tool** | `GroundingTool { run(capture): ToolResult[] }` | new module in `@surface/grounding` | emits `tool-result` Evidence only; measured-wins (ADR-017); lazy-load if heavy |
+| **Grounding tool** | `GroundingTool { run(capture): ToolResult[] }` | new module in `@zigrivers/surface-grounding` | emits `tool-result` Evidence only; measured-wins (ADR-017); lazy-load if heavy |
 | **Lens** | `Lens { id; method; requiresModel; requiresLiveDom; evaluate(ctx): FindingDraft[] }` | `core/src/lenses/<lens>.ts` + a KB entry | must set `method`; measured lens needs tool evidence (ADR-005); judged lens never emits a measured label |
 | **Report renderer** | `ReportRenderer { format; render(findings, backlog): Report }` | new module in `@surface/reporters` | **pure** (read-only over findings, no side effects); local artifact first (ADR-016); no vanity score (FR-SCORE-4) |
 | **Gate evaluator** | `GateEvaluator { evaluate(findings, policy): GateResult }` | `@surface/reporters` | gates on `SeverityBand`; never fails on judged/gated (FR-RULE-4) |

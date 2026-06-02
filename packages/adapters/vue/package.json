@@ -1,7 +1,6 @@
 {
-  "name": "@surface/adapters-vue",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@zigrivers/surface-adapter-vue",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,11 +11,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "@surface/core": "workspace:*",
-    "@vue/compiler-sfc": "^3.5.0"
+    "@vue/compiler-sfc": "^3.5.0",
+    "@zigrivers/surface-core": "workspace:*"
   },
   "scripts": {
     "build": "tsup",
@@ -33,5 +34,25 @@
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "description": "Vue adapter for Surface audits",
+  "license": "MIT",
+  "homepage": "https://github.com/zigrivers/surface#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigrivers/surface.git",
+    "directory": "packages/adapters/vue"
+  },
+  "bugs": {
+    "url": "https://github.com/zigrivers/surface/issues"
+  },
+  "keywords": [
+    "surface",
+    "adapter",
+    "vue"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }
