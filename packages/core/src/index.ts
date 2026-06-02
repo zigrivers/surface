@@ -27,6 +27,7 @@ export * from "./responsiveness-states-lens.js";
 export * from "./state-store.js";
 export * from "./third-party-issue-exporter.js";
 export * from "./usability-heuristic-lens.js";
+export * from "./verdicts.js";
 export * from "./visual-hierarchy-lens.js";
 export {
   applyWaiversToTrackedFindings,

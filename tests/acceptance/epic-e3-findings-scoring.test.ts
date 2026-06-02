@@ -1,7 +1,12 @@
 // Acceptance skeletons — Epic E3: Findings, Scoring & Trust (US-020..023).
 import { describe, expect, it } from "vitest";
 
-import { createSurfaceComposition, ok } from "../../packages/core/src/index.js";
+import {
+  createSelfGroundingReport,
+  createSurfaceComposition,
+  createVerdict,
+  ok,
+} from "../../packages/core/src/index.js";
 import { runSurfaceCli } from "../../packages/cli/src/index.js";
 import {
   scoreFinding,
@@ -269,7 +274,78 @@ describe("E3 Findings, Scoring & Trust", () => {
     });
   });
   describe("US-023 self-grounding accuracy & verdict loop [should]", () => {
-    it.skip("[US-023][AC1] measured ground truth + human verdicts → surface reports its judged false-positive rate (integration)", () => {});
+    it("[US-023][AC1] measured ground truth + human verdicts → surface reports its judged false-positive rate (integration)", () => {
+      const judgedRejected = us023Finding({
+        id: "f_judged_empty_state",
+        method: "judged",
+        evidence: [{ kind: "cited-heuristic", knowledgeEntryId: "kb_empty_state" }],
+      });
+      const judgedAccepted = us023Finding({
+        id: "f_judged_checkout_copy",
+        method: "judged",
+        issueType: "checkout-copy-clarity",
+        evidence: [{ kind: "cited-heuristic", knowledgeEntryId: "kb_checkout_clarity" }],
+        location: { component: "CheckoutCopy" },
+      });
+      const measuredAccepted = us023Finding({
+        id: "f_measured_contrast",
+        method: "measured",
+        evidence: [
+          {
+            kind: "tool-result",
+            tool: "axe",
+            rule: "color-contrast",
+            measuredValue: "3.1:1",
+            threshold: "4.5:1",
+          },
+        ],
+        location: { selector: ".checkout-button" },
+      });
+      const verdicts = [
+        createVerdict({
+          finding: judgedRejected,
+          decision: "reject",
+          rationale: "Human reviewer marked this judged issue as a false positive.",
+          recordedAt: "2026-06-02T00:00:00.000Z",
+        }),
+        createVerdict({
+          finding: judgedAccepted,
+          decision: "accept",
+          rationale: "Human reviewer confirmed this judged issue.",
+          recordedAt: "2026-06-02T00:01:00.000Z",
+        }),
+        createVerdict({
+          finding: measuredAccepted,
+          decision: "accept",
+          rationale: "Measured issue confirmed by ground truth.",
+          recordedAt: "2026-06-02T00:02:00.000Z",
+        }),
+      ];
+
+      expect(verdicts.every((verdict) => verdict.ok)).toBe(true);
+
+      if (!verdicts.every((verdict) => verdict.ok)) {
+        return;
+      }
+
+      const report = createSelfGroundingReport({
+        findings: [judgedRejected, judgedAccepted, measuredAccepted],
+        verdicts: verdicts.map((verdict) => verdict.value),
+      });
+
+      expect(report.ok).toBe(true);
+
+      if (!report.ok) {
+        return;
+      }
+
+      expect(report.value).toEqual({
+        sampleSize: 2,
+        measuredGroundTruthCount: 1,
+        judgedFalsePositiveCount: 1,
+        judgedFalsePositiveRate: 0.5,
+      });
+    });
     it("[US-023][AC2] `verdict <id> --reject --reason` → verdict persists and feeds future prioritization (integration)", async () => {
       const stdout: string[] = [];
       let state = {
@@ -337,3 +413,43 @@ describe("E3 Findings, Scoring & Trust", () => {
     });
   });
 });
+
+type Us023FindingOverrides = Omit<Partial<Finding>, "dimensions" | "location"> & {
+  readonly dimensions?: Partial<Finding["dimensions"]>;
+  readonly location?: Partial<Finding["location"]>;
+};
+
+function us023Finding(overrides: Us023FindingOverrides): Finding {
+  const { dimensions, location, ...findingOverrides } = overrides;
+  const finding: Finding = {
+    id: "f_us_023",
+    lens: "heuristics",
+    issueType: "empty-state-recovery-missing",
+    method: "judged",
+    title: "Empty state lacks a recovery action",
+    rationale: "The empty state explains the problem but does not offer a next step.",
+    citedHeuristics: ["kb_empty_state"],
+    evidence: [{ kind: "cited-heuristic", knowledgeEntryId: "kb_empty_state" }],
+    dimensions: {
+      severity: 0.64,
+      confidence: 0.82,
+      effort: 0.35,
+      userImpact: 0.7,
+      businessImpact: 0.6,
+      a11yLegalRisk: 0.1,
+      evidenceQuality: 0.78,
+      agentImplementability: 0.8,
+      ...dimensions,
+    },
+    severityBand: "P2",
+    location: {
+      component: "EmptyState",
+      ...location,
+    },
+    confidenceBand: "assert",
+    gatedForHuman: true,
+    ...findingOverrides,
+  };
+
+  return finding;
+}
