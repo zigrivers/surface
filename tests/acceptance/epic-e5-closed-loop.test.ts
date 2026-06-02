@@ -2,6 +2,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  applyWaiversToTrackedFindings,
   assignFindingIdentities,
   createSurfaceComposition,
   createNoopPipelineHandlers,
@@ -394,6 +395,47 @@ describe("E5 Closed Loop, State & Baselines", () => {
         ],
       });
     });
-    it.skip("[US-042][AC2] waiver with expiry → on expiry the finding re-activates; gateDisposition returns to active (unit)", () => {});
+    it("[US-042][AC2] waiver with expiry → on expiry the finding re-activates; gateDisposition returns to active (unit)", () => {
+      const tracked = createTrackedFinding({
+        finding: findingWith({ id: "f_current_debt", severityBand: "P1" }),
+        gateDisposition: "ignored-by-waiver",
+        runId: "run_001",
+        validation: { expectation: "contrast passes", kind: "measured-rule" },
+      });
+
+      const [beforeExpiry] = applyWaiversToTrackedFindings({
+        trackedFindings: [tracked],
+        waivers: [
+          {
+            expiry: "2026-06-03T00:00:00.000Z",
+            findingIdentityKey: tracked.identityKey,
+            owner: "design-system",
+            reason: "accepted current debt",
+          },
+        ],
+        now: "2026-06-02T00:00:00.000Z",
+      });
+      const [afterExpiry] = applyWaiversToTrackedFindings({
+        trackedFindings: [beforeExpiry!],
+        waivers: [
+          {
+            expiry: "2026-06-03T00:00:00.000Z",
+            findingIdentityKey: tracked.identityKey,
+            owner: "design-system",
+            reason: "accepted current debt",
+          },
+        ],
+        now: "2026-06-04T00:00:00.000Z",
+      });
+
+      expect(beforeExpiry).toMatchObject({
+        gateDisposition: "ignored-by-waiver",
+        status: "new",
+      });
+      expect(afterExpiry).toMatchObject({
+        gateDisposition: "active",
+        status: "new",
+      });
+    });
   });
 });

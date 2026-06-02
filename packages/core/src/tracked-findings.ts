@@ -26,6 +26,49 @@ export type FindingStatus = z.infer<typeof FindingStatusSchema>;
 export const GateDispositionSchema = z.enum(["active", "ignored-by-waiver"]);
 export type GateDisposition = z.infer<typeof GateDispositionSchema>;
 
+const timestampSchema = nonEmptyStringSchema.refine((value) => !Number.isNaN(Date.parse(value)), {
+  message: "must be a valid timestamp",
+});
+
+export const WaiverSchema = z
+  .object({
+    findingIdentityKey: nonEmptyStringSchema,
+    reason: nonEmptyStringSchema,
+    owner: nonEmptyStringSchema,
+    expiry: timestampSchema.optional(),
+  })
+  .strict();
+export type Waiver = Readonly<z.infer<typeof WaiverSchema>>;
+
+export const BaselineSchema = z
+  .object({
+    baselineId: nonEmptyStringSchema,
+    identityKeys: z.array(nonEmptyStringSchema),
+    reason: nonEmptyStringSchema.optional(),
+    waivers: z.array(WaiverSchema).default([]),
+  })
+  .strict()
+  .superRefine((baseline, context) => {
+    const seenIdentityKeys = new Set<string>();
+
+    baseline.identityKeys.forEach((identityKey, index) => {
+      if (seenIdentityKeys.has(identityKey)) {
+        context.addIssue({
+          code: "custom",
+          message: "baseline identityKeys must be unique",
+          path: ["identityKeys", index],
+        });
+      }
+
+      seenIdentityKeys.add(identityKey);
+    });
+  });
+type ParsedBaseline = z.infer<typeof BaselineSchema>;
+export type Baseline = Omit<Readonly<ParsedBaseline>, "identityKeys" | "waivers"> & {
+  readonly identityKeys: readonly string[];
+  readonly waivers: readonly Waiver[];
+};
+
 export const ValidationCheckSchema = z
   .object({
     kind: z.enum(["measured-rule", "re-evaluate-lens"]),
@@ -132,6 +175,19 @@ export type CreateTrackedFindingInput = {
   readonly gateDisposition?: GateDisposition;
 };
 
+export type CreateBaselineInput = {
+  readonly baselineId: string;
+  readonly identityKeys: readonly string[];
+  readonly reason?: string;
+  readonly waivers?: readonly Waiver[];
+};
+
+export type ApplyWaiversInput = {
+  readonly trackedFindings: readonly TrackedFinding[];
+  readonly waivers: readonly Waiver[];
+  readonly now: Date | string;
+};
+
 /**
  * Create the first tracked lifecycle record for a finding identity.
  *
@@ -197,6 +253,37 @@ export function transitionTrackedFinding(
       parsedTransition.kind === "detected" ? parsedTransition.runId : previous.lastSeenRunId,
     history: [...previous.history, { runId: parsedTransition.runId, status: nextStatus }],
   });
+}
+
+export function createBaseline(input: CreateBaselineInput): Baseline {
+  return BaselineSchema.parse({
+    baselineId: input.baselineId,
+    identityKeys: [...input.identityKeys],
+    ...(input.reason === undefined ? {} : { reason: input.reason }),
+    ...(input.waivers === undefined ? {} : { waivers: [...input.waivers] }),
+  });
+}
+
+export function applyWaiversToTrackedFindings(input: ApplyWaiversInput): readonly TrackedFinding[] {
+  const waivers = z.array(WaiverSchema).parse(input.waivers);
+  const nowMs = timestampMs(input.now, "now");
+
+  return input.trackedFindings.map((trackedFinding) => {
+    const parsed = TrackedFindingSchema.parse(trackedFinding);
+    const gateDisposition = gateDispositionForIdentity(parsed.identityKey, waivers, nowMs);
+
+    return TrackedFindingSchema.parse({
+      ...parsed,
+      gateDisposition,
+    });
+  });
+}
+
+export function isWaiverActive(waiver: Waiver, now: Date | string): boolean {
+  const parsedWaiver = WaiverSchema.parse(waiver);
+  const nowMs = timestampMs(now, "now");
+
+  return waiverActiveAt(parsedWaiver, nowMs);
 }
 
 function identityForFinding(
@@ -274,4 +361,34 @@ function latestNonIdentityBrokenStatus(
   }
 
   return undefined;
+}
+
+function gateDispositionForIdentity(
+  identityKey: string,
+  waivers: readonly Waiver[],
+  nowMs: number,
+): GateDisposition {
+  return waivers.some(
+    (waiver) => waiver.findingIdentityKey === identityKey && waiverActiveAt(waiver, nowMs),
+  )
+    ? "ignored-by-waiver"
+    : "active";
+}
+
+function waiverActiveAt(waiver: Waiver, nowMs: number): boolean {
+  if (waiver.expiry === undefined) {
+    return true;
+  }
+
+  return nowMs <= timestampMs(waiver.expiry, "expiry");
+}
+
+function timestampMs(value: Date | string, fieldName: string): number {
+  const milliseconds = value instanceof Date ? value.getTime() : Date.parse(value);
+
+  if (!Number.isFinite(milliseconds)) {
+    throw new Error(`${fieldName} must be a valid timestamp`);
+  }
+
+  return milliseconds;
 }

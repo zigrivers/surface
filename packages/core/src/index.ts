@@ -26,8 +26,17 @@ export * from "./responsiveness-states-lens.js";
 export * from "./state-store.js";
 export * from "./usability-heuristic-lens.js";
 export * from "./visual-hierarchy-lens.js";
-export { createTrackedFinding, transitionTrackedFinding } from "./tracked-findings.js";
+export {
+  applyWaiversToTrackedFindings,
+  createBaseline,
+  createTrackedFinding,
+  isWaiverActive,
+  transitionTrackedFinding,
+} from "./tracked-findings.js";
 export type {
+  ApplyWaiversInput,
+  Baseline,
+  CreateBaselineInput,
   CreateTrackedFindingInput,
   FindingStatus,
   GateDisposition,
@@ -35,4 +44,5 @@ export type {
   TrackedFindingHistoryEntry,
   TrackedFindingTransition,
   ValidationCheck,
+  Waiver,
 } from "./tracked-findings.js";

@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest";
 import { type Finding } from "./findings.js";
 import { deriveFindingIdentity } from "./identity.js";
 import {
+  applyWaiversToTrackedFindings,
+  createBaseline,
   createTrackedFinding,
+  isWaiverActive,
   TrackedFindingSchema,
   transitionTrackedFinding,
 } from "./tracked-findings.js";
@@ -528,5 +531,119 @@ describe("tracked finding state machine", () => {
       gateDisposition: "ignored-by-waiver",
       status: "still-failing",
     });
+  });
+
+  it("snapshots baseline identity keys with waivers defaulted", () => {
+    const baseline = createBaseline({
+      baselineId: "baseline_001",
+      identityKeys: ["identity_a", "identity_b"],
+      reason: "accepted current debt",
+    });
+
+    expect(baseline).toEqual({
+      baselineId: "baseline_001",
+      identityKeys: ["identity_a", "identity_b"],
+      reason: "accepted current debt",
+      waivers: [],
+    });
+  });
+
+  it("rejects duplicate baseline identity keys", () => {
+    expect(() =>
+      createBaseline({
+        baselineId: "baseline_001",
+        identityKeys: ["identity_a", "identity_a"],
+      }),
+    ).toThrow(/baseline identityKeys must be unique/);
+  });
+
+  it("applies active waivers without changing detection status or history", () => {
+    const tracked = transitionTrackedFinding(
+      createTrackedFinding({
+        finding: baseFinding,
+        runId: "run_001",
+        validation,
+      }),
+      {
+        finding: findingWith({ id: "f_a2" }),
+        kind: "detected",
+        runId: "run_002",
+      },
+    );
+
+    const [waived] = applyWaiversToTrackedFindings({
+      trackedFindings: [tracked],
+      waivers: [
+        {
+          expiry: "2026-06-03T00:00:00.000Z",
+          findingIdentityKey: tracked.identityKey,
+          owner: "design-system",
+          reason: "accepted temporarily",
+        },
+      ],
+      now: "2026-06-02T00:00:00.000Z",
+    });
+
+    expect(waived).toMatchObject({
+      gateDisposition: "ignored-by-waiver",
+      status: "still-failing",
+    });
+    expect(waived?.history).toEqual(tracked.history);
+  });
+
+  it("reactivates expired waivers while preserving the latest detection status", () => {
+    const tracked = createTrackedFinding({
+      finding: baseFinding,
+      gateDisposition: "ignored-by-waiver",
+      runId: "run_001",
+      validation,
+    });
+    const regressed = transitionTrackedFinding(
+      transitionTrackedFinding(tracked, {
+        kind: "missing",
+        runId: "run_002",
+        validationPassed: true,
+      }),
+      {
+        finding: findingWith({ id: "f_a3" }),
+        kind: "detected",
+        runId: "run_003",
+      },
+    );
+
+    const [reactivated] = applyWaiversToTrackedFindings({
+      trackedFindings: [regressed],
+      waivers: [
+        {
+          expiry: "2026-06-01T00:00:00.000Z",
+          findingIdentityKey: regressed.identityKey,
+          owner: "design-system",
+          reason: "accepted temporarily",
+        },
+      ],
+      now: "2026-06-02T00:00:00.000Z",
+    });
+
+    expect(reactivated).toMatchObject({
+      gateDisposition: "active",
+      status: "regressed",
+    });
+    expect(reactivated?.history.map((entry) => entry.status)).toEqual([
+      "new",
+      "resolved",
+      "regressed",
+    ]);
+  });
+
+  it("treats waivers as active until their expiry is passed", () => {
+    const waiver = {
+      expiry: "2026-06-02T00:00:00.000Z",
+      findingIdentityKey: "identity_a",
+      owner: "design-system",
+      reason: "accepted temporarily",
+    };
+
+    expect(isWaiverActive(waiver, "2026-06-02T00:00:00.000Z")).toBe(true);
+    expect(isWaiverActive(waiver, "2026-06-02T00:00:00.001Z")).toBe(false);
   });
 });
