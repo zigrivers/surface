@@ -12,6 +12,8 @@ import {
   createExplainMarkdownRenderer,
   createFindingsJsonRenderer,
   createFindingsMarkdownRenderer,
+  createGitHubChecksExporter,
+  createSarifRenderer,
   FindingsEnvelopeSchema,
   SurfaceSarifLogSchema,
   isOk,
@@ -336,6 +338,69 @@ describe("E4 Output & Reporting", () => {
         level: "error",
       });
     });
-    it.skip("[US-032][AC2] PR context + token → findings post as GitHub Checks/annotations; local artifacts remain source of truth (integration)", () => {});
+    it("[US-032][AC2] PR context + token → findings post as GitHub Checks/annotations; local artifacts remain source of truth (integration)", async () => {
+      const sarifReport = await createSarifRenderer().render([finding], backlog);
+      const created: unknown[] = [];
+      const exporter = createGitHubChecksExporter({
+        owner: "surface",
+        repo: "app",
+        headSha: "abc123",
+        token: "ghs_test",
+        client: {
+          checks: {
+            create: (input) => {
+              created.push(input);
+              return Promise.resolve({ data: { id: 123 } });
+            },
+          },
+        },
+      });
+
+      expect(isOk(sarifReport)).toBe(true);
+
+      if (!isOk(sarifReport)) {
+        return;
+      }
+
+      const sarif = SurfaceSarifLogSchema.parse(
+        JSON.parse(new TextDecoder().decode(sarifReport.value.bytes)),
+      );
+      const result = await exporter.export({
+        backlog,
+        localArtifactPath: ".surface/reports/findings.sarif",
+        sarif,
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!isOk(result)) {
+        return;
+      }
+
+      expect(result.value).toMatchObject({
+        target: "github-checks",
+        status: "complete",
+        synced: [finding.id],
+        unsynced: [],
+        annotationCount: 1,
+      });
+      expect(created[0]).toMatchObject({
+        owner: "surface",
+        repo: "app",
+        head_sha: "abc123",
+        conclusion: "failure",
+        output: {
+          summary: expect.stringContaining(".surface/reports/findings.sarif"),
+          annotations: [
+            {
+              path: "src/Button.tsx",
+              annotation_level: "failure",
+              message: finding.rationale,
+              title: finding.issueType,
+            },
+          ],
+        },
+      });
+    });
   });
 });
