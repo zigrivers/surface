@@ -41,6 +41,50 @@ export type FindingsJsonRendererOptions = {
   readonly degradation?: FindingsEnvelope["degradation"];
 };
 
+export const SurfaceSarifLogSchema = z
+  .object({
+    $schema: z.string().url(),
+    version: z.literal("2.1.0"),
+    runs: z
+      .array(
+        z
+          .object({
+            tool: z
+              .object({
+                driver: z
+                  .object({
+                    name: z.literal("surface"),
+                    informationUri: z.string().url(),
+                    rules: z.array(
+                      z
+                        .object({
+                          id: z.string().min(1),
+                          name: z.string().min(1),
+                          shortDescription: z.object({ text: z.string().min(1) }).strict(),
+                        })
+                        .passthrough(),
+                    ),
+                  })
+                  .passthrough(),
+              })
+              .passthrough(),
+            results: z.array(
+              z
+                .object({
+                  level: z.enum(["error", "warning", "note"]),
+                  message: z.object({ text: z.string().min(1) }).strict(),
+                  ruleId: z.string().min(1),
+                })
+                .passthrough(),
+            ),
+          })
+          .passthrough(),
+      )
+      .length(1),
+  })
+  .passthrough();
+export type SurfaceSarifLog = z.infer<typeof SurfaceSarifLogSchema>;
+
 type OrderedFinding = {
   readonly finding: Finding;
   readonly backlogEntry?: BacklogEntry;
@@ -78,6 +122,13 @@ export function createFindingsJsonRenderer(options: FindingsJsonRendererOptions)
   return {
     format: "findings-json",
     render: (findings, backlog) => renderFindingsJson(findings, backlog, options),
+  };
+}
+
+export function createSarifRenderer(): ReportRenderer {
+  return {
+    format: "sarif",
+    render: (findings, backlog) => renderSarif(findings, backlog),
   };
 }
 
@@ -192,6 +243,28 @@ function renderFindingsJson(
   return ok({
     format: "findings-json",
     bytes: encodeJson(envelope.data),
+    byteStable: true,
+  });
+}
+
+function renderSarif(findings: readonly Finding[], backlog: Backlog): Result<Report, SurfaceError> {
+  const normalized = normalizeReportInputs(findings, backlog);
+
+  if (!normalized.ok) {
+    return normalized;
+  }
+
+  const sarif = SurfaceSarifLogSchema.safeParse(
+    sanitizeTerminalControlValue(sarifForReport(normalized.value.orderedFindings, backlog)),
+  );
+
+  if (!sarif.success) {
+    return reportRenderError("SARIF report is invalid.", sarif.error);
+  }
+
+  return ok({
+    format: "sarif",
+    bytes: encodeStableJson(sarif.data),
     byteStable: true,
   });
 }
@@ -470,6 +543,115 @@ function normalizeReportInputs(
     backlogFindings,
     orderedFindings,
   });
+}
+
+function sarifForReport(
+  orderedFindings: readonly OrderedFinding[],
+  backlog: Backlog,
+): SurfaceSarifLog {
+  const rulesById = new Map<string, ReturnType<typeof sarifRuleForFinding>>();
+
+  for (const { finding } of orderedFindings) {
+    if (!rulesById.has(finding.issueType)) {
+      rulesById.set(finding.issueType, sarifRuleForFinding(finding));
+    }
+  }
+
+  return {
+    $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+    version: "2.1.0",
+    runs: [
+      {
+        tool: {
+          driver: {
+            name: "surface",
+            informationUri: "https://github.com/zigrivers/surface",
+            rules: [...rulesById.values()].sort((left, right) =>
+              compareCodeUnit(left.id, right.id),
+            ),
+          },
+        },
+        automationDetails: { id: backlog.runId },
+        results: orderedFindings.map(({ finding, backlogEntry }) =>
+          sarifResultForFinding(finding, backlogEntry),
+        ),
+      },
+    ],
+  };
+}
+
+function sarifRuleForFinding(finding: Finding) {
+  return {
+    id: finding.issueType,
+    name: finding.issueType,
+    shortDescription: { text: finding.title },
+    fullDescription: { text: finding.rationale },
+    properties: {
+      lens: finding.lens,
+      citedHeuristics: finding.citedHeuristics ?? [],
+    },
+  };
+}
+
+function sarifResultForFinding(finding: Finding, backlogEntry: BacklogEntry | undefined) {
+  return {
+    ruleId: finding.issueType,
+    level: sarifLevelFor(finding.severityBand),
+    message: { text: finding.rationale },
+    locations: [sarifLocationFor(finding)],
+    partialFingerprints: {
+      "surface.findingId": finding.id,
+      "surface.issueType": finding.issueType,
+    },
+    properties: {
+      findingId: finding.id,
+      confidenceBand: finding.confidenceBand,
+      gatedForHuman: finding.gatedForHuman,
+      lens: finding.lens,
+      method: finding.method,
+      severityBand: finding.severityBand,
+      ...(backlogEntry === undefined ? {} : { backlogRank: backlogEntry.rank }),
+    },
+  };
+}
+
+function sarifLocationFor(finding: Finding) {
+  return {
+    physicalLocation: {
+      artifactLocation: {
+        uri: finding.location.file ?? `surface://${finding.id}`,
+      },
+    },
+    logicalLocations: [
+      {
+        name:
+          finding.location.component ??
+          finding.location.selector ??
+          finding.location.elementRef ??
+          finding.id,
+        fullyQualifiedName: [
+          finding.location.file,
+          finding.location.component,
+          finding.location.selector,
+          finding.location.elementRef,
+        ]
+          .filter((part): part is string => part !== undefined)
+          .join(" "),
+      },
+    ],
+  };
+}
+
+function sarifLevelFor(severityBand: Finding["severityBand"]): "error" | "warning" | "note" {
+  if (severityBand === "P0" || severityBand === "P1") {
+    return "error";
+  }
+
+  if (severityBand === "P2") {
+    return "warning";
+  }
+
+  return "note";
 }
 
 function markdownForFindings(backlog: Backlog, orderedFindings: readonly OrderedFinding[]): string {

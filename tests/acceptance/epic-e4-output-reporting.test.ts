@@ -13,6 +13,7 @@ import {
   createFindingsJsonRenderer,
   createFindingsMarkdownRenderer,
   FindingsEnvelopeSchema,
+  SurfaceSarifLogSchema,
   isOk,
   ok,
   renderAndWriteReportArtifacts,
@@ -303,7 +304,38 @@ describe("E4 Output & Reporting", () => {
     });
   });
   describe("US-032 CI-native reporters: SARIF + PR annotations [committed]", () => {
-    it.skip("[US-032][AC1] `--export sarif` → valid SARIF v2.1.0 (unit)", () => {});
+    it("[US-032][AC1] `--export sarif` → valid SARIF v2.1.0 (unit)", async () => {
+      const stdout: string[] = [];
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "backlog", "--export", "sarif"],
+        composition: createSurfaceComposition({
+          stateStore: {
+            readState: () =>
+              ok({
+                backlog,
+                findings: [finding],
+                version: "1.0",
+              }),
+            writeArtifact: () =>
+              Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+            writeState: (state) => ok(state),
+          },
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      const envelope = JSON.parse(stdout.join(""));
+      const sarif = SurfaceSarifLogSchema.parse(envelope.data.sarif);
+
+      expect(envelope).toMatchObject({ command: "backlog", ok: true });
+      expect(sarif.version).toBe("2.1.0");
+      expect(sarif.runs[0]?.tool.driver.name).toBe("surface");
+      expect(sarif.runs[0]?.results[0]).toMatchObject({
+        ruleId: "contrast-insufficient",
+        level: "error",
+      });
+    });
     it.skip("[US-032][AC2] PR context + token → findings post as GitHub Checks/annotations; local artifacts remain source of truth (integration)", () => {});
   });
 });

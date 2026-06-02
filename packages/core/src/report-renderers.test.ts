@@ -7,7 +7,9 @@ import {
   createExplainMarkdownRenderer,
   createFindingsJsonRenderer,
   createFindingsMarkdownRenderer,
+  createSarifRenderer,
   defaultPlanningReportArtifactSpecs,
+  SurfaceSarifLogSchema,
 } from "./report-renderers.js";
 import type { KnowledgeSource } from "./interfaces.js";
 
@@ -167,6 +169,51 @@ describe("report renderers", () => {
     expect(markdown).toContain("heuristic `kb_nielsen_match`");
     expect(markdown).toContain("tool `axe`; rule `color-contrast`");
     expect(markdown).not.toMatch(/overall score|vanity score/i);
+  });
+
+  it("renders valid SARIF v2.1.0 with stable rules and results", async () => {
+    const renderer = createSarifRenderer();
+    const first = await renderer.render([findingA, findingB], backlog);
+    const second = await renderer.render([findingA, findingB], backlog);
+
+    expect(isOk(first)).toBe(true);
+    expect(isOk(second)).toBe(true);
+
+    if (!isOk(first) || !isOk(second)) {
+      return;
+    }
+
+    expect(first.value).toMatchObject({ byteStable: true, format: "sarif" });
+    expect(first.value.bytes).toEqual(second.value.bytes);
+
+    const sarif = SurfaceSarifLogSchema.parse(JSON.parse(textDecoder.decode(first.value.bytes)));
+    expect(sarif).toMatchObject({
+      $schema: "https://json.schemastore.org/sarif-2.1.0.json",
+      version: "2.1.0",
+      runs: [
+        {
+          tool: { driver: { name: "surface" } },
+          automationDetails: { id: "run_123" },
+        },
+      ],
+    });
+    expect(sarif.runs[0]?.tool.driver.rules.map((rule) => rule.id)).toEqual([
+      "ambiguous-label",
+      "contrast-insufficient",
+    ]);
+    expect(sarif.runs[0]?.results.map((result) => result.ruleId)).toEqual([
+      "ambiguous-label",
+      "contrast-insufficient",
+    ]);
+    expect(sarif.runs[0]?.results[0]).toMatchObject({
+      level: "warning",
+      locations: [
+        {
+          physicalLocation: { artifactLocation: { uri: "src/IconButton.tsx" } },
+        },
+      ],
+      partialFingerprints: { "surface.findingId": "f_b" },
+    });
   });
 
   it("renders byte-stable backlog, agent-plan, and validation-report artifacts", async () => {
