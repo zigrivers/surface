@@ -1,4 +1,8 @@
 // Acceptance skeletons — Epic E6: Interfaces (CLI / MCP / Skill) (US-050..052).
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
 import { describe, expect, it } from "vitest";
 
 import {
@@ -8,6 +12,11 @@ import {
 import { runSurfaceCli } from "../../packages/cli/src/index.js";
 import { createSurfaceComposition, ok } from "../../packages/core/src/index.js";
 import type { Capture, Target } from "../../packages/core/src/index.js";
+
+const execFileAsync = promisify(execFile);
+const runnerMapperPath = fileURLToPath(
+  new URL("../../.agents/skills/surface-runner/scripts/map_intent.mjs", import.meta.url),
+);
 
 describe("E6 Interfaces", () => {
   describe("US-050 POSIX-conformant CLI [gate]", () => {
@@ -211,6 +220,21 @@ describe("E6 Interfaces", () => {
     });
   });
   describe("US-052 natural-language runner skill [gate]", () => {
-    it.skip("[US-052][AC1] NL intent → maps to the correct surface command and confirms the action (integration)", () => {});
+    it("[US-052][AC1] NL intent → maps to the correct surface command and confirms the action (integration)", async () => {
+      const { stdout } = await execFileAsync(process.execPath, [
+        runnerMapperPath,
+        "Please audit http://localhost:3000/checkout and tell me the next action.",
+      ]);
+
+      expect(JSON.parse(stdout)).toMatchObject({
+        command: ["surface", "audit", "--localhost", "http://localhost:3000/checkout", "--json"],
+        confirmation:
+          "Mapped intent to surface audit for http://localhost:3000/checkout. Confirm before running: surface audit --localhost http://localhost:3000/checkout --json",
+        intent: "audit",
+        mcpTool: "surface_audit",
+        target: { kind: "localhost", ref: "http://localhost:3000/checkout" },
+        transport: "cli",
+      });
+    });
   });
 });
