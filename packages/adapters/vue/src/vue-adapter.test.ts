@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readFile } from "node:fs/promises";
 
 import { createVueAdapter } from "./index.js";
 
@@ -115,6 +116,55 @@ describe("vue framework adapter", () => {
         ],
       },
     });
+  });
+
+  it("maps the seeded Vue defect fixture to stable component selectors", async () => {
+    const adapter = createVueAdapter();
+    const fixtureUrl = new URL(
+      "../../../../fixtures/seeded-defects/vue/SeededDefectFixture.vue",
+      import.meta.url,
+    );
+    const contents = await readFile(fixtureUrl, "utf8");
+
+    const result = await adapter.introspect({
+      path: "fixtures/seeded-defects/vue/SeededDefectFixture.vue",
+      contents,
+    });
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) {
+      throw new Error(result.error.message);
+    }
+
+    const entriesByComponent = new Map(
+      result.value.entries.map((entry) => [entry.component, entry]),
+    );
+
+    expect([...entriesByComponent.keys()].sort()).toEqual([
+      "EmptyOrdersState",
+      "LowContrastHero",
+      "SeededDefectFixture",
+      "SeededDefectVueFixture",
+      "TargetSizeControls",
+    ]);
+    const fixtureEntry = entriesByComponent.get("SeededDefectVueFixture");
+    const lowContrastEntry = entriesByComponent.get("LowContrastHero");
+    const targetSizeEntry = entriesByComponent.get("TargetSizeControls");
+    const emptyOrdersEntry = entriesByComponent.get("EmptyOrdersState");
+
+    expect(fixtureEntry?.file).toBe("fixtures/seeded-defects/vue/SeededDefectFixture.vue");
+    expect(fixtureEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-component="SeededDefectVueFixture"]']),
+    );
+    expect(lowContrastEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-surface-component="LowContrastHero"]']),
+    );
+    expect(targetSizeEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-surface-component="TargetSizeControls"]']),
+    );
+    expect(emptyOrdersEntry?.selectors).toEqual(
+      expect.arrayContaining(['[data-surface-component="EmptyOrdersState"]']),
+    );
   });
 
   it("returns an error result for malformed source references and parse errors", async () => {
