@@ -11,6 +11,7 @@ export * from "./discovery.js";
 export * from "./errors.js";
 export * from "./export-redaction.js";
 export * from "./findings.js";
+export * from "./flow-lenses.js";
 export * from "./gate-evaluator.js";
 export * from "./github-checks-exporter.js";
 export * from "./github-issue-exporter.js";

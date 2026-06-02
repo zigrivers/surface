@@ -43,7 +43,7 @@ export type RunTaskFlowCaptureInput = {
 
 export type CaptureContextFinding = Finding & {
   readonly captureContext: CaptureContext;
-  readonly tags: readonly string[];
+  readonly tags: string[];
 };
 
 export async function runTaskFlowCapture(
@@ -157,7 +157,7 @@ function contextFor(context: CaptureContext): CaptureContext {
   };
 }
 
-function tagsForContext(context: CaptureContext): readonly string[] {
+function tagsForContext(context: CaptureContext): string[] {
   return [
     `state:${context.stateId}`,
     ...(context.theme === undefined ? [] : [`theme:${context.theme}`]),
