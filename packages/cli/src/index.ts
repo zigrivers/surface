@@ -5,7 +5,9 @@ import { pathToFileURL } from "node:url";
 import {
   DEFAULT_COMPOSITION_STAGE_IDS,
   DEFAULT_SURFACE_CONFIG,
+  BacklogSchema,
   DepthSchema,
+  FindingSchema,
   GatePolicySchema,
   PresetSchema,
   SurfaceSarifLogSchema,
@@ -41,32 +43,13 @@ type SurfaceConfig = typeof DEFAULT_SURFACE_CONFIG;
 type ExecutablePipelineStageId = (typeof DEFAULT_COMPOSITION_STAGE_IDS)[number];
 type SurfaceCompositionOptions = NonNullable<Parameters<typeof createSurfaceComposition>[0]>;
 type CoreSurfaceComposition = ReturnType<typeof createSurfaceComposition>;
-type MaybePromise<T> = T | Promise<T>;
 type VerdictRecord = {
   readonly decision: "accept" | "reject" | "correct" | "defer";
   readonly findingId: string;
   readonly rationale: string;
 };
-type CliRunRecord = {
-  readonly runId: string;
-  readonly trackedFindings: readonly TrackedFinding[];
-};
-type CliProjectStateSnapshot = CoreProjectStateSnapshot & {
-  readonly baselines?: readonly Baseline[];
-  readonly backlog?: Backlog;
-  readonly findings?: readonly Finding[];
-  readonly runRecords?: readonly CliRunRecord[];
-  readonly verdicts?: readonly VerdictRecord[];
-};
-type CliStateStore = Omit<CoreSurfaceComposition["stateStore"], "readState" | "writeState"> & {
-  readState(): MaybePromise<Result<CliProjectStateSnapshot>>;
-  writeState(state: CliProjectStateSnapshot): MaybePromise<Result<CliProjectStateSnapshot>>;
-};
-type SurfaceComposition = Omit<CoreSurfaceComposition, "stateStore"> & {
-  readonly stateStore: {
-    readonly [Key in keyof CliStateStore]: CliStateStore[Key];
-  };
-};
+type CliProjectStateSnapshot = CoreProjectStateSnapshot;
+type SurfaceComposition = CoreSurfaceComposition;
 
 export type CliEnvelope<T> =
   | {
@@ -99,7 +82,7 @@ export type SurfaceCliEnv = Readonly<Record<string, string | undefined>>;
 
 export type RunSurfaceCliOptions = SurfaceCompositionOptions & {
   readonly argv?: readonly string[];
-  readonly composition?: CoreSurfaceComposition | SurfaceComposition;
+  readonly composition?: SurfaceComposition;
   readonly env?: SurfaceCliEnv;
   readonly io?: SurfaceCliIo;
 };
@@ -821,7 +804,7 @@ async function readBacklog(
   }
 
   if (options.export === "sarif") {
-    const sarif = await renderSarifForBacklog(state.value.findings, backlog);
+    const sarif = await renderSarifForBacklog(fullFindingsForState(state.value), backlog);
 
     if (!isResultOk(sarif)) {
       return sarif;
@@ -839,7 +822,7 @@ async function readBacklog(
       return githubOptions;
     }
 
-    const sarif = await renderSarifForBacklog(state.value.findings, backlog);
+    const sarif = await renderSarifForBacklog(fullFindingsForState(state.value), backlog);
 
     if (!isResultOk(sarif)) {
       return sarif;
@@ -901,10 +884,10 @@ async function readBacklog(
 }
 
 async function renderSarifForBacklog(
-  findings: CliProjectStateSnapshot["findings"] | undefined,
+  findings: readonly Finding[],
   backlog: Backlog,
 ): Promise<Result<SurfaceSarifLog>> {
-  const rendered = await createSarifRenderer().render(findings ?? [], backlog);
+  const rendered = await createSarifRenderer().render(findings, backlog);
 
   if (!isResultOk(rendered)) {
     return rendered;
@@ -1084,7 +1067,7 @@ async function evaluateGate(
   }
 
   const latestBaseline = state.value.baselines?.at(-1);
-  const findings = state.value.findings ?? [];
+  const findings = fullFindingsForState(state.value);
 
   const gateResult = await composition.gateEvaluator.evaluate(findings, policy.value, {
     ...(latestBaseline === undefined ? {} : { baseline: latestBaseline }),
@@ -1658,7 +1641,7 @@ function inputLensExists(composition: SurfaceComposition, lens: string): boolean
 }
 
 function findStoredFinding(state: CliProjectStateSnapshot, findingId: string): Finding | undefined {
-  return state.findings?.find((finding) => finding.id === findingId);
+  return fullFindingsForState(state).find((finding) => finding.id === findingId);
 }
 
 function findStoredTrackedFinding(
@@ -1705,7 +1688,7 @@ function identityKeysForBaseline(state: CliProjectStateSnapshot): readonly strin
   }
 
   return [
-    ...new Set((state.findings ?? []).map((finding) => identityKeyForFinding(state, finding))),
+    ...new Set(fullFindingsForState(state).map((finding) => identityKeyForFinding(state, finding))),
   ];
 }
 
@@ -1720,8 +1703,11 @@ function backlogForState(
   state: CliProjectStateSnapshot,
   runId: string | undefined,
 ): Backlog | undefined {
-  if (state.backlog !== undefined && (runId === undefined || state.backlog.runId === runId)) {
-    return state.backlog;
+  const parsedBacklog =
+    state.backlog === undefined ? undefined : BacklogSchema.safeParse(state.backlog);
+
+  if (parsedBacklog?.success && (runId === undefined || parsedBacklog.data.runId === runId)) {
+    return parsedBacklog.data;
   }
 
   if (state.backlog !== undefined && runId !== undefined && state.backlog.runId !== runId) {
@@ -1729,9 +1715,18 @@ function backlogForState(
   }
 
   const effectiveRunId = runId ?? "current";
-  const findings = state.findings ?? [];
+  const findings = fullFindingsForState(state);
 
   return backlogFromFindings(effectiveRunId, findings);
+}
+
+function fullFindingsForState(state: CliProjectStateSnapshot): readonly Finding[] {
+  return (state.findings ?? [])
+    .map((finding) => FindingSchema.safeParse(finding))
+    .filter(
+      (result): result is { readonly success: true; readonly data: Finding } => result.success,
+    )
+    .map((result) => result.data);
 }
 
 function backlogFromFindings(runId: string, findings: readonly Finding[]): Backlog {

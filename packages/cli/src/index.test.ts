@@ -66,8 +66,24 @@ type TestCapture = {
 type TestFinding = {
   readonly id: string;
   readonly citedHeuristics: readonly string[];
+  readonly confidenceBand: "assert" | "surface-as-question" | "suppress-unless-deep";
+  readonly dimensions: {
+    readonly a11yLegalRisk: number;
+    readonly agentImplementability: number;
+    readonly businessImpact: number;
+    readonly confidence: number;
+    readonly effort: number;
+    readonly evidenceQuality: number;
+    readonly severity: number;
+    readonly userImpact: number;
+  };
   readonly evidence: readonly unknown[];
   readonly gatedForHuman: boolean;
+  readonly issueType: string;
+  readonly lens: string;
+  readonly location: {
+    readonly selector: string;
+  };
   readonly method: "measured" | "judged";
   readonly rationale: string;
   readonly severityBand: "P0" | "P1" | "P2" | "P3";
@@ -307,7 +323,7 @@ describe("@surface/cli findings and loop verbs", () => {
       composition: createSurfaceComposition({
         stateStore: new MemoryStateStore({
           backlog: {
-            entries: [{ findingId: "finding_button_contrast", rank: 1 }],
+            entries: [{ findingId: "finding_button_contrast", priority: 1, rank: 1 }],
             id: "backlog_run_eval",
             runId: "run_eval",
           },
@@ -386,12 +402,14 @@ describe("@surface/cli findings and loop verbs", () => {
           entries: [
             {
               findingId: "finding_button_contrast",
+              priority: 2,
               rank: 1,
               severityBand: "P1",
               title: "Fix button contrast",
             },
             {
               findingId: "finding_focus_state",
+              priority: 1,
               rank: 2,
               severityBand: "P2",
               title: "Restore focus state",
@@ -872,12 +890,27 @@ function testFinding(): TestFinding {
       {
         kind: "tool-result",
         measuredValue: "3.1:1",
+        rule: "color-contrast",
         threshold: "4.5:1",
         tool: "axe",
       },
     ],
+    confidenceBand: "assert",
+    dimensions: {
+      a11yLegalRisk: 0.8,
+      agentImplementability: 0.9,
+      businessImpact: 0.4,
+      confidence: 1,
+      effort: 0.2,
+      evidenceQuality: 1,
+      severity: 0.8,
+      userImpact: 0.7,
+    },
     gatedForHuman: false,
     id: "finding_button_contrast",
+    issueType: "contrast-insufficient",
+    lens: "accessibility",
+    location: { selector: ".button" },
     method: "measured",
     rationale: "Button text fails AA contrast.",
     severityBand: "P1",
