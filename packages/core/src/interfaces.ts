@@ -182,12 +182,20 @@ export interface GateResult {
   readonly passed: boolean;
   readonly failingFindingIds: string[];
   readonly exitCode: 0 | 1 | 2;
+  readonly baselineId?: string;
 }
+
+export type GateEvaluationContext = {
+  readonly baseline?: Baseline;
+  readonly trackedFindings?: readonly TrackedFinding[];
+  readonly now?: Date | string;
+};
 
 export interface GateEvaluator {
   evaluate(
     findings: readonly Finding[],
     policy: GatePolicy,
+    context?: GateEvaluationContext,
   ): MaybePromise<Result<GateResult, SurfaceError>>;
 }
 

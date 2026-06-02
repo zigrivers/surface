@@ -143,6 +143,11 @@ type SurfaceComposition = {
     evaluate(
       findings: readonly Finding[],
       policy: SurfaceConfig["reporting"]["gatePolicy"],
+      context?: {
+        readonly baseline?: BaselineRecord;
+        readonly trackedFindings?: readonly TrackedFinding[];
+        readonly now?: Date | string;
+      },
     ): MaybePromise<Result<GateResult>>;
   };
   readonly lensRegistry: readonly {
@@ -1073,17 +1078,14 @@ async function evaluateGate(
 
   const latestBaseline = state.value.baselines?.at(-1);
   const findings = state.value.findings ?? [];
-  const findingsForGate =
-    latestBaseline === undefined
-      ? findings
-      : findings.filter(
-          (finding) =>
-            !latestBaseline.identityKeys.includes(identityKeyForFinding(state.value, finding)),
-        );
 
   const gateResult = await composition.gateEvaluator.evaluate(
-    findingsForGate,
+    findings,
     DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
+    {
+      ...(latestBaseline === undefined ? {} : { baseline: latestBaseline }),
+      trackedFindings: state.value.trackedFindings ?? [],
+    },
   );
 
   if (!isResultOk(gateResult)) {
