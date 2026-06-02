@@ -1,6 +1,8 @@
 import { Octokit } from "@octokit/rest";
 
+import type { RedactionRule } from "./config.js";
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
+import { redactExportValue } from "./export-redaction.js";
 import type { Backlog } from "./findings.js";
 import type { SurfaceSarifLog } from "./report-renderers.js";
 
@@ -45,6 +47,7 @@ export type GitHubChecksExporterOptions = {
   readonly userAgent?: string;
   readonly client?: GitHubChecksClient;
   readonly maxAnnotations?: number;
+  readonly redactionRules?: readonly RedactionRule[];
 };
 
 export type GitHubChecksExportInput = {
@@ -88,19 +91,28 @@ export function createGitHubChecksExporter(options: GitHubChecksExporterOptions)
     ): Promise<Result<GitHubChecksExport, SurfaceError>> => {
       const annotations = annotationsForSarif(input.sarif).slice(0, maxAnnotations);
       const synced = input.backlog.entries.map((entry) => entry.findingId);
-      const createResult = await createCheckRun(client, {
-        owner: options.owner,
-        repo: options.repo,
-        name: checkName,
-        head_sha: options.headSha,
-        status: "completed",
-        conclusion: conclusionForSarif(input.sarif),
-        output: {
-          title: checkName,
-          summary: summaryFor(input, annotations.length),
-          ...(annotations.length === 0 ? {} : { annotations }),
-        },
-      });
+      const createInput = redactExportValue(
+        {
+          owner: options.owner,
+          repo: options.repo,
+          name: checkName,
+          head_sha: options.headSha,
+          status: "completed",
+          conclusion: conclusionForSarif(input.sarif),
+          output: {
+            title: checkName,
+            summary: summaryFor(input, annotations.length),
+            ...(annotations.length === 0 ? {} : { annotations }),
+          },
+        } satisfies GitHubCheckCreateInput,
+        options.redactionRules,
+      );
+
+      if (!createInput.ok) {
+        return createInput;
+      }
+
+      const createResult = await createCheckRun(client, createInput.value);
 
       if (!createResult.ok) {
         return err(createResult.error);

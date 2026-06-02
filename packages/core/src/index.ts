@@ -9,6 +9,7 @@ export * from "./context-ingestor.js";
 export * from "./content-lens.js";
 export * from "./discovery.js";
 export * from "./errors.js";
+export * from "./export-redaction.js";
 export * from "./findings.js";
 export * from "./gate-evaluator.js";
 export * from "./github-checks-exporter.js";

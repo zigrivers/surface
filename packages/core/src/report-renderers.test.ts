@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import type { RedactionRule } from "./config.js";
 import { createSurfaceError, err, isErr, isOk, ok } from "./errors.js";
+import { REDACTED_EXPORT_VALUE } from "./export-redaction.js";
 import { FindingsEnvelopeSchema, type Backlog, type Finding } from "./findings.js";
 import {
   createExplainJsonRenderer,
@@ -84,6 +86,10 @@ const backlog = {
     { findingId: "f_a", priority: 0.5, rank: 2 },
   ],
 } satisfies Backlog;
+
+const exportRedactionRules = [
+  { pattern: "secret-[a-z0-9-]+", appliesTo: ["export"] },
+] satisfies readonly RedactionRule[];
 
 const knowledge = {
   query: () => ok([]),
@@ -213,6 +219,102 @@ describe("report renderers", () => {
         },
       ],
       partialFingerprints: { "surface.findingId": "f_b" },
+    });
+  });
+
+  it("redacts export-scoped patterns from findings JSON, markdown, and SARIF", async () => {
+    const secretFinding = {
+      ...findingA,
+      id: "f_secret",
+      title: "Primary button exposes secret-alpha",
+      rationale: "The exported finding includes secret-beta in evidence context.",
+      evidence: [
+        {
+          kind: "tool-result",
+          tool: "axe",
+          rule: "color-contrast",
+          measuredValue: "secret-gamma",
+          threshold: "4.5:1",
+        },
+      ],
+      location: {
+        file: "src/secret-delta/Button.tsx",
+        component: "SecretButton",
+        selector: ".btn-primary",
+      },
+      suggestedPatch: {
+        kind: "contrast-hex",
+        change: "Replace secret-epsilon with an accessible foreground token.",
+      },
+    } satisfies Finding;
+    const secretBacklog = {
+      id: "bk_secret",
+      runId: "run_secret",
+      entries: [{ findingId: "f_secret", priority: 1, rank: 1 }],
+    } satisfies Backlog;
+
+    const json = await createFindingsJsonRenderer({
+      generatedAt: "2026-05-31T18:00:00.000Z",
+      redactionRules: exportRedactionRules,
+    }).render([secretFinding], secretBacklog);
+    const markdown = await createFindingsMarkdownRenderer({
+      redactionRules: exportRedactionRules,
+    }).render([secretFinding], secretBacklog);
+    const sarif = await createSarifRenderer({
+      redactionRules: exportRedactionRules,
+    }).render([secretFinding], secretBacklog);
+
+    expect(isOk(json)).toBe(true);
+    expect(isOk(markdown)).toBe(true);
+    expect(isOk(sarif)).toBe(true);
+
+    if (!isOk(json) || !isOk(markdown) || !isOk(sarif)) {
+      return;
+    }
+
+    for (const report of [json.value, markdown.value, sarif.value]) {
+      const text = textDecoder.decode(report.bytes);
+      expect(text).not.toMatch(/secret-[a-z0-9-]+/);
+      expect(text).toContain(REDACTED_EXPORT_VALUE);
+    }
+  });
+
+  it("does not apply non-export redaction rules to reports", async () => {
+    const secretFinding = {
+      ...findingA,
+      title: "Primary button exposes secret-alpha",
+      rationale: "The exported finding includes secret-beta in evidence context.",
+    } satisfies Finding;
+    const result = await createFindingsMarkdownRenderer({
+      redactionRules: [{ pattern: "secret-[a-z0-9-]+", appliesTo: ["dom"] }],
+    }).render([secretFinding], {
+      ...backlog,
+      entries: [{ findingId: "f_a", priority: 1, rank: 1 }],
+    });
+
+    expect(isOk(result)).toBe(true);
+
+    if (!isOk(result)) {
+      return;
+    }
+
+    const markdown = textDecoder.decode(result.value.bytes);
+    expect(markdown).toContain("secret\\-alpha");
+    expect(markdown).toContain("secret\\-beta");
+    expect(markdown).not.toContain(REDACTED_EXPORT_VALUE);
+  });
+
+  it("returns export_failed for invalid export redaction patterns", async () => {
+    const result = await createFindingsMarkdownRenderer({
+      redactionRules: [{ pattern: "[", appliesTo: ["export"] }],
+    }).render([findingA, findingB], backlog);
+
+    expect(isErr(result)).toBe(true);
+    expect(result).toMatchObject({
+      error: {
+        code: "export_failed",
+        kind: "IntegrationError",
+      },
     });
   });
 
