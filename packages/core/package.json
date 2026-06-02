@@ -1,7 +1,6 @@
 {
-  "name": "@surface/core",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@zigrivers/surface-core",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -15,7 +14,9 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
     "@noble/hashes": "catalog:",
@@ -57,5 +58,26 @@
     "playwright": {
       "optional": true
     }
+  },
+  "description": "Core schemas, state, scoring, and orchestration for Surface",
+  "license": "MIT",
+  "homepage": "https://github.com/zigrivers/surface#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigrivers/surface.git",
+    "directory": "packages/core"
+  },
+  "bugs": {
+    "url": "https://github.com/zigrivers/surface/issues"
+  },
+  "keywords": [
+    "surface",
+    "ui-audit",
+    "core",
+    "accessibility"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

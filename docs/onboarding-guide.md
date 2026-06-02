@@ -35,7 +35,7 @@ guide + troubleshooting: `docs/dev-setup.md`. (No database, no web dev server â€
 
 ## 3. Architecture in one screen
 
-Modular pnpm+Turborepo monorepo: a pure **`@surface/core`** (Finding/Backlog schema, scoring,
+Modular pnpm+Turborepo monorepo: a pure **`@zigrivers/surface-core`** (Finding/Backlog schema, scoring,
 identity, closed-loop, state, the pipeline orchestrator, and every plugin **interface**) wrapped
 by thin **`cli`** + **`mcp`** adapters, with **edge plugins** behind core's interfaces:
 `capture` (Playwright/agent-browser/static), `grounding` (axe/Lighthouse/jsx-a11y), `adapters`

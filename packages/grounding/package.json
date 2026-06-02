@@ -1,7 +1,6 @@
 {
-  "name": "@surface/grounding",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@zigrivers/surface-grounding",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,13 +11,15 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "@surface/core": "workspace:*",
     "eslint": "catalog:",
     "eslint-plugin-jsx-a11y": "catalog:",
-    "typescript-eslint": "catalog:"
+    "typescript-eslint": "catalog:",
+    "@zigrivers/surface-core": "workspace:*"
   },
   "scripts": {
     "build": "tsup",
@@ -34,5 +35,25 @@
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "description": "Measured grounding tools for Surface audits",
+  "license": "MIT",
+  "homepage": "https://github.com/zigrivers/surface#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigrivers/surface.git",
+    "directory": "packages/grounding"
+  },
+  "bugs": {
+    "url": "https://github.com/zigrivers/surface/issues"
+  },
+  "keywords": [
+    "surface",
+    "grounding",
+    "accessibility"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

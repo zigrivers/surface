@@ -1,7 +1,6 @@
 {
-  "name": "@surface/mcp",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@zigrivers/surface-mcp",
+  "version": "0.1.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -12,12 +11,14 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
     "@modelcontextprotocol/sdk": "catalog:",
-    "@surface/core": "workspace:*",
-    "zod": "catalog:"
+    "zod": "catalog:",
+    "@zigrivers/surface-core": "workspace:*"
   },
   "scripts": {
     "build": "tsup",
@@ -34,5 +35,25 @@
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "description": "MCP server adapter for Surface audits",
+  "license": "MIT",
+  "homepage": "https://github.com/zigrivers/surface#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigrivers/surface.git",
+    "directory": "packages/mcp"
+  },
+  "bugs": {
+    "url": "https://github.com/zigrivers/surface/issues"
+  },
+  "keywords": [
+    "surface",
+    "mcp",
+    "ui-audit"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

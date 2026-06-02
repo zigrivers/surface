@@ -1,0 +1,74 @@
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Semver tag to release, for example v0.1.0"
+        required: true
+        type: string
+      publish:
+        description: "Publish npm packages and create/update the GitHub release"
+        required: true
+        default: "false"
+        type: choice
+        options: ["false", "true"]
+
+permissions:
+  contents: write
+  id-token: write
+
+concurrency:
+  group: release-${{ inputs.tag }}
+  cancel-in-progress: true
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: npm-release
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - name: Enable Corepack
+        run: corepack enable
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.14.0
+          registry-url: https://registry.npmjs.org
+          cache: pnpm
+      - name: Ensure npm supports trusted publishing
+        run: npm install --global npm@^11.5.1
+      - run: pnpm install --frozen-lockfile
+      - name: Local quality gate
+        run: pnpm run check
+      - name: Release artifact validation
+        run: pnpm run release:verify
+      - name: Publish npm packages
+        if: inputs.publish == 'true'
+        env:
+          NPM_CONFIG_PROVENANCE: "true"
+        run: |
+          mkdir -p .release-packs
+          pnpm --dir packages/core pack --pack-destination .release-packs
+          pnpm --dir packages/grounding pack --pack-destination .release-packs
+          pnpm --dir packages/mcp pack --pack-destination .release-packs
+          pnpm --dir packages/adapters/agnostic pack --pack-destination .release-packs
+          pnpm --dir packages/adapters/react pack --pack-destination .release-packs
+          pnpm --dir packages/adapters/svelte pack --pack-destination .release-packs
+          pnpm --dir packages/adapters/vue pack --pack-destination .release-packs
+          pnpm --dir packages/cli pack --pack-destination .release-packs
+          npm publish .release-packs/zigrivers-surface-core-0.1.0.tgz --access public --provenance
+          npm publish .release-packs/zigrivers-surface-grounding-0.1.0.tgz --access public --provenance
+          npm publish .release-packs/zigrivers-surface-mcp-0.1.0.tgz --access public --provenance
+          npm publish .release-packs/zigrivers-surface-adapter-agnostic-0.1.0.tgz --access public --provenance
+          npm publish .release-packs/zigrivers-surface-adapter-react-0.1.0.tgz --access public --provenance
+          npm publish .release-packs/zigrivers-surface-adapter-svelte-0.1.0.tgz --access public --provenance
+          npm publish .release-packs/zigrivers-surface-adapter-vue-0.1.0.tgz --access public --provenance
+          npm publish .release-packs/zigrivers-surface-0.1.0.tgz --access public --provenance
+      - name: Create GitHub release
+        if: inputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes-file CHANGELOG.md --verify-tag

@@ -13,11 +13,11 @@
 Legend: **Tier** G=gate · C=committed · S=should. **Risk** flags noted inline.
 Every task's acceptance = "its referenced AC tests go red→green + `pnpm run check` passes".
 
-## Wave 0 — Core foundations (`@surface/core`)
+## Wave 0 — Core foundations (`@zigrivers/surface-core`)
 
 | ID | Task (≤3 files) | Tier | Stories/refs | Deps | Tests |
 |---|---|---|---|---|---|
-| T-001 | Scaffold `@surface/core` (package.json, tsconfig, tsup, vitest) | G | ADR-002 | — | build smoke |
+| T-001 | Scaffold `@zigrivers/surface-core` (package.json, tsconfig, tsup, vitest) | G | ADR-002 | — | build smoke |
 | T-002 | zod schemas: `Finding`, `FindingDraft`, `Evidence`, `Dimensions`, `Location`, `SeverityBand` | G | US-020, FR-SCORE-1 | T-001 | E3 US-020 |
 | T-003 | zod `SurfaceConfig` slices (Capture/Evaluation/Findings/Reporting) + precedence merge | G | FR-IF-5, ADR-013 | T-001 | unit |
 | T-004 | `Result<T, SurfaceError>` + error taxonomy + edge→exit/MCP mapping | G | ADR-014, NFR-CLI-1 | T-001 | unit |
@@ -108,11 +108,11 @@ mutually parallel within the wave; the lenses parallelize among themselves once 
 | ID | Task | Tier | Stories/refs | Deps | Tests |
 |---|---|---|---|---|---|
 | T-059 | Shared **composition factory** in `core` (build the wired registry of plugins) — used by both CLI and MCP so neither depends on the other | G | arch §2a | core+plugins | unit · *added (review Codex P1): CLI/MCP are siblings over core* |
-| T-060 | `@surface/cli` commander app + exit codes 0/1/2 + `--json` envelope + error→exit mapping | G | US-050, FR-IF-1, NFR-CLI-1 | T-059,T-004 | E6 US-050 (e2e) |
+| T-060 | `@zigrivers/surface` commander app + exit codes 0/1/2 + `--json` envelope + error→exit mapping | G | US-050, FR-IF-1, NFR-CLI-1 | T-059,T-004 | E6 US-050 (e2e) |
 | T-061a | CLI verbs **core loop**: `init`/`status`/`run`/`next`/`capture`/`audit` | G | US-050, api-contracts §2 | T-060 | E6 US-050 · CLI contract |
 | T-061b | CLI verbs **findings/loop**: `explain`/`backlog`/`validate`/`gate`/`trace` | G | US-050/031/042 | T-060 | E6 US-050 |
 | T-061c | CLI verbs **committed/should**: `baseline` (C) / `verdict`,`diff`,`alternatives` (S) | C/S | US-042/023/015 | T-060 | E5/E3/E2 |
-| T-062a | `@surface/mcp` server bootstrap + tool-schema infra + snapshot harness (depends on **core**, not CLI) | G | US-051, NFR-MCP-1 | T-059 | E6 US-051 · MCP snapshot |
+| T-062a | `@zigrivers/surface-mcp` server bootstrap + tool-schema infra + snapshot harness (depends on **core**, not CLI) | G | US-051, NFR-MCP-1 | T-059 | E6 US-051 · MCP snapshot |
 | T-062b | MCP **analytical** tools (`surface_capture/audit/explain/backlog/status`) | G | US-051, api-contracts §3 | T-062a | E6 US-051 |
 | T-062c | MCP **closed-loop** tools (`surface_gate/validate/baseline/verdict/diff/trace`) + optional (`alternatives`) | G/C/S | US-051 | T-062a | contract |
 | T-063 | Runner skill (NL→CLI/MCP command mapping) per platform | G | US-052, FR-IF-3 | T-061a,T-062b | E6 US-052 |

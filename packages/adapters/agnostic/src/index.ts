@@ -3,8 +3,8 @@ import type {
   ComponentMapEntry,
   FrameworkAdapter,
   SourceFileRef,
-} from "@surface/core/interfaces";
-import { createSurfaceError, type Result, type SurfaceError } from "@surface/core";
+} from "@zigrivers/surface-core/interfaces";
+import { createSurfaceError, type Result, type SurfaceError } from "@zigrivers/surface-core";
 import { parse, type DefaultTreeAdapterMap } from "parse5";
 
 export const AGNOSTIC_ADAPTER_ID = "agnostic";

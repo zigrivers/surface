@@ -43,7 +43,7 @@ async function main() {
     "StateStore",
   ];
 
-  if (core.CORE_PACKAGE_NAME !== "@surface/core") {
+  if (core.CORE_PACKAGE_NAME !== "@zigrivers/surface-core") {
     console.error("Unexpected CORE_PACKAGE_NAME:", core.CORE_PACKAGE_NAME);
     process.exit(1);
   }

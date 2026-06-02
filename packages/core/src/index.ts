@@ -1,4 +1,4 @@
-export const CORE_PACKAGE_NAME = "@surface/core";
+export const CORE_PACKAGE_NAME = "@zigrivers/surface-core";
 
 export { createAccessibilityLens } from "./accessibility-lens.js";
 export * from "./app-type-overlays.js";

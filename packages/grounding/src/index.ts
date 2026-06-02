@@ -7,8 +7,13 @@ import {
   createSurfaceError,
   type Result,
   type SurfaceError,
-} from "@surface/core";
-import type { Capture, GroundingTool, SourceFileRef, ToolResult } from "@surface/core/interfaces";
+} from "@zigrivers/surface-core";
+import type {
+  Capture,
+  GroundingTool,
+  SourceFileRef,
+  ToolResult,
+} from "@zigrivers/surface-core/interfaces";
 
 export const AXE_GROUNDING_ID = "axe";
 export const JSX_A11Y_GROUNDING_ID = "eslint-jsx-a11y";

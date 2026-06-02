@@ -6,7 +6,7 @@
 > **POSIX CLI** (FR-IF-1, NFR-CLI-1), the **MCP tool surface** (FR-IF-2, NFR-MCP-1), and the
 > **machine output schemas** (`findings.json`, SARIF). This document is the definitive
 > agreement those interfaces honor; plugin (inter-component) interfaces are summarized in §8
-> and owned by `@surface/core` (system-architecture §2a). Inputs: system-architecture, ADRs,
+> and owned by `@zigrivers/surface-core` (system-architecture §2a). Inputs: system-architecture, ADRs,
 > domain models.
 
 ## 1. Conventions
@@ -100,7 +100,7 @@ dropped (NFR-SCALE-1).
 
 ## 3. MCP tool contract
 
-The MCP server (`@surface/mcp`, ADR-008) exposes surface's capabilities as tools — one tool per
+The MCP server (`@zigrivers/surface-mcp`, ADR-008) exposes surface's capabilities as tools — one tool per
 agent-relevant CLI verb — with **zod-derived JSON schemas** (NFR-MCP-1). Tools are thin over the
 same `core` services as the CLI (system-architecture §2a), so behavior is identical.
 
@@ -252,10 +252,10 @@ user's (BYO key, ADR-006).
 
 ## 8. Plugin (inter-component) interface contracts
 
-Component-to-component contracts are TypeScript interfaces in `@surface/core/interfaces`
+Component-to-component contracts are TypeScript interfaces in `@zigrivers/surface-core/interfaces`
 (system-architecture §2a/§6), not network APIs: `CaptureBackend`, `FrameworkAdapter`,
 `GroundingTool`, `Lens`, `ReportRenderer`, `GateEvaluator`, `IssueExporter`, `KnowledgeSource`,
-`StateStore`. They are versioned with the `@surface/core` package; breaking a published interface
+`StateStore`. They are versioned with the `@zigrivers/surface-core` package; breaking a published interface
 is a major bump. Their signatures and constraints are specified in system-architecture §6 and
 realized in the implementation plan.
 

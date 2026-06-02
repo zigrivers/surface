@@ -38,7 +38,7 @@ surface/
 ```
 
 ## Boundary rules (parallel-agent safety)
-- Packages communicate **only** through published entry points (`@surface/<pkg>`); no deep
+- Packages communicate **only** through published entry points (`@zigrivers/<pkg>`); no deep
   imports. This lets an agent work in `adapters/vue` while another works in `reporters`
   without merge conflicts.
 - `core` owns the canonical schema + vocabulary; everything else depends on `core`, never the

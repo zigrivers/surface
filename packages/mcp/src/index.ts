@@ -27,7 +27,7 @@ import {
   type SurfaceComposition,
   type SurfaceCompositionOptions,
   type SurfaceError,
-} from "@surface/core";
+} from "@zigrivers/surface-core";
 import type {
   Backlog,
   Baseline,
@@ -37,7 +37,7 @@ import type {
   ProjectRunRecord,
   ProjectStateSnapshot,
   Target,
-} from "@surface/core/interfaces";
+} from "@zigrivers/surface-core/interfaces";
 import { z } from "zod";
 
 export const SURFACE_MCP_SERVER_NAME = "surface";

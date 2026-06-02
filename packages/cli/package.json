@@ -1,7 +1,6 @@
 {
-  "name": "@surface/cli",
-  "version": "0.0.0",
-  "private": true,
+  "name": "@zigrivers/surface",
+  "version": "0.1.0",
   "type": "module",
   "bin": {
     "surface": "./dist/index.js"
@@ -15,11 +14,13 @@
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "dependencies": {
-    "@surface/core": "workspace:*",
-    "commander": "catalog:"
+    "commander": "catalog:",
+    "@zigrivers/surface-core": "workspace:*"
   },
   "scripts": {
     "build": "tsup",
@@ -36,5 +37,26 @@
     "tsup": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
+  },
+  "description": "Surface CLI for local UI audits",
+  "license": "MIT",
+  "homepage": "https://github.com/zigrivers/surface#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zigrivers/surface.git",
+    "directory": "packages/cli"
+  },
+  "bugs": {
+    "url": "https://github.com/zigrivers/surface/issues"
+  },
+  "keywords": [
+    "surface",
+    "ui-audit",
+    "accessibility",
+    "cli"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
   }
 }

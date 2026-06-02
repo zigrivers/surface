@@ -5,8 +5,8 @@ import type {
   ComponentMapEntry,
   FrameworkAdapter,
   SourceFileRef,
-} from "@surface/core/interfaces";
-import { createSurfaceError, type Result, type SurfaceError } from "@surface/core";
+} from "@zigrivers/surface-core/interfaces";
+import { createSurfaceError, type Result, type SurfaceError } from "@zigrivers/surface-core";
 import { parse } from "svelte/compiler";
 
 export const SVELTE_ADAPTER_ID = "svelte";

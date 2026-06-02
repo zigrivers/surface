@@ -10,8 +10,8 @@ import {
   type FindingDraft,
   type LensRegistration,
   type SurfaceComposition,
-} from "@surface/core";
-import type { Capture } from "@surface/core/interfaces";
+} from "@zigrivers/surface-core";
+import type { Capture } from "@zigrivers/surface-core/interfaces";
 
 import {
   SURFACE_MCP_SERVER_NAME,
@@ -22,7 +22,7 @@ import {
   createSurfaceMcpToolRegistry,
 } from "./index.js";
 
-describe("@surface/mcp bootstrap", () => {
+describe("@zigrivers/surface-mcp bootstrap", () => {
   it("lists versioned Surface tools from the bootstrap registry", () => {
     const registry = createSurfaceMcpToolRegistry();
     const tools = registry.listTools();

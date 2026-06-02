@@ -156,7 +156,7 @@ Node ≥ 22.13.0 (pinned to the CI patch release and modern pnpm/Vite/Vitest flo
 | `pnpm check` / `pnpm run check` | **full local gate, identical to CI** (format-check + lint + typecheck + test + build:smoke) |
 | `pnpm clean` | remove caches and build output |
 
-Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
+Run one package with a filter, e.g. `pnpm --filter @zigrivers/surface-core test`.
 
 ### Dev Environment
 
@@ -165,7 +165,7 @@ Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
 - **Model keys are optional.** With none set, surface runs measured-only and transmits
   nothing (NFR-DATA-1). Add keys in `.env` (gitignored) to enable judged / multi-model
   findings; `.env.example` documents every variable.
-- **Run the CLI locally:** build `@surface/cli`, then `pnpm --filter @surface/cli exec npm link`
+- **Run the CLI locally:** build `@zigrivers/surface`, then `pnpm --filter @zigrivers/surface exec npm link`
   to expose the `surface` binary; or run from source via `tsx src/index.ts`.
 - **Prove It:** before claiming a change works, run `pnpm run check` and show the output.
   `pnpm run check` is exactly what CI runs.
@@ -173,7 +173,7 @@ Run one package with a filter, e.g. `pnpm --filter @surface/core test`.
 ## Architecture Overview
 
 surface is a **modular-monorepo CLI + MCP tool** (no hosted service, no DB): a pure
-`@surface/core` (schema, scoring, identity, state, pipeline orchestrator) wrapped by thin
+`@zigrivers/surface-core` (schema, scoring, identity, state, pipeline orchestrator) wrapped by thin
 `cli`/`mcp` adapters, with edge plugins (capture backends, framework adapters, grounding,
 reporters) behind interfaces in `core`.
 
