@@ -9,6 +9,8 @@ import {
   BUILT_IN_LENS_REGISTRY,
   createFileSystemKnowledgeSource,
   createGitHubIssueExporter,
+  createJiraIssueExporter,
+  createLinearIssueExporter,
   loadKnowledgeEntries,
   isOk,
   type Backlog,
@@ -121,7 +123,74 @@ describe("E7 Integrations", () => {
     });
   });
   describe("US-061 Linear/Jira export & token parsers [should]", () => {
-    it.skip("[US-061][AC1] --export linear|jira → items created per that vendor's API within rate limits (integration)", () => {});
+    it("[US-061][AC1] --export linear|jira → items created per that vendor's API within rate limits (integration)", async () => {
+      const projectRoot = await writeBacklogFixture(backlog);
+      const linearCreated: unknown[] = [];
+      const jiraCreated: unknown[] = [];
+      const linear = createLinearIssueExporter({
+        teamId: "team_surface",
+        projectRoot,
+        maxAttempts: 2,
+        client: {
+          createIssue: (input) => {
+            linearCreated.push(input);
+            return Promise.resolve({ id: "lin_1" });
+          },
+        },
+      });
+      const jira = createJiraIssueExporter({
+        projectKey: "SURF",
+        projectRoot,
+        maxAttempts: 2,
+        client: {
+          createIssue: (input) => {
+            jiraCreated.push(input);
+            return Promise.resolve({ key: "SURF-1" });
+          },
+        },
+      });
+
+      const linearResult = await linear.export({
+        backlogId: backlog.id,
+        path: ".surface/reports/backlog.json",
+      });
+      const jiraResult = await jira.export({
+        backlogId: backlog.id,
+        path: ".surface/reports/backlog.json",
+      });
+
+      expect(isOk(linearResult)).toBe(true);
+      expect(isOk(jiraResult)).toBe(true);
+
+      if (!isOk(linearResult) || !isOk(jiraResult)) {
+        return;
+      }
+
+      expect(linearResult.value).toMatchObject({
+        target: "linear",
+        synced: ["f_checkout_contrast"],
+        unsynced: [],
+        status: "complete",
+      });
+      expect(jiraResult.value).toMatchObject({
+        target: "jira",
+        synced: ["f_checkout_contrast"],
+        unsynced: [],
+        status: "complete",
+      });
+      expect(linearCreated[0]).toMatchObject({
+        teamId: "team_surface",
+        title: "[Surface] 1. f_checkout_contrast",
+      });
+      expect(jiraCreated[0]).toMatchObject({
+        fields: {
+          project: { key: "SURF" },
+          summary: "[Surface] 1. f_checkout_contrast",
+        },
+      });
+      expect(JSON.stringify(linearCreated[0])).toContain("Checkout button contrast is below AA");
+      expect(JSON.stringify(jiraCreated[0])).toContain("selector=`.checkout-button`");
+    });
   });
 });
 
