@@ -497,6 +497,47 @@ describe("@surface/cli findings and loop verbs", () => {
     });
   });
 
+  it("fails gate for baseline findings with expired waivers", async () => {
+    const stdout: string[] = [];
+    const stateStore = new MemoryStateStore({
+      baselines: [
+        {
+          baselineId: "baseline_001",
+          identityKeys: ["identity_button_contrast"],
+          waivers: [
+            {
+              expiry: "2000-01-01T00:00:00.000Z",
+              findingIdentityKey: "identity_button_contrast",
+              owner: "design-system",
+              reason: "temporary acceptance",
+            },
+          ],
+        },
+      ],
+      findings: [testFinding()],
+      trackedFindings: [testTrackedFinding({ gateDisposition: "ignored-by-waiver" })],
+      version: "1.0",
+    });
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "gate", "--ci"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout[0] ?? "")).toMatchObject({
+      command: "gate",
+      data: {
+        gateResult: {
+          baselineId: "baseline_001",
+          failingFindingIds: ["finding_button_contrast"],
+          passed: false,
+        },
+      },
+      ok: true,
+    });
+  });
+
   it("records verdicts for stored findings", async () => {
     const stdout: string[] = [];
     const stateStore = new MemoryStateStore({

@@ -5,6 +5,7 @@ import { isErr, isOk } from "./errors.js";
 import type { Finding } from "./findings.js";
 import { createGateEvaluator } from "./gate-evaluator.js";
 import type { GatePolicy } from "./interfaces.js";
+import { createBaseline, createTrackedFinding } from "./tracked-findings.js";
 
 const baseFinding = {
   id: "f_p1_measured",
@@ -102,6 +103,114 @@ describe("GateEvaluator", () => {
         exitCode: 0,
         failingFindingIds: [],
         passed: true,
+      },
+    });
+  });
+
+  it("does not fail findings already accepted by the active baseline", async () => {
+    const evaluator = createGateEvaluator();
+    const tracked = createTrackedFinding({
+      finding: baseFinding,
+      runId: "run_001",
+      validation: { expectation: "axe color-contrast passes", kind: "measured-rule" },
+    });
+    const result = await evaluator.evaluate(
+      [baseFinding],
+      DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
+      {
+        baseline: createBaseline({
+          baselineId: "baseline_001",
+          identityKeys: [tracked.identityKey],
+        }),
+        trackedFindings: [tracked],
+      },
+    );
+
+    expect(isOk(result)).toBe(true);
+    expect(result).toMatchObject({
+      value: {
+        baselineId: "baseline_001",
+        exitCode: 0,
+        failingFindingIds: [],
+        passed: true,
+      },
+    });
+  });
+
+  it("does not fail findings with active waivers", async () => {
+    const evaluator = createGateEvaluator();
+    const tracked = createTrackedFinding({
+      finding: baseFinding,
+      runId: "run_001",
+      validation: { expectation: "axe color-contrast passes", kind: "measured-rule" },
+    });
+    const result = await evaluator.evaluate(
+      [baseFinding],
+      DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
+      {
+        baseline: createBaseline({
+          baselineId: "baseline_001",
+          identityKeys: [tracked.identityKey],
+          waivers: [
+            {
+              expiry: "2026-06-03T00:00:00.000Z",
+              findingIdentityKey: tracked.identityKey,
+              owner: "design-system",
+              reason: "temporary acceptance",
+            },
+          ],
+        }),
+        now: "2026-06-02T00:00:00.000Z",
+        trackedFindings: [tracked],
+      },
+    );
+
+    expect(isOk(result)).toBe(true);
+    expect(result).toMatchObject({
+      value: {
+        exitCode: 0,
+        failingFindingIds: [],
+        passed: true,
+      },
+    });
+  });
+
+  it("fails baseline findings whose waiver has expired", async () => {
+    const evaluator = createGateEvaluator();
+    const tracked = createTrackedFinding({
+      finding: baseFinding,
+      gateDisposition: "ignored-by-waiver",
+      runId: "run_001",
+      validation: { expectation: "axe color-contrast passes", kind: "measured-rule" },
+    });
+    const result = await evaluator.evaluate(
+      [baseFinding],
+      DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
+      {
+        baseline: createBaseline({
+          baselineId: "baseline_001",
+          identityKeys: [tracked.identityKey],
+          waivers: [
+            {
+              expiry: "2026-06-01T00:00:00.000Z",
+              findingIdentityKey: tracked.identityKey,
+              owner: "design-system",
+              reason: "temporary acceptance",
+            },
+          ],
+        }),
+        now: "2026-06-02T00:00:00.000Z",
+        trackedFindings: [tracked],
+      },
+    );
+
+    expect(isOk(result)).toBe(true);
+    expect(result).toMatchObject({
+      value: {
+        baselineId: "baseline_001",
+        exitCode: 1,
+        failingFindingIds: [baseFinding.id],
+        passed: false,
       },
     });
   });

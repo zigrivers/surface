@@ -338,16 +338,15 @@ describe("E5 Closed Loop, State & Baselines", () => {
 
     it("[US-042][AC1] `surface baseline` → snapshot; `gate` thereafter fails only on net-new/expired findings (integration)", async () => {
       const stdout: string[] = [];
+      const currentDebt = findingWith({ id: "f_current_debt", severityBand: "P1" });
+      const trackedCurrentDebt = createTrackedFinding({
+        finding: currentDebt,
+        runId: "run_001",
+        validation: { expectation: "contrast passes", kind: "measured-rule" },
+      });
       let state = {
-        findings: [findingWith({ id: "f_current_debt", severityBand: "P1" })],
-        trackedFindings: [
-          {
-            currentFindingId: "f_current_debt",
-            identityKey: "identity_current_debt",
-            status: "still-failing",
-            validation: { expectation: "contrast passes", kind: "measured-rule" },
-          },
-        ],
+        findings: [currentDebt],
+        trackedFindings: [trackedCurrentDebt],
         version: "1.0",
       };
       const composition = createSurfaceComposition({
@@ -389,7 +388,7 @@ describe("E5 Closed Loop, State & Baselines", () => {
       expect(state).toMatchObject({
         baselines: [
           {
-            identityKeys: ["identity_current_debt"],
+            identityKeys: [trackedCurrentDebt.identityKey],
             reason: "accepted current debt",
           },
         ],
