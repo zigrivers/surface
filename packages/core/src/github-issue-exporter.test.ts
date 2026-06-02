@@ -4,7 +4,9 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { RedactionRule } from "./config.js";
 import { isErr, isOk } from "./errors.js";
+import { REDACTED_EXPORT_VALUE } from "./export-redaction.js";
 import { createGitHubIssueExporter } from "./github-issue-exporter.js";
 import type { Backlog } from "./findings.js";
 
@@ -25,6 +27,10 @@ const backlog = {
     { findingId: "f_b", priority: 0.4, rank: 2, demotedAsDuplicateOf: "f_a" },
   ],
 } satisfies Backlog;
+
+const exportRedactionRules = [
+  { pattern: "secret-[a-z0-9-]+", appliesTo: ["export"] },
+] satisfies readonly RedactionRule[];
 
 describe("GitHubIssueExporter", () => {
   it("creates GitHub issues with finding context from a local backlog artifact", async () => {
@@ -74,6 +80,82 @@ describe("GitHubIssueExporter", () => {
     expect(JSON.stringify(created[0])).toContain("Primary action contrast is below AA");
     expect(JSON.stringify(created[0])).toContain("selector=`.primary-action`");
     expect(JSON.stringify(created[0])).toContain("Set foreground to #111827.");
+  });
+
+  it("redacts export-scoped patterns from GitHub issue payloads", async () => {
+    const secretBacklog = {
+      ...backlog,
+      entries: [
+        {
+          ...backlog.entries[0]!,
+          title: "Primary action exposes secret-alpha",
+          rationale: "The exported issue includes secret-beta.",
+          location: { file: "src/secret-gamma/Button.tsx", selector: ".primary-action" },
+          suggestedPatch: {
+            kind: "contrast-hex",
+            change: "Replace secret-delta before publishing.",
+          },
+        },
+      ],
+    } satisfies Backlog;
+    const projectRoot = await writeBacklogArtifact(secretBacklog);
+    const created: unknown[] = [];
+    const exporter = createGitHubIssueExporter({
+      owner: "surface",
+      repo: "app",
+      projectRoot,
+      redactionRules: exportRedactionRules,
+      client: {
+        issues: {
+          create: (input) => {
+            created.push(input);
+            return Promise.resolve({ data: { number: created.length } });
+          },
+        },
+      },
+    });
+
+    const result = await exporter.export({
+      backlogId: secretBacklog.id,
+      path: ".surface/reports/backlog.json",
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(created).toHaveLength(1);
+    expect(JSON.stringify(created[0])).not.toMatch(/secret-[a-z0-9-]+/);
+    expect(JSON.stringify(created[0])).toContain(REDACTED_EXPORT_VALUE);
+  });
+
+  it("ignores non-export redaction rules for GitHub issue payloads", async () => {
+    const secretBacklog = {
+      ...backlog,
+      entries: [{ ...backlog.entries[0]!, title: "Primary action exposes secret-alpha" }],
+    } satisfies Backlog;
+    const projectRoot = await writeBacklogArtifact(secretBacklog);
+    const created: unknown[] = [];
+    const exporter = createGitHubIssueExporter({
+      owner: "surface",
+      repo: "app",
+      projectRoot,
+      redactionRules: [{ pattern: "secret-[a-z0-9-]+", appliesTo: ["dom"] }],
+      client: {
+        issues: {
+          create: (input) => {
+            created.push(input);
+            return Promise.resolve({ data: { number: created.length } });
+          },
+        },
+      },
+    });
+
+    const result = await exporter.export({
+      backlogId: secretBacklog.id,
+      path: ".surface/reports/backlog.json",
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(JSON.stringify(created[0])).toContain("secret-alpha");
+    expect(JSON.stringify(created[0])).not.toContain(REDACTED_EXPORT_VALUE);
   });
 
   it("retries retryable failures and reports persistent unsynced findings", async () => {

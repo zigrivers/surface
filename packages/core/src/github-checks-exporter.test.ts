@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
+import type { RedactionRule } from "./config.js";
 import { isErr, isOk } from "./errors.js";
+import { REDACTED_EXPORT_VALUE } from "./export-redaction.js";
 import type { Backlog } from "./findings.js";
 import { createGitHubChecksExporter } from "./github-checks-exporter.js";
 import type { SurfaceSarifLog } from "./report-renderers.js";
@@ -81,6 +83,10 @@ const sarif = {
   ],
 } satisfies SurfaceSarifLog;
 
+const exportRedactionRules = [
+  { pattern: "secret-[a-z0-9-/.]+", appliesTo: ["export"] },
+] satisfies readonly RedactionRule[];
+
 describe("GitHubChecksExporter", () => {
   it("creates a GitHub check run with SARIF-derived annotations and local artifact context", async () => {
     const created: unknown[] = [];
@@ -141,6 +147,49 @@ describe("GitHubChecksExporter", () => {
       },
     });
     expect(JSON.stringify(created[0])).toContain(".surface/reports/findings.sarif");
+  });
+
+  it("redacts export-scoped patterns from GitHub Checks payloads", async () => {
+    const secretSarif = {
+      ...sarif,
+      runs: [
+        {
+          ...sarif.runs[0]!,
+          results: [
+            {
+              ...sarif.runs[0]!.results[0]!,
+              message: { text: "The annotation includes secret-alpha." },
+            },
+          ],
+        },
+      ],
+    } satisfies SurfaceSarifLog;
+    const created: unknown[] = [];
+    const exporter = createGitHubChecksExporter({
+      owner: "surface",
+      repo: "app",
+      headSha: "abc123",
+      redactionRules: exportRedactionRules,
+      client: {
+        checks: {
+          create: (input) => {
+            created.push(input);
+            return Promise.resolve({ data: { id: 123 } });
+          },
+        },
+      },
+    });
+
+    const result = await exporter.export({
+      backlog,
+      localArtifactPath: ".surface/reports/secret-beta.sarif",
+      sarif: secretSarif,
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(created).toHaveLength(1);
+    expect(JSON.stringify(created[0])).not.toMatch(/secret-[a-z0-9-/.]+/);
+    expect(JSON.stringify(created[0])).toContain(REDACTED_EXPORT_VALUE);
   });
 
   it("returns export_failed when GitHub rejects the check run", async () => {

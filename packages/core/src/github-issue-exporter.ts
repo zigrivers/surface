@@ -3,7 +3,9 @@ import path from "node:path";
 
 import { Octokit } from "@octokit/rest";
 
+import type { RedactionRule } from "./config.js";
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
+import { redactExportValue } from "./export-redaction.js";
 import { BacklogSchema, type Backlog, type BacklogEntry } from "./findings.js";
 import type { IssueExport, IssueExporter, LocalBacklogRef } from "./interfaces.js";
 
@@ -45,6 +47,7 @@ export type GitHubIssueExporterOptions = {
   readonly maxAttempts?: number;
   readonly initialBackoffMs?: number;
   readonly wait?: (milliseconds: number) => Promise<void>;
+  readonly redactionRules?: readonly RedactionRule[];
 };
 
 export function createGitHubIssueExporter(options: GitHubIssueExporterOptions): IssueExporter {
@@ -70,8 +73,16 @@ export function createGitHubIssueExporter(options: GitHubIssueExporterOptions): 
           : { initialBackoffMs, maxAttempts, wait: options.wait };
 
       for (const [index, entry] of backlog.value.entries.entries()) {
-        const input = issueCreateInput(options, backlog.value, entry, backlogRef);
-        const issue = await retry(() => client.issues.create(input), retryConfig);
+        const input = redactExportValue(
+          issueCreateInput(options, backlog.value, entry, backlogRef),
+          options.redactionRules,
+        );
+
+        if (!input.ok) {
+          return input;
+        }
+
+        const issue = await retry(() => client.issues.create(input.value), retryConfig);
 
         if (issue.ok) {
           synced.push(entry.findingId);

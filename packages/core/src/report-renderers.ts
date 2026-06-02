@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
+import type { RedactionRule } from "./config.js";
+import { redactExportString, redactExportValue } from "./export-redaction.js";
 import {
   BacklogSchema,
   FindingSchema as RuntimeFindingSchema,
@@ -39,6 +41,11 @@ const MAX_TERMINAL_SANITIZE_DEPTH = 32;
 export type FindingsJsonRendererOptions = {
   readonly generatedAt: string;
   readonly degradation?: FindingsEnvelope["degradation"];
+  readonly redactionRules?: readonly RedactionRule[];
+};
+
+export type ReportRendererRedactionOptions = {
+  readonly redactionRules?: readonly RedactionRule[];
 };
 
 export const SurfaceSarifLogSchema = z
@@ -111,6 +118,7 @@ export type RenderAndWriteReportArtifactsOptions = {
 export type ExplainRendererOptions = {
   readonly findingId: string;
   readonly knowledge?: KnowledgeSource;
+  readonly redactionRules?: readonly RedactionRule[];
 };
 
 type ExplanationContext = {
@@ -125,38 +133,46 @@ export function createFindingsJsonRenderer(options: FindingsJsonRendererOptions)
   };
 }
 
-export function createSarifRenderer(): ReportRenderer {
+export function createSarifRenderer(options: ReportRendererRedactionOptions = {}): ReportRenderer {
   return {
     format: "sarif",
-    render: (findings, backlog) => renderSarif(findings, backlog),
+    render: (findings, backlog) => renderSarif(findings, backlog, options),
   };
 }
 
-export function createFindingsMarkdownRenderer(): ReportRenderer {
+export function createFindingsMarkdownRenderer(
+  options: ReportRendererRedactionOptions = {},
+): ReportRenderer {
   return {
     format: "findings-md",
-    render: (findings, backlog) => renderFindingsMarkdown(findings, backlog),
+    render: (findings, backlog) => renderFindingsMarkdown(findings, backlog, options),
   };
 }
 
-export function createBacklogMarkdownRenderer(): ReportRenderer {
+export function createBacklogMarkdownRenderer(
+  options: ReportRendererRedactionOptions = {},
+): ReportRenderer {
   return {
     format: "backlog",
-    render: (findings, backlog) => renderBacklogMarkdown(findings, backlog),
+    render: (findings, backlog) => renderBacklogMarkdown(findings, backlog, options),
   };
 }
 
-export function createAgentPlanMarkdownRenderer(): ReportRenderer {
+export function createAgentPlanMarkdownRenderer(
+  options: ReportRendererRedactionOptions = {},
+): ReportRenderer {
   return {
     format: "agent-plan",
-    render: (findings, backlog) => renderAgentPlanMarkdown(findings, backlog),
+    render: (findings, backlog) => renderAgentPlanMarkdown(findings, backlog, options),
   };
 }
 
-export function createValidationReportMarkdownRenderer(): ReportRenderer {
+export function createValidationReportMarkdownRenderer(
+  options: ReportRendererRedactionOptions = {},
+): ReportRenderer {
   return {
     format: "validation-report",
-    render: (findings, backlog) => renderValidationReportMarkdown(findings, backlog),
+    render: (findings, backlog) => renderValidationReportMarkdown(findings, backlog, options),
   };
 }
 
@@ -174,12 +190,14 @@ export function createExplainJsonRenderer(options: ExplainRendererOptions): Repo
   };
 }
 
-export function defaultPlanningReportArtifactSpecs(): readonly ReportArtifactSpec[] {
+export function defaultPlanningReportArtifactSpecs(
+  options: ReportRendererRedactionOptions = {},
+): readonly ReportArtifactSpec[] {
   return [
-    { renderer: createBacklogMarkdownRenderer(), relativePath: "reports/backlog.md" },
-    { renderer: createAgentPlanMarkdownRenderer(), relativePath: "reports/agent-plan.md" },
+    { renderer: createBacklogMarkdownRenderer(options), relativePath: "reports/backlog.md" },
+    { renderer: createAgentPlanMarkdownRenderer(options), relativePath: "reports/agent-plan.md" },
     {
-      renderer: createValidationReportMarkdownRenderer(),
+      renderer: createValidationReportMarkdownRenderer(options),
       relativePath: "reports/validation-report.md",
     },
   ];
@@ -240,23 +258,40 @@ function renderFindingsJson(
     return reportRenderError("findings.json envelope is invalid.", envelope.error);
   }
 
+  const redactedEnvelope = redactExportValue(envelope.data, options.redactionRules);
+
+  if (!redactedEnvelope.ok) {
+    return redactedEnvelope;
+  }
+
   return ok({
     format: "findings-json",
-    bytes: encodeJson(envelope.data),
+    bytes: encodeJson(redactedEnvelope.value),
     byteStable: true,
   });
 }
 
-function renderSarif(findings: readonly Finding[], backlog: Backlog): Result<Report, SurfaceError> {
+function renderSarif(
+  findings: readonly Finding[],
+  backlog: Backlog,
+  options: ReportRendererRedactionOptions,
+): Result<Report, SurfaceError> {
   const normalized = normalizeReportInputs(findings, backlog);
 
   if (!normalized.ok) {
     return normalized;
   }
 
-  const sarif = SurfaceSarifLogSchema.safeParse(
-    sanitizeTerminalControlValue(sarifForReport(normalized.value.orderedFindings, backlog)),
+  const sanitized = sanitizeTerminalControlValue(
+    sarifForReport(normalized.value.orderedFindings, backlog),
   );
+  const redacted = redactExportValue(sanitized, options.redactionRules);
+
+  if (!redacted.ok) {
+    return redacted;
+  }
+
+  const sarif = SurfaceSarifLogSchema.safeParse(redacted.value);
 
   if (!sarif.success) {
     return reportRenderError("SARIF report is invalid.", sarif.error);
@@ -272,6 +307,7 @@ function renderSarif(findings: readonly Finding[], backlog: Backlog): Result<Rep
 function renderFindingsMarkdown(
   findings: readonly Finding[],
   backlog: Backlog,
+  options: ReportRendererRedactionOptions,
 ): Result<Report, SurfaceError> {
   const normalized = normalizeReportInputs(findings, backlog);
 
@@ -279,11 +315,18 @@ function renderFindingsMarkdown(
     return normalized;
   }
 
+  const markdown = redactExportString(
+    markdownForFindings(normalized.value.backlog, normalized.value.orderedFindings),
+    options.redactionRules,
+  );
+
+  if (!markdown.ok) {
+    return markdown;
+  }
+
   return ok({
     format: "findings-md",
-    bytes: encodeText(
-      markdownForFindings(normalized.value.backlog, normalized.value.orderedFindings),
-    ),
+    bytes: encodeText(markdown.value),
     byteStable: true,
   });
 }
@@ -291,6 +334,7 @@ function renderFindingsMarkdown(
 function renderBacklogMarkdown(
   findings: readonly Finding[],
   backlog: Backlog,
+  options: ReportRendererRedactionOptions,
 ): Result<Report, SurfaceError> {
   const normalized = normalizeReportInputs(findings, backlog);
 
@@ -298,11 +342,18 @@ function renderBacklogMarkdown(
     return normalized;
   }
 
+  const markdown = redactExportString(
+    markdownForBacklog(normalized.value.backlog, normalized.value.backlogFindings),
+    options.redactionRules,
+  );
+
+  if (!markdown.ok) {
+    return markdown;
+  }
+
   return ok({
     format: "backlog",
-    bytes: encodeText(
-      markdownForBacklog(normalized.value.backlog, normalized.value.backlogFindings),
-    ),
+    bytes: encodeText(markdown.value),
     byteStable: true,
   });
 }
@@ -310,6 +361,7 @@ function renderBacklogMarkdown(
 function renderAgentPlanMarkdown(
   findings: readonly Finding[],
   backlog: Backlog,
+  options: ReportRendererRedactionOptions,
 ): Result<Report, SurfaceError> {
   const normalized = normalizeReportInputs(findings, backlog);
 
@@ -317,11 +369,18 @@ function renderAgentPlanMarkdown(
     return normalized;
   }
 
+  const markdown = redactExportString(
+    markdownForAgentPlan(normalized.value.backlog, normalized.value.backlogFindings),
+    options.redactionRules,
+  );
+
+  if (!markdown.ok) {
+    return markdown;
+  }
+
   return ok({
     format: "agent-plan",
-    bytes: encodeText(
-      markdownForAgentPlan(normalized.value.backlog, normalized.value.backlogFindings),
-    ),
+    bytes: encodeText(markdown.value),
     byteStable: true,
   });
 }
@@ -329,6 +388,7 @@ function renderAgentPlanMarkdown(
 function renderValidationReportMarkdown(
   findings: readonly Finding[],
   backlog: Backlog,
+  options: ReportRendererRedactionOptions,
 ): Result<Report, SurfaceError> {
   const normalized = normalizeReportInputs(findings, backlog);
 
@@ -336,11 +396,18 @@ function renderValidationReportMarkdown(
     return normalized;
   }
 
+  const markdown = redactExportString(
+    markdownForValidationReport(normalized.value.backlog, normalized.value.backlogFindings),
+    options.redactionRules,
+  );
+
+  if (!markdown.ok) {
+    return markdown;
+  }
+
   return ok({
     format: "validation-report",
-    bytes: encodeText(
-      markdownForValidationReport(normalized.value.backlog, normalized.value.backlogFindings),
-    ),
+    bytes: encodeText(markdown.value),
     byteStable: true,
   });
 }
@@ -355,9 +422,18 @@ async function renderExplainMarkdown(
     return context;
   }
 
+  const markdown = redactExportString(
+    markdownForExplanation(context.value),
+    options.redactionRules,
+  );
+
+  if (!markdown.ok) {
+    return markdown;
+  }
+
   return ok({
     format: "explain-md",
-    bytes: encodeText(markdownForExplanation(context.value)),
+    bytes: encodeText(markdown.value),
     byteStable: true,
   });
 }
@@ -374,17 +450,24 @@ async function renderExplainJson(
 
   const { finding, citedHeuristics } = context.value;
 
+  const redacted = redactExportValue(
+    sanitizeTerminalControlValue({
+      schemaVersion: "1.0",
+      finding,
+      rationale: finding.rationale,
+      resolvedCitedHeuristics: citedHeuristics,
+      evidence: finding.evidence,
+    }),
+    options.redactionRules,
+  );
+
+  if (!redacted.ok) {
+    return redacted;
+  }
+
   return ok({
     format: "explain-json",
-    bytes: encodeStableJson(
-      sanitizeTerminalControlValue({
-        schemaVersion: "1.0",
-        finding,
-        rationale: finding.rationale,
-        resolvedCitedHeuristics: citedHeuristics,
-        evidence: finding.evidence,
-      }),
-    ),
+    bytes: encodeStableJson(redacted.value),
     byteStable: true,
   });
 }
