@@ -1,6 +1,7 @@
 import path from "node:path";
 
 import {
+  createAgentBrowserCaptureBackend,
   createCaptureService,
   createPlaywrightCaptureBackend,
   createStaticCaptureBackend,
@@ -90,7 +91,10 @@ export function createSurfaceComposition(
 ): SurfaceComposition {
   const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
   const staticFallback = options.staticFallback ?? createStaticCaptureBackend();
-  const browserBackends = options.captureBackends ?? [createPlaywrightCaptureBackend()];
+  const browserBackends = options.captureBackends ?? [
+    createAgentBrowserCaptureBackend(),
+    createPlaywrightCaptureBackend(),
+  ];
   const captureBackends = [...browserBackends, staticFallback];
   const stateStore =
     options.stateStore ??

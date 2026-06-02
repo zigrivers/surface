@@ -20,6 +20,7 @@
   "dependencies": {
     "@noble/hashes": "catalog:",
     "@octokit/rest": "catalog:",
+    "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
     "pino": "catalog:",
     "proper-lockfile": "catalog:",
