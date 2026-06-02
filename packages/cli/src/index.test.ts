@@ -21,7 +21,13 @@ type TestProjectStateSnapshot = {
   readonly baselines?: readonly {
     readonly baselineId: string;
     readonly identityKeys: readonly string[];
-    readonly reason?: string;
+    readonly reason?: string | undefined;
+    readonly waivers: readonly {
+      readonly findingIdentityKey: string;
+      readonly reason: string;
+      readonly owner: string;
+      readonly expiry?: string | undefined;
+    }[];
   }[];
   readonly currentStage?: string;
   readonly backlog?: {

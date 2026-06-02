@@ -93,7 +93,14 @@ type GateResult = {
 type BaselineRecord = {
   readonly baselineId: string;
   readonly identityKeys: readonly string[];
-  readonly reason?: string;
+  readonly reason?: string | undefined;
+  readonly waivers: readonly WaiverRecord[];
+};
+type WaiverRecord = {
+  readonly findingIdentityKey: string;
+  readonly reason: string;
+  readonly owner: string;
+  readonly expiry?: string | undefined;
 };
 type VerdictRecord = {
   readonly decision: "accept" | "reject" | "correct" | "defer";
@@ -1107,6 +1114,7 @@ async function createBaseline(
   const baseline: BaselineRecord = {
     baselineId: `baseline_${Date.now().toString(36)}`,
     identityKeys,
+    waivers: [],
     ...(options.reason === undefined ? {} : { reason: options.reason }),
   };
   const writtenState = await composition.stateStore.writeState({

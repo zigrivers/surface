@@ -13,7 +13,7 @@ import type {
   ProjectStateSnapshot,
   StateStore,
 } from "./interfaces.js";
-import { TrackedFindingSchema } from "./tracked-findings.js";
+import { BaselineSchema, TrackedFindingSchema } from "./tracked-findings.js";
 
 /** Default project-local directory used for Surface state and artifacts. */
 export const SURFACE_STATE_DIR = ".surface";
@@ -38,6 +38,7 @@ const ProjectStatePipelineSchema = z
 const ProjectStateSnapshotSchema = z
   .object({
     version: z.string().min(1),
+    baselines: z.array(BaselineSchema).optional(),
     currentStage: z.string().min(1).optional(),
     pipeline: ProjectStatePipelineSchema.optional(),
     trackedFindings: z.array(TrackedFindingSchema).optional(),
@@ -48,6 +49,7 @@ const LegacyProjectStateSnapshotSchema = z
   .object({
     schemaVersion: z.string().min(1).optional(),
     version: z.string().min(1).optional(),
+    baselines: z.array(z.unknown()).optional(),
     currentStage: z.string().min(1).optional(),
     pipeline: ProjectStatePipelineSchema.optional(),
     trackedFindings: z.array(z.unknown()).optional(),
@@ -525,8 +527,17 @@ function migrateProjectState(
   // trackedFindings currently migrate with the project state version. Add explicit per-item
   // migration here before changing required tracked finding fields or history invariants.
   const legacy = LegacyProjectStateSnapshotSchema.parse(value);
-  const { currentStage, pipeline, schemaVersion, trackedFindings, version, ...passthrough } =
-    legacy;
+  const {
+    baselines,
+    currentStage,
+    pipeline,
+    schemaVersion,
+    trackedFindings,
+    version,
+    ...passthrough
+  } = legacy;
+  const migratedBaselines =
+    baselines === undefined ? undefined : z.array(BaselineSchema).parse(baselines);
   const migratedTrackedFindings =
     trackedFindings === undefined
       ? undefined
@@ -538,6 +549,7 @@ function migrateProjectState(
   const migrated: ProjectStateSnapshot = {
     ...passthrough,
     version: migratedVersion,
+    ...(migratedBaselines !== undefined ? { baselines: migratedBaselines } : {}),
     ...(currentStage !== undefined ? { currentStage } : {}),
     ...(pipeline !== undefined ? { pipeline } : {}),
     ...(migratedTrackedFindings !== undefined ? { trackedFindings: migratedTrackedFindings } : {}),

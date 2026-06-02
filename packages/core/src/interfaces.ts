@@ -9,7 +9,7 @@ import type {
   ToolResultEvidence,
 } from "./findings.js";
 import type { ModelProvider } from "./model-provider.js";
-import type { TrackedFinding } from "./tracked-findings.js";
+import type { Baseline, TrackedFinding } from "./tracked-findings.js";
 export type { Backlog, BacklogEntry } from "./findings.js";
 export type { ModelProvider } from "./model-provider.js";
 
@@ -288,6 +288,7 @@ export interface PersistedArtifactRef {
 
 export interface ProjectStateSnapshot {
   readonly version: string;
+  readonly baselines?: readonly Baseline[];
   readonly currentStage?: string;
   readonly discovery?: {
     readonly [key: string]: unknown;

@@ -173,6 +173,57 @@ describe("FileStateStore", () => {
     });
   });
 
+  it("round-trips baseline records and defaults legacy records to no waivers", async () => {
+    const root = await makeTempRoot();
+    const stateDir = path.join(root, ".surface");
+    const stateFile = path.join(stateDir, "state.json");
+    const store = createFileStateStore({ projectRoot: root });
+
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(
+      stateFile,
+      `${JSON.stringify({
+        schemaVersion: "0.1",
+        baselines: [
+          {
+            baselineId: "baseline_001",
+            identityKeys: ["identity_a"],
+            reason: "accepted current debt",
+          },
+        ],
+      })}\n`,
+    );
+
+    const migrated = await store.readState();
+    const persisted = JSON.parse(await readFile(stateFile, "utf8")) as Record<string, unknown>;
+
+    expect(isOk(migrated)).toBe(true);
+    expect(migrated).toMatchObject({
+      value: {
+        baselines: [
+          {
+            baselineId: "baseline_001",
+            identityKeys: ["identity_a"],
+            reason: "accepted current debt",
+            waivers: [],
+          },
+        ],
+        version: SURFACE_STATE_VERSION,
+      },
+    });
+    expect(persisted).toMatchObject({
+      baselines: [
+        {
+          baselineId: "baseline_001",
+          identityKeys: ["identity_a"],
+          reason: "accepted current debt",
+          waivers: [],
+        },
+      ],
+      version: SURFACE_STATE_VERSION,
+    });
+  });
+
   it("reports corrupt state without throwing", async () => {
     const root = await makeTempRoot();
     await mkdir(path.join(root, ".surface"), { recursive: true });
