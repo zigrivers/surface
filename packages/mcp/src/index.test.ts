@@ -434,6 +434,41 @@ describe("@surface/mcp bootstrap", () => {
       await rm(root, { force: true, recursive: true });
     }
   });
+
+  it("runs advertised alternatives and pipeline MCP tools through concrete handlers", async () => {
+    const capture = captureFixture();
+    const server = createSurfaceMcpServer({
+      composition: compositionFixture({ capture }),
+    });
+
+    const alternatives = await server.callTool("surface_alternatives", { target: capture.target });
+
+    expect(alternatives).toMatchObject({
+      ok: true,
+      value: { alternatives: { target: capture.target } },
+    });
+    if (!alternatives.ok) {
+      throw new Error(alternatives.error.message);
+    }
+    expect(alternatives.value.alternatives.proposals).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: "alt_preserve_structure" })]),
+    );
+    await expect(server.callTool("surface_next", {})).resolves.toMatchObject({
+      ok: true,
+      value: { eligible: ["run discovery", "run all"] },
+    });
+    await expect(server.callTool("surface_run", { step: "all" })).resolves.toMatchObject({
+      ok: true,
+      value: {
+        stage: "all",
+        status: "completed",
+      },
+    });
+    await expect(server.callTool("surface_run", { step: "missing" })).resolves.toMatchObject({
+      ok: false,
+      error: { code: "unknown_step", kind: "UsageError" },
+    });
+  });
 });
 
 function captureFixture(): Capture {

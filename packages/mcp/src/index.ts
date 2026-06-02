@@ -1,7 +1,9 @@
 import { pathToFileURL } from "node:url";
 
 import {
+  DEFAULT_COMPOSITION_STAGE_IDS,
   DEFAULT_SURFACE_CONFIG,
+  createBoundedAlternatives,
   createTrackedFinding,
   createSurfaceComposition,
   createSurfaceError,
@@ -15,6 +17,7 @@ import {
   synthesizeBacklog,
   toMcpError,
   transitionTrackedFinding,
+  type AlternativesReportData,
   type Evidence,
   type Finding,
   type TrackedFinding,
@@ -173,6 +176,20 @@ export type SurfaceMcpTraceOutput = {
   readonly trackedFinding: TrackedFinding;
 };
 
+export type SurfaceMcpAlternativesOutput = {
+  readonly alternatives: AlternativesReportData;
+};
+
+export type SurfaceMcpRunOutput = {
+  readonly runId: string;
+  readonly stage: string;
+  readonly status: "completed";
+};
+
+export type SurfaceMcpNextOutput = {
+  readonly eligible: readonly string[];
+};
+
 export type SurfaceMcpToolOutputMap = {
   readonly surface_capture: Capture;
   readonly surface_audit: SurfaceMcpAuditOutput;
@@ -184,10 +201,10 @@ export type SurfaceMcpToolOutputMap = {
   readonly surface_baseline: SurfaceMcpBaselineOutput;
   readonly surface_verdict: SurfaceMcpVerdictOutput;
   readonly surface_diff: SurfaceMcpDiffOutput;
-  readonly surface_alternatives: never;
+  readonly surface_alternatives: SurfaceMcpAlternativesOutput;
   readonly surface_trace: SurfaceMcpTraceOutput;
-  readonly surface_run: never;
-  readonly surface_next: never;
+  readonly surface_run: SurfaceMcpRunOutput;
+  readonly surface_next: SurfaceMcpNextOutput;
 };
 
 export type SurfaceMcpToolOutput = SurfaceMcpToolOutputMap[SurfaceMcpToolName];
@@ -210,6 +227,7 @@ const TargetSchema = z
 const AuthStateRefSchema = z.string().min(1);
 const RunRefSchema = z.object({ runId: z.string().min(1) }).strict();
 const GatePolicyInputSchema = z.record(z.string(), z.unknown());
+type ExecutablePipelineStageId = (typeof DEFAULT_COMPOSITION_STAGE_IDS)[number];
 
 const TOOL_INPUT_SCHEMAS = {
   surface_capture: z
@@ -694,18 +712,16 @@ async function callSurfaceMcpTool(
       return await callSurfaceVerdict(input.composition, input.session, input.input);
     case "surface_diff":
       return callSurfaceDiff(input.session, input.input);
+    case "surface_alternatives":
+      return await callSurfaceAlternatives(input.composition, input.input);
     case "surface_trace":
       return callSurfaceTrace(input.session, input.input);
+    case "surface_run":
+      return await callSurfaceRun(input.composition, input.input);
+    case "surface_next":
+      return await callSurfaceNext(input.composition);
     case "surface_status":
       return callSurfaceStatus(input.session);
-    case "surface_alternatives":
-    case "surface_run":
-    case "surface_next":
-      return err(
-        createSurfaceError("unknown_step", "MCP tool handler is not implemented yet.", {
-          details: { tool: input.name },
-        }),
-      );
   }
 }
 
@@ -1082,6 +1098,31 @@ function callSurfaceDiff(
   return ok(diffTrackedFindings(before.trackedFindings, after.trackedFindings));
 }
 
+async function callSurfaceAlternatives(
+  composition: SurfaceComposition,
+  rawInput: unknown,
+): Promise<Result<SurfaceMcpAlternativesOutput>> {
+  const parsed = parseToolInput("surface_alternatives", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  const target = targetForCore(parsed.value.target);
+  const capture = await composition.captureService.capture(
+    target,
+    captureOptionsFor(DEFAULT_SURFACE_CONFIG, parsed.value.authState),
+  );
+
+  if (!capture.ok) {
+    return capture;
+  }
+
+  return ok({
+    alternatives: createBoundedAlternatives(target),
+  });
+}
+
 function callSurfaceTrace(
   session: SurfaceMcpSessionState,
   rawInput: unknown,
@@ -1103,6 +1144,64 @@ function callSurfaceTrace(
   }
 
   return ok({ trackedFinding });
+}
+
+async function callSurfaceRun(
+  composition: SurfaceComposition,
+  rawInput: unknown,
+): Promise<Result<SurfaceMcpRunOutput>> {
+  const parsed = parseToolInput("surface_run", rawInput);
+
+  if (!parsed.ok) {
+    return parsed;
+  }
+
+  if (parsed.value.step !== "all" && !isExecutableStageId(parsed.value.step)) {
+    return err(
+      createSurfaceError("unknown_step", `Unknown MCP pipeline step "${parsed.value.step}".`, {
+        details: { step: parsed.value.step },
+      }),
+    );
+  }
+
+  const runId = nextMcpPipelineRunId();
+  const run = await composition.pipelineOrchestrator.run({
+    config: DEFAULT_SURFACE_CONFIG,
+    runId,
+  });
+
+  if (!run.ok) {
+    return err(
+      createSurfaceError("step_failed", `MCP pipeline run ${runId} failed.`, {
+        cause: run.error,
+        details: { runId, stage: parsed.value.step },
+      }),
+    );
+  }
+
+  return ok({
+    runId: run.value.runId,
+    stage: parsed.value.step,
+    status: "completed",
+  });
+}
+
+async function callSurfaceNext(
+  composition: SurfaceComposition,
+): Promise<Result<SurfaceMcpNextOutput>> {
+  const state = await composition.stateStore.readState();
+
+  if (!state.ok) {
+    return state;
+  }
+
+  const lastCompletedStage = state.value.pipeline?.lastCompletedStage;
+  const eligible =
+    lastCompletedStage === undefined
+      ? ["run discovery", "run all"]
+      : eligibleStagesAfter(lastCompletedStage).map((stage) => `run ${stage}`);
+
+  return ok({ eligible });
 }
 
 function callSurfaceStatus(session: SurfaceMcpSessionState): Result<SurfaceMcpStatusOutput> {
@@ -1261,6 +1360,24 @@ function nextBaselineId(session: SurfaceMcpSessionState): string {
   session.nextBaselineSequence += 1;
 
   return baselineId;
+}
+
+function nextMcpPipelineRunId(): string {
+  return `run_mcp_pipeline_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function isExecutableStageId(step: string): step is ExecutablePipelineStageId {
+  return DEFAULT_COMPOSITION_STAGE_IDS.includes(step as ExecutablePipelineStageId);
+}
+
+function eligibleStagesAfter(lastCompletedStage: string): readonly ExecutablePipelineStageId[] {
+  const index = DEFAULT_COMPOSITION_STAGE_IDS.findIndex((stage) => stage === lastCompletedStage);
+
+  if (index === -1) {
+    return DEFAULT_COMPOSITION_STAGE_IDS;
+  }
+
+  return DEFAULT_COMPOSITION_STAGE_IDS.slice(index + 1);
 }
 
 function runRecordFor(
