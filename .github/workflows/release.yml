@@ -50,23 +50,24 @@ jobs:
         env:
           NPM_CONFIG_PROVENANCE: "true"
         run: |
-          mkdir -p .release-packs
-          pnpm --dir packages/core pack --pack-destination .release-packs
-          pnpm --dir packages/grounding pack --pack-destination .release-packs
-          pnpm --dir packages/mcp pack --pack-destination .release-packs
-          pnpm --dir packages/adapters/agnostic pack --pack-destination .release-packs
-          pnpm --dir packages/adapters/react pack --pack-destination .release-packs
-          pnpm --dir packages/adapters/svelte pack --pack-destination .release-packs
-          pnpm --dir packages/adapters/vue pack --pack-destination .release-packs
-          pnpm --dir packages/cli pack --pack-destination .release-packs
-          npm publish .release-packs/zigrivers-surface-core-0.1.0.tgz --access public --provenance
-          npm publish .release-packs/zigrivers-surface-grounding-0.1.0.tgz --access public --provenance
-          npm publish .release-packs/zigrivers-surface-mcp-0.1.0.tgz --access public --provenance
-          npm publish .release-packs/zigrivers-surface-adapter-agnostic-0.1.0.tgz --access public --provenance
-          npm publish .release-packs/zigrivers-surface-adapter-react-0.1.0.tgz --access public --provenance
-          npm publish .release-packs/zigrivers-surface-adapter-svelte-0.1.0.tgz --access public --provenance
-          npm publish .release-packs/zigrivers-surface-adapter-vue-0.1.0.tgz --access public --provenance
-          npm publish .release-packs/zigrivers-surface-0.1.0.tgz --access public --provenance
+          PACK_DIR="$PWD/.release-packs"
+          mkdir -p "$PACK_DIR"
+          pnpm --dir packages/core pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/grounding pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/mcp pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/adapters/agnostic pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/adapters/react pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/adapters/svelte pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/adapters/vue pack --pack-destination "$PACK_DIR"
+          pnpm --dir packages/cli pack --pack-destination "$PACK_DIR"
+          npm publish "$PACK_DIR"/zigrivers-surface-core-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-grounding-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-mcp-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-agnostic-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-react-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-svelte-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-vue-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-0.1.0.tgz --access public --provenance
       - name: Create GitHub release
         if: inputs.publish == 'true'
         env:
