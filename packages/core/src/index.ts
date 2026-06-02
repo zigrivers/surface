@@ -21,6 +21,7 @@ export * from "./lens-registry.js";
 export * from "./logging.js";
 export * from "./model-provider.js";
 export * from "./pipeline-orchestrator.js";
+export * from "./reconciliation.js";
 export * from "./report-renderers.js";
 export * from "./responsiveness-states-lens.js";
 export * from "./state-store.js";

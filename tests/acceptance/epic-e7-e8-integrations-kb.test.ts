@@ -11,9 +11,11 @@ import {
   createGitHubIssueExporter,
   createJiraIssueExporter,
   createLinearIssueExporter,
+  createReconciliationService,
   loadKnowledgeEntries,
   isOk,
   type Backlog,
+  type Finding,
 } from "../../packages/core/src/index.js";
 
 const backlog = {
@@ -302,10 +304,127 @@ describe("E8 Knowledge Base, Presets & Multi-model", () => {
     });
   });
   describe("US-071 multi-model reconciliation [should]", () => {
-    it.skip("[US-071][AC1] depth 4–5 + installed CLIs → findings reconciled by confidence; divergence surfaced as a question (integration)", () => {});
-    it.skip("[US-071][AC2] a CLI unavailable → degrade to single-model; record which channels participated (integration)", () => {});
+    it("[US-071][AC1] depth 4–5 + installed CLIs → findings reconciled by confidence; divergence surfaced as a question (integration)", () => {
+      const service = createReconciliationService();
+      const highConfidence = reconciliationFinding({
+        id: "f_codex_empty_state",
+        dimensions: { confidence: 0.94 },
+        severityBand: "P2",
+      });
+      const lowerConfidence = reconciliationFinding({
+        id: "f_grok_empty_state",
+        dimensions: { confidence: 0.78 },
+        severityBand: "P2",
+      });
+      const divergent = reconciliationFinding({
+        id: "f_gemini_empty_state",
+        dimensions: { confidence: 0.9, severity: 0.22 },
+        severityBand: "P3",
+      });
+
+      const reconciled = service.reconcile({
+        channels: [
+          { id: "codex", status: "available", findings: [highConfidence] },
+          { id: "grok", status: "available", findings: [lowerConfidence] },
+        ],
+      });
+      const divergentResult = service.reconcile({
+        channels: [
+          { id: "codex", status: "available", findings: [highConfidence] },
+          { id: "gemini", status: "available", findings: [divergent] },
+        ],
+      });
+
+      expect(isOk(reconciled)).toBe(true);
+      expect(isOk(divergentResult)).toBe(true);
+
+      if (!isOk(reconciled) || !isOk(divergentResult)) {
+        return;
+      }
+
+      expect(reconciled.value.findings[0]).toMatchObject({
+        canonicalFindingId: "f_codex_empty_state",
+        confidence: 0.94,
+        supportingChannels: ["codex", "grok"],
+      });
+      expect(divergentResult.value.findings).toEqual([]);
+      expect(divergentResult.value.questions[0]).toMatchObject({
+        kind: "severity-divergence",
+        channelIds: ["codex", "gemini"],
+      });
+    });
+
+    it("[US-071][AC2] a CLI unavailable → degrade to single-model; record which channels participated (integration)", () => {
+      const service = createReconciliationService();
+
+      const result = service.reconcile({
+        channels: [
+          { id: "codex", status: "available", findings: [reconciliationFinding()] },
+          {
+            id: "gemini",
+            status: "unavailable",
+            reason: "model_unavailable",
+            message: "gemini CLI unavailable",
+          },
+        ],
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!isOk(result)) {
+        return;
+      }
+
+      expect(result.value).toMatchObject({
+        participatedChannels: ["codex"],
+        unavailableChannels: [
+          { id: "gemini", reason: "model_unavailable", message: "gemini CLI unavailable" },
+        ],
+      });
+      expect(result.value.findings).toHaveLength(1);
+      expect(result.value.questions).toEqual([]);
+    });
   });
 });
+
+type ReconciliationFindingOverrides = Omit<Partial<Finding>, "dimensions" | "location"> & {
+  readonly dimensions?: Partial<Finding["dimensions"]>;
+  readonly location?: Partial<Finding["location"]>;
+};
+
+function reconciliationFinding(overrides: ReconciliationFindingOverrides = {}): Finding {
+  const { dimensions, location, ...findingOverrides } = overrides;
+  return {
+    id: "f_empty_state",
+    lens: "heuristics",
+    issueType: "empty-state-recovery-missing",
+    method: "judged",
+    title: "Empty state lacks a recovery action",
+    rationale: "The empty state explains the problem but does not offer a next step.",
+    citedHeuristics: ["kb_empty_state"],
+    evidence: [{ kind: "cited-heuristic", knowledgeEntryId: "kb_empty_state" }],
+    dimensions: {
+      severity: 0.64,
+      confidence: 0.88,
+      effort: 0.35,
+      userImpact: 0.7,
+      businessImpact: 0.6,
+      a11yLegalRisk: 0.1,
+      evidenceQuality: 0.78,
+      agentImplementability: 0.8,
+      ...dimensions,
+    },
+    severityBand: "P2",
+    location: {
+      component: "EmptyState",
+      selector: ".empty-state",
+      ...location,
+    },
+    confidenceBand: "assert",
+    gatedForHuman: true,
+    ...findingOverrides,
+  } as Finding;
+}
 
 async function writeKnowledgeFixture(): Promise<string> {
   const rootDir = await mkdtemp(path.join(tmpdir(), "surface-us-070-"));
