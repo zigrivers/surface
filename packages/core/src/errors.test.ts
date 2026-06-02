@@ -29,6 +29,7 @@ const API_CONTRACT_ERROR_CODES = [
   "finding_draft_invalid",
   "finding_score_failed",
   "backlog_synthesis_failed",
+  "reconciliation_failed",
   "finding_not_found",
   "evidence_missing",
   "invalid_verdict_transition",
