@@ -14,6 +14,8 @@ import {
   createCaptureService,
   createDefaultCaptureIdFactory,
   createContextIngestor,
+  runTaskFlowCapture,
+  tagFindingsWithCaptureContext,
   createPlaywrightCaptureBackend,
   createStaticCaptureBackend,
   err,
@@ -24,6 +26,7 @@ import {
   type CaptureBackend,
   type CaptureArtifact,
   type CaptureOptions,
+  type Finding,
   type Target,
 } from "../../packages/core/src/index.js";
 
@@ -2468,8 +2471,96 @@ describe("E1 Capture & Inputs", () => {
     });
   });
   describe("US-004 multi-state & dual-theme capture [should]", () => {
-    it.skip("[US-004][AC1] task-flow recipe → each reachable state captured; unreachable step reported (integration)", () => {});
-    it.skip("[US-004][AC2] prefers-color-scheme toggle → light+dark captured; findings tagged with theme (integration)", () => {});
+    it("[US-004][AC1] task-flow recipe → each reachable state captured; unreachable step reported (integration)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const observedTargets: Target[] = [];
+      const service = {
+        capture: async (observedTarget: Target) => {
+          observedTargets.push(observedTarget);
+
+          if (observedTarget.ref.endsWith("/payment")) {
+            return err(createSurfaceError("capture_unreachable", "Payment step is unreachable."));
+          }
+
+          return ok(await captureFor("playwright", observedTarget, artifactRoot));
+        },
+      };
+
+      const result = await runTaskFlowCapture({
+        captureOptions: { config: allowedCaptureConfig },
+        recipe: {
+          id: "checkout-flow",
+          steps: [
+            { id: "cart", target },
+            { id: "payment", target: { kind: "url", ref: "https://example.com/payment" } },
+          ],
+        },
+        service,
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!isOk(result)) {
+        return;
+      }
+
+      expect(observedTargets.map((entry) => entry.ref)).toEqual([
+        "https://example.com",
+        "https://example.com/payment",
+      ]);
+      expect(result.value.captures).toEqual([
+        expect.objectContaining({
+          stateId: "cart",
+          capture: expect.objectContaining({ status: "completed" }),
+        }),
+      ]);
+      expect(result.value.unreachable).toEqual([
+        expect.objectContaining({
+          stateId: "payment",
+          reason: "Payment step is unreachable.",
+        }),
+      ]);
+    });
+
+    it("[US-004][AC2] prefers-color-scheme toggle → light+dark captured; findings tagged with theme (integration)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const observedTargets: Target[] = [];
+      const service = {
+        capture: async (observedTarget: Target) => {
+          observedTargets.push(observedTarget);
+
+          return ok(await captureFor("playwright", observedTarget, artifactRoot));
+        },
+      };
+
+      const result = await runTaskFlowCapture({
+        captureOptions: { config: allowedCaptureConfig },
+        recipe: {
+          id: "home-dual-theme",
+          steps: [{ id: "home", target }],
+          themes: ["light", "dark"],
+        },
+        service,
+      });
+
+      expect(isOk(result)).toBe(true);
+
+      if (!isOk(result)) {
+        return;
+      }
+
+      expect(observedTargets.map((entry) => entry.theme)).toEqual(["light", "dark"]);
+      expect(result.value.captures.map((entry) => entry.theme)).toEqual(["light", "dark"]);
+
+      const tagged = tagFindingsWithCaptureContext([themeFinding()], {
+        stateId: "home",
+        theme: "dark",
+      });
+      expect(tagged[0]).toMatchObject({
+        captureContext: { stateId: "home", theme: "dark" },
+        tags: ["state:home", "theme:dark"],
+      });
+    });
   });
   describe("US-005 sensitive-data redaction [committed]", () => {
     it("[US-005][AC1] capture-write redaction replaces matched content and marks changed artifacts (unit)", async () => {
@@ -2525,3 +2616,38 @@ describe("E1 Capture & Inputs", () => {
     });
   });
 });
+
+function themeFinding(): Finding {
+  return {
+    id: "f_dark_contrast",
+    lens: "accessibility",
+    issueType: "contrast-insufficient",
+    method: "measured",
+    title: "Dark theme button contrast is below AA",
+    rationale: "Primary button contrast is insufficient in the dark theme.",
+    citedHeuristics: ["kb_wcag_143"],
+    evidence: [
+      {
+        kind: "tool-result",
+        tool: "axe",
+        rule: "color-contrast",
+        measuredValue: "3.1:1",
+        threshold: "4.5:1",
+      },
+    ],
+    dimensions: {
+      severity: 0.8,
+      confidence: 1,
+      effort: 0.2,
+      userImpact: 0.7,
+      businessImpact: 0.5,
+      a11yLegalRisk: 0.9,
+      evidenceQuality: 1,
+      agentImplementability: 0.9,
+    },
+    severityBand: "P1",
+    location: { selector: ".btn-primary" },
+    confidenceBand: "assert",
+    gatedForHuman: false,
+  };
+}
