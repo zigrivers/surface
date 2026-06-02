@@ -23,6 +23,8 @@ const API_CONTRACT_ERROR_CODES = [
   "capture_unreachable",
   "auth_injection_failed",
   "capture_failed",
+  "grounding_failed",
+  "adapter_failed",
   "model_unavailable",
   "invalid_model_request",
   "model_request_failed",
@@ -148,6 +150,38 @@ describe("SurfaceError and Result", () => {
       kind: "McpError",
       message: error.message,
       details: { expectedVersion: "1.x" },
+    });
+  });
+
+  it("maps grounding and adapter failures through CLI and MCP envelopes", () => {
+    const grounding = createSurfaceError(
+      "grounding_failed",
+      "Grounding tool failed. Re-run with measured-only evidence or inspect tool output.",
+      { details: { tool: "axe" } },
+    );
+    const adapter = createSurfaceError(
+      "adapter_failed",
+      "Framework adapter failed. Check component source and adapter configuration.",
+      { details: { adapter: "react" } },
+    );
+
+    expect(toCliErrorEnvelope("audit", grounding)).toMatchObject({
+      error: { code: "grounding_failed", exitCode: 1, kind: "GroundingError" },
+    });
+    expect(toMcpError(grounding)).toEqual({
+      code: "grounding_failed",
+      kind: "GroundingError",
+      message: grounding.message,
+      details: { tool: "axe" },
+    });
+    expect(toCliErrorEnvelope("audit", adapter)).toMatchObject({
+      error: { code: "adapter_failed", exitCode: 1, kind: "AdapterError" },
+    });
+    expect(toMcpError(adapter)).toEqual({
+      code: "adapter_failed",
+      kind: "AdapterError",
+      message: adapter.message,
+      details: { adapter: "react" },
     });
   });
 

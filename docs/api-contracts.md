@@ -230,6 +230,8 @@ Every command/tool has ≥2 domain-specific codes (see §2/§3). Catalog:
 | `unknown_step` / `unknown_lens` / `unknown_export_target` / `no_target` / `no_decision_flag` | `UsageError` | 2 | bad args (≥2 domain-specific usage codes) |
 | `config_invalid` / `policy_invalid` | `ConfigError` | 1 | malformed `.surface/config.yml` / gate policy |
 | `capture_unreachable` / `auth_injection_failed` / `capture_failed` | `CaptureError` | 1 | target down / auth-state invalid (US-002) / backend error |
+| `grounding_failed` | `GroundingError` | 1 | measured grounding tool failed before evidence could be produced |
+| `adapter_failed` | `AdapterError` | 1 | framework or context adapter failed while normalizing source inputs |
 | `model_unavailable` | `ModelError` | **0** (degradation) on `audit`; **1** only on judged-required commands (`alternatives`) | no model configured — degrades to measured-only (US-012); a hard error **only** where judged output is the whole point |
 | `finding_not_found` / `evidence_missing` / `invalid_verdict_transition` | `StateError` | 1 | id lookup / missing evidence / illegal verdict |
 | `run_not_found` / `runs_incomparable` / `validation_run_failed` | `RuntimeError` | 1 | `diff`/`validate`/`trace` over unknown or incomparable runs |

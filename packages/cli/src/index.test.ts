@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { createSurfaceComposition, ok } from "@surface/core";
@@ -62,8 +66,24 @@ type TestCapture = {
 type TestFinding = {
   readonly id: string;
   readonly citedHeuristics: readonly string[];
+  readonly confidenceBand: "assert" | "surface-as-question" | "suppress-unless-deep";
+  readonly dimensions: {
+    readonly a11yLegalRisk: number;
+    readonly agentImplementability: number;
+    readonly businessImpact: number;
+    readonly confidence: number;
+    readonly effort: number;
+    readonly evidenceQuality: number;
+    readonly severity: number;
+    readonly userImpact: number;
+  };
   readonly evidence: readonly unknown[];
   readonly gatedForHuman: boolean;
+  readonly issueType: string;
+  readonly lens: string;
+  readonly location: {
+    readonly selector: string;
+  };
   readonly method: "measured" | "judged";
   readonly rationale: string;
   readonly severityBand: "P0" | "P1" | "P2" | "P3";
@@ -303,7 +323,7 @@ describe("@surface/cli findings and loop verbs", () => {
       composition: createSurfaceComposition({
         stateStore: new MemoryStateStore({
           backlog: {
-            entries: [{ findingId: "finding_button_contrast", rank: 1 }],
+            entries: [{ findingId: "finding_button_contrast", priority: 1, rank: 1 }],
             id: "backlog_run_eval",
             runId: "run_eval",
           },
@@ -382,12 +402,14 @@ describe("@surface/cli findings and loop verbs", () => {
           entries: [
             {
               findingId: "finding_button_contrast",
+              priority: 2,
               rank: 1,
               severityBand: "P1",
               title: "Fix button contrast",
             },
             {
               findingId: "finding_focus_state",
+              priority: 1,
               rank: 2,
               severityBand: "P2",
               title: "Restore focus state",
@@ -435,6 +457,7 @@ describe("@surface/cli findings and loop verbs", () => {
       argv: ["node", "surface", "--json", "validate", "--run", "run_eval"],
       composition: createSurfaceComposition({
         stateStore: new MemoryStateStore({
+          runRecords: [{ runId: "run_eval", trackedFindings: [testTrackedFinding()] }],
           trackedFindings: [testTrackedFinding()],
           version: "1.0",
         }),
@@ -455,6 +478,75 @@ describe("@surface/cli findings and loop verbs", () => {
         ],
       },
       ok: true,
+    });
+  });
+
+  it("uses validate --run to select tracked findings from the requested run", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "validate", "--run", "run_selected"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          runRecords: [
+            {
+              runId: "run_other",
+              trackedFindings: [
+                testTrackedFinding({
+                  currentFindingId: "finding_other",
+                  identityKey: "identity_other",
+                }),
+              ],
+            },
+            {
+              runId: "run_selected",
+              trackedFindings: [testTrackedFinding()],
+            },
+          ],
+          trackedFindings: [
+            testTrackedFinding({
+              currentFindingId: "finding_top_level",
+              identityKey: "identity_top_level",
+            }),
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "validate",
+      data: {
+        checks: [
+          {
+            findingId: "finding_button_contrast",
+            id: "identity_button_contrast",
+          },
+        ],
+      },
+      ok: true,
+    });
+  });
+
+  it("returns run_not_found when validate --run references a missing run", async () => {
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "validate", "--run", "missing"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          runRecords: [{ runId: "run_eval", trackedFindings: [testTrackedFinding()] }],
+          version: "1.0",
+        }),
+      }),
+      io: { stderr: (chunk) => stderr.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.join(""))).toMatchObject({
+      command: "validate",
+      error: { code: "run_not_found", kind: "RuntimeError" },
+      ok: false,
     });
   });
 
@@ -483,6 +575,49 @@ describe("@surface/cli findings and loop verbs", () => {
       },
       ok: true,
     });
+  });
+
+  it("uses gate --policy to load a gate policy file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-cli-gate-policy-"));
+    const policyPath = join(root, "gate-policy.json");
+    const stdout: string[] = [];
+
+    try {
+      await writeFile(
+        policyPath,
+        JSON.stringify({
+          failOnNewMeasuredAtOrAbove: "P0",
+          thresholds: {},
+          neverFailOn: ["judged", "gatedForHuman"],
+        }),
+      );
+
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "gate", "--policy", policyPath],
+        composition: createSurfaceComposition({
+          stateStore: new MemoryStateStore({
+            findings: [testFinding()],
+            version: "1.0",
+          }),
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        command: "gate",
+        data: {
+          gateResult: {
+            exitCode: 0,
+            failingFindingIds: [],
+            passed: true,
+          },
+        },
+        ok: true,
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("traces a tracked finding by current finding id", async () => {
@@ -755,12 +890,27 @@ function testFinding(): TestFinding {
       {
         kind: "tool-result",
         measuredValue: "3.1:1",
+        rule: "color-contrast",
         threshold: "4.5:1",
         tool: "axe",
       },
     ],
+    confidenceBand: "assert",
+    dimensions: {
+      a11yLegalRisk: 0.8,
+      agentImplementability: 0.9,
+      businessImpact: 0.4,
+      confidence: 1,
+      effort: 0.2,
+      evidenceQuality: 1,
+      severity: 0.8,
+      userImpact: 0.7,
+    },
     gatedForHuman: false,
     id: "finding_button_contrast",
+    issueType: "contrast-insufficient",
+    lens: "accessibility",
+    location: { selector: ".button" },
     method: "measured",
     rationale: "Button text fails AA contrast.",
     severityBand: "P1",

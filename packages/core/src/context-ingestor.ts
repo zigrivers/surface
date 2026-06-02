@@ -6,7 +6,13 @@ import { z } from "zod";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
 import { FindingDraftSchema, type FindingDraft } from "./findings.js";
-import type { ComponentMap, FrameworkAdapter, SourceFileRef, Target } from "./interfaces.js";
+import type {
+  ArtifactWriter,
+  ComponentMap,
+  FrameworkAdapter,
+  SourceFileRef,
+  Target,
+} from "./interfaces.js";
 
 const CSS_SCAN_MAX_BYTES = 256_000;
 const CSS_CONTRADICTION_TOOL = "context-ingestor";
@@ -115,6 +121,7 @@ export type ContextIngestorClock = () => string;
 
 export interface ContextIngestorOptions {
   readonly adapters?: readonly FrameworkAdapter[];
+  readonly artifactWriter?: ArtifactWriter;
   readonly clock?: ContextIngestorClock;
   readonly projectRoot?: string;
 }
@@ -145,6 +152,7 @@ class ContextInputError extends Error {
  */
 export function createContextIngestor(options: ContextIngestorOptions = {}): ContextIngestor {
   const adapters = options.adapters ?? [];
+  const artifactWriter = options.artifactWriter;
   const clock = options.clock ?? (() => new Date().toISOString());
   const projectRoot = options.projectRoot ?? process.cwd();
 
@@ -163,16 +171,25 @@ export function createContextIngestor(options: ContextIngestorOptions = {}): Con
       try {
         const normalized = parsed.data;
         const loadedSourceInputs = prependOptional(normalized.source, normalized.sources);
+        const artifactWriterOption = artifactWriter === undefined ? {} : { artifactWriter };
         const sources = await Promise.all(
           loadedSourceInputs.map((source) =>
-            loadSourceFile(source, projectRoot, { materializeInline: true }),
+            loadSourceFile(source, projectRoot, {
+              ...artifactWriterOption,
+              materializeInline: true,
+            }),
           ),
         );
         const dom = await loadOptionalSourceFile(normalized.dom, projectRoot, {
+          ...artifactWriterOption,
           materializeInline: true,
           materializationPrefix: "dom",
         });
-        const screenshot = await loadOptionalScreenshotFile(normalized.screenshot, projectRoot);
+        const screenshot = await loadOptionalScreenshotFile(
+          normalized.screenshot,
+          projectRoot,
+          artifactWriter,
+        );
         const scaffoldDocs = await Promise.all(
           normalized.scaffoldDocs.map((document) => loadSourceFile(document, projectRoot)),
         );
@@ -275,7 +292,11 @@ function prependOptional<T>(first: T | undefined, rest: readonly T[]): readonly 
 async function loadOptionalSourceFile(
   input: TextInput | undefined,
   projectRoot: string,
-  options: { readonly materializationPrefix?: string; readonly materializeInline?: boolean } = {},
+  options: {
+    readonly artifactWriter?: ArtifactWriter;
+    readonly materializationPrefix?: string;
+    readonly materializeInline?: boolean;
+  } = {},
 ): Promise<SourceFileRef | undefined> {
   if (input === undefined) {
     return undefined;
@@ -287,18 +308,23 @@ async function loadOptionalSourceFile(
 async function loadOptionalScreenshotFile(
   input: TextInput | undefined,
   projectRoot: string,
+  artifactWriter: ArtifactWriter | undefined,
 ): Promise<SourceFileRef | undefined> {
   if (input === undefined) {
     return undefined;
   }
 
-  return loadScreenshotFile(input, projectRoot);
+  return loadScreenshotFile(input, projectRoot, artifactWriter);
 }
 
 async function loadSourceFile(
   input: TextInput,
   projectRoot: string,
-  options: { readonly materializationPrefix?: string; readonly materializeInline?: boolean } = {},
+  options: {
+    readonly artifactWriter?: ArtifactWriter;
+    readonly materializationPrefix?: string;
+    readonly materializeInline?: boolean;
+  } = {},
 ): Promise<SourceFileRef> {
   const path = input.path === undefined ? undefined : normalizeTextInputPath(input.path);
   const loaded =
@@ -323,6 +349,7 @@ async function loadSourceFile(
         projectRoot,
         options.materializationPrefix ?? "source",
         path,
+        options.artifactWriter,
       ),
     );
   }
@@ -330,13 +357,21 @@ async function loadSourceFile(
   return source;
 }
 
-async function loadScreenshotFile(input: TextInput, projectRoot: string): Promise<SourceFileRef> {
+async function loadScreenshotFile(
+  input: TextInput,
+  projectRoot: string,
+  artifactWriter: ArtifactWriter | undefined,
+): Promise<SourceFileRef> {
   const path = input.path === undefined ? undefined : normalizeTextInputPath(input.path);
 
   if (input.contents !== undefined) {
     assertTextInputSize(input.contents, path);
 
-    const materializedPath = await materializeInlineScreenshot(input.contents, projectRoot);
+    const materializedPath = await materializeInlineScreenshot(
+      input.contents,
+      projectRoot,
+      artifactWriter,
+    );
 
     return {
       contents: input.contents,
@@ -356,11 +391,13 @@ async function loadScreenshotFile(input: TextInput, projectRoot: string): Promis
 async function materializeInlineScreenshot(
   contents: string,
   projectRootPath: string,
+  artifactWriter: ArtifactWriter | undefined,
 ): Promise<string> {
   return materializeContextInputBuffer(
     inlineScreenshotContentsToBuffer(contents),
     projectRootPath,
     `screenshot-${sha256(contents).slice(0, 12)}.png`,
+    artifactWriter,
   );
 }
 
@@ -369,6 +406,7 @@ async function materializeInlineTextInput(
   projectRootPath: string,
   prefix: string,
   path: string | undefined,
+  artifactWriter: ArtifactWriter | undefined,
 ): Promise<string> {
   const extension = textInputMaterializationExtension(path);
 
@@ -376,6 +414,7 @@ async function materializeInlineTextInput(
     Buffer.from(contents, "utf8"),
     projectRootPath,
     `${prefix}-${sha256(contents).slice(0, 12)}${extension}`,
+    artifactWriter,
   );
 }
 
@@ -383,8 +422,24 @@ async function materializeContextInputBuffer(
   contents: Buffer,
   projectRootPath: string,
   fileName: string,
+  artifactWriter: ArtifactWriter | undefined,
 ): Promise<string> {
   const projectRoot = await realpath(projectRootPath);
+
+  if (artifactWriter !== undefined) {
+    const written = await artifactWriter.writeArtifact({
+      kind: "generated",
+      relativePath: `context-inputs/${fileName}`,
+      bytes: contents,
+    });
+
+    if (!written.ok) {
+      throw new ContextInputError(written.error);
+    }
+
+    return resolve(projectRoot, written.value.path);
+  }
+
   const outputRoot = resolve(projectRoot, ".surface", "context-inputs");
   await mkdir(outputRoot, { recursive: true });
 
