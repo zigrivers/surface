@@ -134,13 +134,21 @@ type ProjectStateSnapshot = {
   readonly baselines?: readonly BaselineRecord[];
   readonly currentStage?: string;
   readonly backlog?: Backlog;
-  readonly findings?: readonly Finding[];
+  readonly findings?: readonly StoredFindingSnapshot[];
   readonly pipeline?: {
     readonly lastCompletedStage?: string | undefined;
   };
   readonly runRecords?: readonly CliRunRecord[];
   readonly trackedFindings?: readonly TrackedFinding[];
-  readonly verdicts?: readonly VerdictRecord[];
+  readonly verdicts?: readonly StoredVerdictSnapshot[];
+};
+type StoredFindingSnapshot = {
+  readonly id: string;
+};
+type StoredVerdictSnapshot = {
+  readonly decision: string;
+  readonly findingId: string;
+  readonly rationale: string;
 };
 type SurfaceComposition = {
   readonly captureService: {
@@ -1137,7 +1145,7 @@ async function evaluateGate(
   }
 
   const latestBaseline = state.value.baselines?.at(-1);
-  const findings = state.value.findings ?? [];
+  const findings = (state.value.findings ?? []) as readonly Finding[];
 
   const gateResult = await composition.gateEvaluator.evaluate(
     findings,
@@ -1712,7 +1720,7 @@ function inputLensExists(composition: SurfaceComposition, lens: string): boolean
 }
 
 function findStoredFinding(state: ProjectStateSnapshot, findingId: string): Finding | undefined {
-  return state.findings?.find((finding) => finding.id === findingId);
+  return state.findings?.find((finding) => finding.id === findingId) as Finding | undefined;
 }
 
 function findStoredTrackedFinding(
@@ -1759,7 +1767,11 @@ function identityKeysForBaseline(state: ProjectStateSnapshot): readonly string[]
   }
 
   return [
-    ...new Set((state.findings ?? []).map((finding) => identityKeyForFinding(state, finding))),
+    ...new Set(
+      ((state.findings ?? []) as readonly Finding[]).map((finding) =>
+        identityKeyForFinding(state, finding),
+      ),
+    ),
   ];
 }
 
@@ -1783,7 +1795,7 @@ function backlogForState(
   }
 
   const effectiveRunId = runId ?? "current";
-  const findings = state.findings ?? [];
+  const findings = (state.findings ?? []) as readonly Finding[];
 
   return backlogFromFindings(effectiveRunId, findings);
 }

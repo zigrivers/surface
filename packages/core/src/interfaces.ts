@@ -12,6 +12,7 @@ import type { ModelProvider } from "./model-provider.js";
 import type { Baseline, TrackedFinding } from "./tracked-findings.js";
 export type { Backlog, BacklogEntry } from "./findings.js";
 export type { ModelProvider } from "./model-provider.js";
+export type { Baseline } from "./tracked-findings.js";
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -305,7 +306,10 @@ export interface ArtifactWriter {
 export interface ProjectStateSnapshot {
   readonly version: string;
   readonly baselines?: readonly Baseline[];
+  readonly backlog?: ProjectBacklogSnapshot;
   readonly currentStage?: string;
+  readonly findings?: readonly ProjectFindingSnapshot[];
+  readonly runRecords?: readonly ProjectRunRecord[];
   readonly discovery?: {
     readonly [key: string]: unknown;
     readonly appType?: AppType;
@@ -354,6 +358,37 @@ export interface ProjectStateSnapshot {
     readonly stageIds: readonly string[];
   };
   readonly trackedFindings?: readonly TrackedFinding[];
+  readonly verdicts?: readonly ProjectVerdictSnapshot[];
+}
+
+export interface ProjectBacklogSnapshot {
+  readonly id: string;
+  readonly runId: string;
+  readonly entries: readonly unknown[];
+}
+
+export interface ProjectFindingSnapshot {
+  readonly id: string;
+}
+
+export interface ProjectRunRecord {
+  readonly runId: string;
+  readonly status?: "completed" | "failed";
+  readonly backlog?: FindingsBacklog;
+  readonly capture?: Capture;
+  readonly findings?: readonly Finding[];
+  readonly skippedLenses?: readonly {
+    readonly lensId: string;
+    readonly message: string;
+    readonly reason: string;
+  }[];
+  readonly trackedFindings: readonly TrackedFinding[];
+}
+
+export interface ProjectVerdictSnapshot {
+  readonly decision: string;
+  readonly findingId: string;
+  readonly rationale: string;
 }
 
 export interface StateStore {
