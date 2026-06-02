@@ -13,11 +13,12 @@
     "test": "turbo run test",
     "test:watch": "turbo run test:watch",
     "test:evals": "vitest run tests/evals",
+    "test:e2e": "pnpm --filter @surface/cli build && vitest run tests/e2e",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "format": "prettier --write .",
     "format:check": "prettier --check .",
-    "check": "pnpm run format:check && turbo run lint typecheck test build:smoke",
+    "check": "pnpm run format:check && turbo run lint typecheck test build:smoke && pnpm run test:e2e",
     "clean": "turbo run clean && rm -rf node_modules/.cache .turbo"
   },
   "devDependencies": {

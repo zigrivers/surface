@@ -179,11 +179,11 @@ describe("@surface/cli core verbs", () => {
     expect(stateStore.state.currentStage).toBe("completed");
   });
 
-  it("captures a DOM target through the shared capture service", async () => {
+  it("captures a URL target through the shared capture service", async () => {
     const stdout: string[] = [];
     const capturedTargets: TestTarget[] = [];
     const exitCode = await runSurfaceCli({
-      argv: ["node", "surface", "--json", "capture", "--dom", "<main>Hello</main>"],
+      argv: ["node", "surface", "--json", "capture", "--url", "https://example.com"],
       composition: createSurfaceComposition({
         captureBackends: [createTestCaptureBackend(capturedTargets)],
       }),
@@ -191,13 +191,13 @@ describe("@surface/cli core verbs", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(capturedTargets).toEqual([{ kind: "dom", ref: "<main>Hello</main>" }]);
+    expect(capturedTargets).toEqual([{ kind: "url", ref: "https://example.com" }]);
     expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "capture",
       data: {
         artifacts: [],
         backend: "test",
-        captureId: "capture_dom",
+        captureId: "capture_url",
       },
       ok: true,
     });
