@@ -20,8 +20,8 @@ error strategy deserves its own record so handling is consistent across packages
 
 1. **Typed `SurfaceError` taxonomy:** `UsageError` (→ CLI exit 2), `ConfigError`,
    `CaptureError`, `GroundingError`, `AdapterError`, `ModelError`, `IntegrationError`,
-   `StateError`, `McpError` — each carrying a `cause` and an **actionable message** (what
-   failed, likely cause, next command — US-050).
+   `StateError`, `RuntimeError`, `McpError` — each carrying a `cause` and an
+   **actionable message** (what failed, likely cause, next command — US-050).
 2. **`Result<T, SurfaceError>` at every package boundary;** throwing is confined to the
    CLI/MCP **edge**, which maps errors to exit codes (0/1/2) or MCP structured errors.
 3. **No swallowed errors** — catch only to add context, then rethrow/convert (coding-standards).
