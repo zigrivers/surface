@@ -49,6 +49,7 @@ describe("createSurfaceComposition", () => {
     });
 
     expect(composition.captureBackends.map((backend) => backend.id)).toEqual([
+      "agent-browser",
       "playwright",
       "static",
     ]);

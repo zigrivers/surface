@@ -10,6 +10,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   DEFAULT_SURFACE_CONFIG,
   createSurfaceError,
+  createAgentBrowserCaptureBackend,
   createCaptureService,
   createDefaultCaptureIdFactory,
   createContextIngestor,
@@ -95,6 +96,14 @@ async function captureFor(
     id: captureId,
     status: "completed",
     target,
+  };
+}
+
+function agentBrowserResult(data: unknown): { exitCode: number; stderr: string; stdout: string } {
+  return {
+    exitCode: 0,
+    stderr: "",
+    stdout: JSON.stringify({ data, error: null, success: true }),
   };
 }
 
@@ -454,6 +463,136 @@ describe("E1 Capture & Inputs", () => {
       ).resolves.toContain("WebArea");
       expect(gotoOptions).toEqual({ timeout: 1_234, waitUntil: "domcontentloaded" });
       expect(contextOptions).toMatchObject({ serviceWorkers: "block" });
+    });
+
+    it("[US-001][AC1] agent-browser backend captures via array args and preserves @e refs (contract)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const commandCalls: string[][] = [];
+      const service = createCaptureService({
+        backends: [
+          createAgentBrowserCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:30:00.000Z",
+            idFactory: () => "cap-agent-browser-fixture",
+            runCommand: async (args) => {
+              commandCalls.push([...args]);
+
+              const commandIndex = args.findIndex((arg) =>
+                ["open", "wait", "screenshot", "snapshot", "get", "close"].includes(arg),
+              );
+              const command = commandIndex === -1 ? undefined : args[commandIndex];
+
+              if (command === "screenshot") {
+                const screenshotPath = args.at(-2);
+
+                if (screenshotPath === undefined) {
+                  throw new Error("expected screenshot path");
+                }
+
+                await writeFile(screenshotPath, VALID_PNG_BYTES);
+
+                return agentBrowserResult({ path: screenshotPath });
+              }
+
+              if (command === "snapshot") {
+                return agentBrowserResult({
+                  origin: "https://example.com/",
+                  refs: {
+                    e1: {
+                      name: "Buy",
+                      role: "button",
+                    },
+                  },
+                  snapshot: '- button "Buy" [ref=e1]',
+                });
+              }
+
+              if (command === "get" && args[commandIndex + 1] === "html") {
+                return agentBrowserResult({ html: "<button>Buy</button>" });
+              }
+
+              if (command === "get" && args[commandIndex + 1] === "styles") {
+                return agentBrowserResult({
+                  styles: [
+                    {
+                      ref: "@e1",
+                      styles: { color: "rgb(0, 0, 0)" },
+                    },
+                  ],
+                });
+              }
+
+              if (command === "get" && args[commandIndex + 1] === "url") {
+                return agentBrowserResult({ url: "https://example.com/" });
+              }
+
+              if (command === "wait") {
+                return agentBrowserResult({ state: "domcontentloaded" });
+              }
+
+              if (command === "open") {
+                return agentBrowserResult({ title: "Example", url: "https://example.com/" });
+              }
+
+              return agentBrowserResult({ closed: true });
+            },
+            sessionName: "surface-contract",
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(target, {
+        artifactRoot,
+        config: allowedCaptureConfig,
+        navigationWaitUntil: "domcontentloaded",
+      });
+
+      expect(isOk(result)).toBe(true);
+      if (!result.ok) {
+        throw new Error("expected capture to succeed");
+      }
+
+      expect(result.value).toMatchObject({
+        backend: "agent-browser",
+        id: "cap-agent-browser-fixture",
+        status: "completed",
+      });
+      expect(result.value.artifacts.map((artifact) => artifact.type).sort()).toEqual([
+        "accessibility-tree",
+        "computed-styles",
+        "dom-snapshot",
+        "screenshot",
+      ]);
+      expect(commandCalls).toEqual([
+        ["--session", "surface-contract", "open", "https://example.com", "--json"],
+        ["--session", "surface-contract", "wait", "--load", "domcontentloaded", "--json"],
+        [
+          "--session",
+          "surface-contract",
+          "screenshot",
+          "--full",
+          join(artifactRoot, "cap-agent-browser-fixture", "screenshot.png"),
+          "--json",
+        ],
+        ["--session", "surface-contract", "snapshot", "-i", "--json"],
+        ["--session", "surface-contract", "get", "html", "body", "--json"],
+        ["--session", "surface-contract", "get", "styles", "body", "--json"],
+        ["--session", "surface-contract", "get", "url", "--json"],
+        ["--session", "surface-contract", "close", "--json"],
+      ]);
+      await expect(
+        readFile(
+          join(artifactRoot, "cap-agent-browser-fixture", "accessibility-tree.json"),
+          "utf8",
+        ),
+      ).resolves.toContain("@e1");
+      await expect(
+        readFile(
+          join(artifactRoot, "cap-agent-browser-fixture", "accessibility-tree.json"),
+          "utf8",
+        ),
+      ).resolves.toContain("ref=@e1");
     });
 
     it("[US-001][AC1] Playwright backend allows allowlisted public subresources from localhost captures (unit)", async () => {

@@ -1,8 +1,11 @@
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
+import { accessSync, constants as fsConstants } from "node:fs";
 import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { extname, isAbsolute, join, relative, resolve } from "node:path";
+import { delimiter, extname, isAbsolute, join, relative, resolve } from "node:path";
+
+import { execa } from "execa";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
 import type {
@@ -107,6 +110,25 @@ export interface PlaywrightCaptureBackendOptions {
   readonly clock?: CaptureClock;
   readonly idFactory?: CaptureIdFactory;
   readonly loadPlaywright?: () => Promise<unknown>;
+}
+
+export interface AgentBrowserCommandResult {
+  readonly exitCode: number;
+  readonly stderr: string;
+  readonly stdout: string;
+}
+
+export type AgentBrowserCommandRunner = (
+  args: readonly string[],
+) => Promise<AgentBrowserCommandResult>;
+
+export interface AgentBrowserCaptureBackendOptions {
+  readonly available?: boolean;
+  readonly clock?: CaptureClock;
+  readonly command?: string;
+  readonly idFactory?: CaptureIdFactory;
+  readonly runCommand?: AgentBrowserCommandRunner;
+  readonly sessionName?: string;
 }
 
 export interface StaticCaptureBackendOptions {
@@ -383,6 +405,197 @@ export function createPlaywrightCaptureBackend(
   };
 }
 
+export function createAgentBrowserCaptureBackend(
+  options: AgentBrowserCaptureBackendOptions = {},
+): CaptureBackend {
+  const command = options.command ?? "agent-browser";
+  const idFactory = options.idFactory ?? createDefaultCaptureIdFactory();
+  const clock = options.clock ?? (() => new Date().toISOString());
+  const runCommand =
+    options.runCommand ?? ((args: readonly string[]) => runAgentBrowserCommand(command, args));
+
+  return {
+    id: "agent-browser",
+    detect: () => options.available ?? commandExists(command),
+    observe: async (target, captureOptions) => {
+      const targetUrl = targetUrlForBrowser(target);
+
+      if (targetUrl === undefined) {
+        return err(
+          createSurfaceError(
+            "capture_failed",
+            `agent-browser backend does not support ${target.kind} targets.`,
+            {
+              details: { backendId: "agent-browser", targetKind: target.kind },
+            },
+          ),
+        );
+      }
+
+      const authStateValidation = await validateAgentBrowserAuthStateRef(
+        captureOptions.authStateRef,
+      );
+
+      if (!authStateValidation.ok) {
+        return err(authStateValidation.error);
+      }
+
+      const captureId = idFactory(target);
+
+      if (!isSafeCaptureId(captureId)) {
+        return err(agentBrowserCaptureError("capture id must be filesystem-safe", target));
+      }
+
+      const artifactRoot = captureOptions.artifactRoot ?? ".surface/captures";
+      const captureRoot = join(artifactRoot, captureId);
+      const screenshotPath = join(captureRoot, "screenshot.png");
+      const domPath = join(captureRoot, "dom.html");
+      const accessibilityPath = join(captureRoot, "accessibility-tree.json");
+      const computedStylesPath = join(captureRoot, "computed-styles.json");
+      const sessionName = options.sessionName ?? `surface-${captureId}`;
+      const redactionRules = compileCaptureRedactionRules(captureOptions.config.redactionRules);
+
+      if (!redactionRules.ok) {
+        return err(redactionRules.error);
+      }
+
+      try {
+        await mkdir(captureRoot, { recursive: true });
+        await runAgentBrowserJson(
+          runCommand,
+          sessionName,
+          "open",
+          [targetUrl],
+          captureOptions.authStateRef === undefined
+            ? {}
+            : { statePath: captureOptions.authStateRef },
+        );
+        await runAgentBrowserJson(runCommand, sessionName, "wait", [
+          "--load",
+          captureOptions.navigationWaitUntil ?? "load",
+        ]);
+        await runAgentBrowserJson(runCommand, sessionName, "screenshot", [
+          "--full",
+          screenshotPath,
+        ]);
+
+        const snapshot = await runAgentBrowserJson(runCommand, sessionName, "snapshot", ["-i"]);
+        const dom = await runAgentBrowserJson(runCommand, sessionName, "get", ["html", "body"]);
+        const styles = await runAgentBrowserJson(runCommand, sessionName, "get", [
+          "styles",
+          "body",
+        ]);
+        const landedUrl = await runAgentBrowserJson(runCommand, sessionName, "get", ["url"]);
+        const verification = targetVerificationForAgentBrowser(
+          targetUrl,
+          landedUrl,
+          captureOptions,
+        );
+
+        if (
+          captureOptions.authStateRef !== undefined &&
+          (!verification.authInjectedBeforeNavigation || !verification.isRequestedTarget)
+        ) {
+          await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
+
+          return err(authInjectionVerificationError(verification));
+        }
+
+        const screenshotRedaction = redactArtifactBytes(
+          await readFile(screenshotPath),
+          "screenshot",
+          redactionRules.value,
+        );
+        await writeFile(screenshotPath, screenshotRedaction.contents);
+
+        const domRedaction = redactArtifactText(
+          agentBrowserDomHtml(dom),
+          "dom",
+          redactionRules.value,
+        );
+        await writeFile(domPath, domRedaction.contents);
+
+        const accessibilityRedaction = redactArtifactText(
+          JSON.stringify(agentBrowserSnapshotWithRefs(snapshot), null, 2),
+          "dom",
+          redactionRules.value,
+        );
+        await writeFile(accessibilityPath, accessibilityRedaction.contents);
+
+        const computedStylesRedaction = redactArtifactText(
+          JSON.stringify(styles, null, 2),
+          "dom",
+          redactionRules.value,
+        );
+        await writeFile(computedStylesPath, computedStylesRedaction.contents);
+
+        return ok({
+          artifacts: [
+            {
+              id: "screenshot",
+              path: screenshotPath,
+              redacted: screenshotRedaction.redacted,
+              type: "screenshot",
+            },
+            {
+              id: "dom",
+              path: domPath,
+              redacted: domRedaction.redacted,
+              type: "dom-snapshot",
+            },
+            {
+              id: "accessibility-tree",
+              path: accessibilityPath,
+              redacted: accessibilityRedaction.redacted,
+              type: "accessibility-tree",
+            },
+            {
+              id: "computed-styles",
+              path: computedStylesPath,
+              redacted: computedStylesRedaction.redacted,
+              type: "computed-styles",
+            },
+          ],
+          backend: "agent-browser",
+          capturedAt: clock(),
+          authUsed: captureOptions.authStateRef !== undefined,
+          id: captureId,
+          status: "completed",
+          target,
+          verification,
+        });
+      } catch (cause) {
+        await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
+
+        return err(agentBrowserCaptureError(cause, target));
+      } finally {
+        await runAgentBrowserJson(runCommand, sessionName, "close", []).catch(() => {});
+      }
+    },
+  };
+}
+
+async function validateAgentBrowserAuthStateRef(
+  authStateRef: string | undefined,
+): Promise<Result<void, SurfaceError>> {
+  if (authStateRef === undefined) {
+    return ok(undefined);
+  }
+
+  try {
+    await stat(authStateRef);
+
+    return ok(undefined);
+  } catch (cause) {
+    return err(
+      createSurfaceError("auth_injection_failed", "Auth state file could not be read.", {
+        cause,
+        details: { reason: "auth-state-unreadable", authStateRef },
+      }),
+    );
+  }
+}
+
 async function validateAuthStateRef(
   authStateRef: string | undefined,
 ): Promise<Result<void, SurfaceError>> {
@@ -453,6 +666,26 @@ function targetVerificationForPlaywright(
   readonly requestedUrl: string;
 } {
   const landedUrl = page.url();
+
+  return {
+    authInjectedBeforeNavigation: captureOptions.authStateRef !== undefined,
+    isRequestedTarget: landedUrlMatchesRequestedUrl(landedUrl, requestedUrl),
+    landedUrl,
+    requestedUrl,
+  };
+}
+
+function targetVerificationForAgentBrowser(
+  requestedUrl: string,
+  landedUrlResult: unknown,
+  captureOptions: CaptureOptions,
+): {
+  readonly authInjectedBeforeNavigation: boolean;
+  readonly isRequestedTarget: boolean;
+  readonly landedUrl: string;
+  readonly requestedUrl: string;
+} {
+  const landedUrl = agentBrowserUrl(landedUrlResult) ?? "";
 
   return {
     authInjectedBeforeNavigation: captureOptions.authStateRef !== undefined,
@@ -1092,6 +1325,10 @@ function canResolveModule(id: string): boolean {
 }
 
 function targetUrlForPlaywright(target: Target): string | undefined {
+  return targetUrlForBrowser(target);
+}
+
+function targetUrlForBrowser(target: Target): string | undefined {
   if (target.kind === "url") {
     return target.ref;
   }
@@ -1101,6 +1338,157 @@ function targetUrlForPlaywright(target: Target): string | undefined {
   }
 
   return undefined;
+}
+
+async function runAgentBrowserCommand(
+  command: string,
+  args: readonly string[],
+): Promise<AgentBrowserCommandResult> {
+  const result = await execa(command, [...args], { reject: false });
+
+  return {
+    exitCode: result.exitCode ?? 0,
+    stderr: result.stderr,
+    stdout: result.stdout,
+  };
+}
+
+async function runAgentBrowserJson(
+  runCommand: AgentBrowserCommandRunner,
+  sessionName: string,
+  command: string,
+  args: readonly string[],
+  options: { readonly statePath?: string } = {},
+): Promise<unknown> {
+  const commandArgs = [
+    "--session",
+    sessionName,
+    ...(options.statePath === undefined ? [] : ["--state", options.statePath]),
+    command,
+    ...args,
+    "--json",
+  ];
+  const result = await runCommand(commandArgs);
+
+  if (result.exitCode !== 0) {
+    throw new AgentBrowserCommandError(commandArgs, result);
+  }
+
+  const parsed = parseAgentBrowserEnvelope(result.stdout);
+
+  if (!parsed.success) {
+    throw new AgentBrowserCommandError(commandArgs, result, parsed.error);
+  }
+
+  return parsed.data;
+}
+
+class AgentBrowserCommandError extends Error {
+  constructor(
+    readonly args: readonly string[],
+    readonly result: AgentBrowserCommandResult,
+    readonly agentBrowserError?: unknown,
+  ) {
+    super("agent-browser command failed");
+  }
+}
+
+function parseAgentBrowserEnvelope(stdout: string): {
+  readonly data: unknown;
+  readonly error: unknown;
+  readonly success: boolean;
+} {
+  const parsed = JSON.parse(stdout) as unknown;
+
+  if (parsed === null || typeof parsed !== "object") {
+    throw new Error("agent-browser JSON output was not an object");
+  }
+
+  const envelope = parsed as {
+    readonly data?: unknown;
+    readonly error?: unknown;
+    readonly success?: unknown;
+  };
+
+  return {
+    data: envelope.data,
+    error: envelope.error,
+    success: envelope.success === true,
+  };
+}
+
+function agentBrowserDomHtml(result: unknown): string {
+  if (result !== null && typeof result === "object") {
+    const html = (result as { readonly html?: unknown }).html;
+
+    if (typeof html === "string") {
+      return `<!doctype html><html><body>${html}</body></html>`;
+    }
+  }
+
+  throw new Error("agent-browser get html output did not include HTML");
+}
+
+function agentBrowserUrl(result: unknown): string | undefined {
+  if (result !== null && typeof result === "object") {
+    const url = (result as { readonly url?: unknown }).url;
+
+    if (typeof url === "string") {
+      return url;
+    }
+  }
+
+  return undefined;
+}
+
+function agentBrowserSnapshotWithRefs(result: unknown): unknown {
+  if (result === null || typeof result !== "object") {
+    return result;
+  }
+
+  const snapshot = result as {
+    readonly refs?: unknown;
+    readonly snapshot?: unknown;
+  };
+  const refs =
+    snapshot.refs !== null && typeof snapshot.refs === "object"
+      ? Object.fromEntries(
+          Object.entries(snapshot.refs as Record<string, unknown>).map(([ref, value]) => [
+            ref.startsWith("@") ? ref : `@${ref}`,
+            value,
+          ]),
+        )
+      : snapshot.refs;
+
+  return {
+    ...(result as Record<string, unknown>),
+    refs,
+    snapshot:
+      typeof snapshot.snapshot === "string"
+        ? snapshot.snapshot.replace(/\bref=e(\d+)\b/g, "ref=@e$1")
+        : snapshot.snapshot,
+  };
+}
+
+function commandExists(command: string): boolean {
+  if (isAbsolute(command)) {
+    return isExecutable(command);
+  }
+
+  return (process.env.PATH ?? "")
+    .split(delimiter)
+    .filter((entry) => entry.length > 0)
+    .some((entry) => isExecutable(join(entry, command)));
+}
+
+function isExecutable(path: string): boolean {
+  try {
+    accessSync(path, fsConstants.X_OK);
+
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function playwrightRequestAllowed(
@@ -1460,6 +1848,22 @@ function playwrightCaptureError(cause: unknown, target: Target): SurfaceError {
     details: {
       backendId: "playwright",
       reason: classification.reason,
+      targetKind: target.kind,
+    },
+  });
+}
+
+function agentBrowserCaptureError(cause: unknown, target: Target): SurfaceError {
+  const isCommandError = cause instanceof AgentBrowserCommandError;
+  const commandError = isCommandError ? cause : undefined;
+
+  return createSurfaceError("capture_failed", "agent-browser could not capture the target.", {
+    cause,
+    details: {
+      backendId: "agent-browser",
+      commandArgs: commandError?.args,
+      reason: isCommandError ? "agent-browser-command-failed" : errorMessage(cause),
+      stderr: commandError?.result.stderr,
       targetKind: target.kind,
     },
   });
