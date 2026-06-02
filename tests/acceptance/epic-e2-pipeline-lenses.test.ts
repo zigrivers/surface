@@ -8,6 +8,7 @@ import { describe, expect, it } from "vitest";
 import {
   COMMITTED_WEB_APP_TYPE_OVERLAYS,
   JUDGED_COVERAGE_UNAVAILABLE_MESSAGE,
+  createSurfaceComposition,
   createNoopPipelineHandlers,
   createPipelineOrchestrator,
   createFileStateStore,
@@ -16,12 +17,14 @@ import {
   isOk,
   listAppTypeOverlays,
   modelSkipForLens,
+  ok,
   resolveModelProviderConfig,
   resolveSurfaceConfig,
   runDiscovery,
   selectLensExecutionPlan,
   synthesizeMeasuredWinsDecision,
 } from "../../packages/core/src/index.js";
+import { runSurfaceCli } from "../../packages/cli/src/index.js";
 import type { Capture } from "../../packages/core/src/interfaces.js";
 import {
   createAxeGroundingTool,
@@ -381,7 +384,87 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
     it.skip("[US-014][AC2] conversion path under e-commerce overlay → friction findings tagged to that path (integration)", () => {});
   });
   describe("US-015 bounded alternatives & before/after diff [should]", () => {
-    it.skip("[US-015][AC1] `alternatives <target>` → bounded improvements to that view (never blank-canvas) with rationale (integration)", () => {});
-    it.skip("[US-015][AC2] `diff <before> <after>` → reports resolved/introduced findings between them (integration)", () => {});
+    it("[US-015][AC1] `alternatives <target>` → bounded improvements to that view (never blank-canvas) with rationale (integration)", async () => {
+      const stdout: string[] = [];
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "alternatives", "--dom", "<main>Checkout</main>"],
+        composition: createSurfaceComposition(),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      const parsed = JSON.parse(stdout.join(""));
+
+      expect(parsed).toMatchObject({
+        command: "alternatives",
+        data: {
+          alternatives: {
+            target: { kind: "dom", ref: "<main>Checkout</main>" },
+          },
+        },
+        ok: true,
+      });
+      expect(parsed.data.alternatives.proposals).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            rationale: expect.stringContaining("Bounded to the captured view"),
+            title: expect.not.stringMatching(/blank canvas/i),
+          }),
+        ]),
+      );
+    });
+
+    it("[US-015][AC2] `diff <before> <after>` → reports resolved/introduced findings between them (integration)", async () => {
+      const stdout: string[] = [];
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "diff", "run_before", "run_after"],
+        composition: createSurfaceComposition({
+          stateStore: {
+            readState: () =>
+              ok({
+                runRecords: [
+                  {
+                    runId: "run_before",
+                    trackedFindings: [
+                      {
+                        currentFindingId: "finding_resolved",
+                        identityKey: "identity_resolved",
+                        status: "still-failing",
+                        validation: { expectation: "before failed", kind: "measured-rule" },
+                      },
+                    ],
+                  },
+                  {
+                    runId: "run_after",
+                    trackedFindings: [
+                      {
+                        currentFindingId: "finding_introduced",
+                        identityKey: "identity_introduced",
+                        status: "new",
+                        validation: { expectation: "after failed", kind: "measured-rule" },
+                      },
+                    ],
+                  },
+                ],
+                version: "1.0",
+              }),
+            writeArtifact: () =>
+              Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+            writeState: (state) => ok(state),
+          },
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        command: "diff",
+        data: {
+          introduced: [{ findingId: "finding_introduced", identityKey: "identity_introduced" }],
+          resolved: [{ findingId: "finding_resolved", identityKey: "identity_resolved" }],
+        },
+        ok: true,
+      });
+    });
   });
 });
