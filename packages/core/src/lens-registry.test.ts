@@ -356,6 +356,8 @@ describe("lens registry", () => {
       "visual-hierarchy",
       "content",
       "responsiveness",
+      "conversion",
+      "task-completion",
     ];
     const builtInRegistry: readonly LensRegistration[] = BUILT_IN_LENS_REGISTRY;
 

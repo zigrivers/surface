@@ -1,5 +1,5 @@
 // Acceptance skeletons — Epic E2: Evaluation Pipeline & Lenses (US-010..015).
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -12,6 +12,8 @@ import {
   createNoopPipelineHandlers,
   createPipelineOrchestrator,
   createFileStateStore,
+  createConversionLens,
+  createTaskCompletionLens,
   createAccessibilityLens,
   getAppTypeOverlay,
   isOk,
@@ -25,7 +27,13 @@ import {
   synthesizeMeasuredWinsDecision,
 } from "../../packages/core/src/index.js";
 import { runSurfaceCli } from "../../packages/cli/src/index.js";
-import type { Capture } from "../../packages/core/src/interfaces.js";
+import type {
+  Capture,
+  KnowledgeEntry,
+  KnowledgeSource,
+  ModelProvider,
+} from "../../packages/core/src/interfaces.js";
+import type { ModelRequest } from "../../packages/core/src/model-provider.js";
 import {
   createAxeGroundingTool,
   createLighthouseGroundingTool,
@@ -380,8 +388,124 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
     });
   });
   describe("US-014 cognitive walkthrough & conversion audit [should]", () => {
-    it.skip("[US-014][AC1] task/persona + flow → each step evaluated as first-time user; friction emitted citing heuristic (integration)", () => {});
-    it.skip("[US-014][AC2] conversion path under e-commerce overlay → friction findings tagged to that path (integration)", () => {});
+    it("[US-014][AC1] task/persona + flow → each step evaluated as first-time user; friction emitted citing heuristic (integration)", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "surface-us014-task-"));
+      const requests: ModelRequest[] = [];
+
+      try {
+        const domPath = path.join(root, "dom.html");
+        await writeFile(
+          domPath,
+          `<main id="checkout"><h1>Checkout</h1><button id="pay">Pay now</button></main>`,
+        );
+        const lens = createTaskCompletionLens({
+          task: {
+            conversionCritical: true,
+            id: "checkout",
+            persona: {
+              goals: ["complete checkout"],
+              id: "first-time-shopper",
+              priorKnowledge: "first-time",
+            },
+            steps: ["Review cart", "Confirm shipping", "Pay"],
+          },
+        });
+        const result = await lens.evaluate({
+          capture: flowCaptureWithDom(domPath),
+          config: resolveSurfaceConfig(),
+          evidence: [],
+          knowledge: flowKnowledgeWith(flowTaskKnowledge()),
+          model: flowModelWithText(
+            JSON.stringify([
+              {
+                issueType: "first-time-user-friction",
+                rationale: "A first-time shopper cannot tell whether shipping is confirmed.",
+                selector: "#checkout",
+                title: "Checkout lacks first-time confirmation context",
+              },
+            ]),
+            requests,
+          ),
+        });
+
+        expect(isOk(result)).toBe(true);
+        expect(requests[0]?.prompt.input).toMatchObject({
+          task: {
+            id: "checkout",
+            persona: { priorKnowledge: "first-time" },
+            steps: ["Review cart", "Confirm shipping", "Pay"],
+          },
+        });
+
+        if (!isOk(result)) {
+          return;
+        }
+
+        expect(result.value[0]).toMatchObject({
+          citedHeuristics: ["kb_task_completion_walkthrough"],
+          evidence: [
+            { kind: "cited-heuristic", knowledgeEntryId: "kb_task_completion_walkthrough" },
+            { kind: "dom", selector: "#checkout" },
+          ],
+          lens: "task-completion",
+          method: "judged",
+          tags: ["task:checkout"],
+        });
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    });
+
+    it("[US-014][AC2] conversion path under e-commerce overlay → friction findings tagged to that path (integration)", async () => {
+      const root = await mkdtemp(path.join(os.tmpdir(), "surface-us014-conversion-"));
+      const requests: ModelRequest[] = [];
+
+      try {
+        const domPath = path.join(root, "dom.html");
+        await writeFile(
+          domPath,
+          `<main id="checkout"><button id="pay">Pay now</button><p>Taxes calculated later</p></main>`,
+        );
+        const lens = createConversionLens({ conversionPath: "checkout" });
+        const result = await lens.evaluate({
+          capture: flowCaptureWithDom(domPath),
+          config: resolveSurfaceConfig({ cli: { evaluation: { appType: "e-commerce" } } }),
+          evidence: [],
+          knowledge: flowKnowledgeWith(flowConversionKnowledge()),
+          model: flowModelWithText(
+            JSON.stringify([
+              {
+                issueType: "late-cost-surprise",
+                rationale: "The checkout path hides taxes until a later step.",
+                selector: "#checkout",
+                title: "Checkout path hides total cost until late",
+              },
+            ]),
+            requests,
+          ),
+        });
+
+        expect(isOk(result)).toBe(true);
+        expect(requests[0]?.prompt.input).toMatchObject({
+          appType: "e-commerce",
+          conversionPath: "checkout",
+        });
+
+        if (!isOk(result)) {
+          return;
+        }
+
+        expect(result.value[0]).toMatchObject({
+          citedHeuristics: ["kb_conversion_path_friction_trust"],
+          issueType: "late-cost-surprise",
+          lens: "conversion",
+          method: "judged",
+          tags: ["conversion-path:checkout"],
+        });
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    });
   });
   describe("US-015 bounded alternatives & before/after diff [should]", () => {
     it("[US-015][AC1] `alternatives <target>` → bounded improvements to that view (never blank-canvas) with rationale (integration)", async () => {
@@ -468,3 +592,58 @@ describe("E2 Evaluation Pipeline & Lenses", () => {
     });
   });
 });
+
+function flowCaptureWithDom(domPath: string): Capture {
+  return {
+    artifacts: [
+      {
+        id: "dom",
+        path: domPath,
+        redacted: false,
+        type: "dom-snapshot",
+      },
+    ],
+    backend: "playwright",
+    capturedAt: "2026-06-02T00:00:00.000Z",
+    id: "cap_us014",
+    status: "completed",
+    target: { kind: "url", ref: "https://example.com/checkout" },
+  };
+}
+
+function flowKnowledgeWith(entry: KnowledgeEntry): KnowledgeSource {
+  return {
+    query: () => Promise.resolve(ok([entry])),
+    resolve: () => Promise.resolve(ok(entry)),
+  };
+}
+
+function flowTaskKnowledge(): KnowledgeEntry {
+  return {
+    appliesToLenses: ["task-completion"],
+    deepGuidance: "Walk through each task step as a first-time user.",
+    id: "kb_task_completion_walkthrough",
+    summary: "First-time users need clear step context and recovery.",
+    title: "Task completion walkthrough",
+  };
+}
+
+function flowConversionKnowledge(): KnowledgeEntry {
+  return {
+    appliesToLenses: ["conversion"],
+    deepGuidance: "Inspect conversion paths for hidden cost, risk, and blocked next actions.",
+    id: "kb_conversion_path_friction_trust",
+    summary: "Conversion paths should make cost, risk, and next action clear.",
+    title: "Conversion path friction and trust",
+  };
+}
+
+function flowModelWithText(text: string, requests: ModelRequest[]): ModelProvider {
+  return {
+    availability: () => ok({ available: true, model: "reviewer", provider: "local" }),
+    complete: (request) => {
+      requests.push(request);
+      return ok({ model: "reviewer", provider: "local", text });
+    },
+  };
+}

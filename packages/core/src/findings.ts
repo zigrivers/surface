@@ -205,6 +205,7 @@ export const FindingDraftSchema = z
     rawDimensions: DimensionsSchema.partial().strict(),
     location: LocationSchema,
     suggestedPatch: SuggestedPatchSchema.optional(),
+    tags: z.array(nonEmptyStringSchema).optional(),
   })
   .strict()
   .superRefine((draft, context) => {
@@ -238,6 +239,7 @@ export const FindingSchema = z
     confidenceBand: ConfidenceBandSchema,
     gatedForHuman: z.boolean(),
     suggestedPatch: SuggestedPatchSchema.optional(),
+    tags: z.array(nonEmptyStringSchema).optional(),
   })
   .strict()
   .superRefine((finding, context) => {
@@ -1029,6 +1031,7 @@ export function scoreFinding(
     confidenceBand,
     gatedForHuman,
     ...(suggestedPatch !== undefined ? { suggestedPatch } : {}),
+    ...(validDraft.tags === undefined ? {} : { tags: validDraft.tags }),
   });
 
   if (!finding.success) {

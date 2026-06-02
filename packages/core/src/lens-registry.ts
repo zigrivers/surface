@@ -2,6 +2,7 @@ import type { SurfaceConfig } from "./config.js";
 import { createAccessibilityLens } from "./accessibility-lens.js";
 import { getAppTypeOverlay, type AppTypeOverlay } from "./app-type-overlays.js";
 import { createContentMicrocopyLens } from "./content-lens.js";
+import { createConversionLens, createTaskCompletionLens } from "./flow-lenses.js";
 import type { Capture, CaptureArtifactType, Lens } from "./interfaces.js";
 import type { ModelAvailability } from "./model-provider.js";
 import { createResponsivenessStatesLens } from "./responsiveness-states-lens.js";
@@ -114,9 +115,11 @@ export const BUILT_IN_LENS_REGISTRY = [
   {
     id: "conversion",
     method: "judged",
+    requiredArtifacts: ["dom-snapshot"],
     requiresModel: true,
-    requiresLiveDom: false,
+    requiresLiveDom: true,
     presets: ["conversion-focused", "deep", "agent-ready"],
+    create: (options) => createConversionLens(options),
   },
   {
     id: "message-clarity",
@@ -128,9 +131,11 @@ export const BUILT_IN_LENS_REGISTRY = [
   {
     id: "task-completion",
     method: "judged",
+    requiredArtifacts: ["dom-snapshot"],
     requiresModel: true,
-    requiresLiveDom: false,
+    requiresLiveDom: true,
     presets: ["standard", "deep", "agent-ready"],
+    create: (options) => createTaskCompletionLens(options),
   },
   {
     id: "agent-implementation",
