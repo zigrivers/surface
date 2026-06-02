@@ -1,10 +1,12 @@
 #!/usr/bin/env node
+import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
 import {
   DEFAULT_COMPOSITION_STAGE_IDS,
   DEFAULT_SURFACE_CONFIG,
   DepthSchema,
+  GatePolicySchema,
   PresetSchema,
   SurfaceSarifLogSchema,
   createGitHubChecksExporter,
@@ -1106,22 +1108,79 @@ function githubChecksOptionsFromEnv(env: SurfaceCliEnv): Result<GitHubChecksExpo
   });
 }
 
+async function gatePolicyForOptions(
+  options: GateCommandOptions,
+): Promise<Result<SurfaceConfig["reporting"]["gatePolicy"]>> {
+  if (options.policy === undefined) {
+    return resultOk(DEFAULT_SURFACE_CONFIG.reporting.gatePolicy);
+  }
+
+  let decoded: unknown;
+
+  try {
+    decoded = JSON.parse(await readFile(options.policy, "utf8")) as unknown;
+  } catch (cause) {
+    return resultErr(
+      createSurfaceError("policy_invalid", "Gate policy file could not be read or parsed.", {
+        cause,
+        details: { path: options.policy },
+      }),
+    );
+  }
+
+  const parsed = GatePolicySchema.safeParse(decoded);
+
+  if (!parsed.success) {
+    return resultErr(
+      createSurfaceError("policy_invalid", "Gate policy file is invalid.", {
+        cause: parsed.error,
+        details: { path: options.policy },
+      }),
+    );
+  }
+
+  return resultOk(parsed.data);
+}
+
+function trackedFindingsForRunOption(
+  state: ProjectStateSnapshot,
+  runId: string | undefined,
+): Result<readonly TrackedFinding[]> {
+  if (runId === undefined) {
+    return resultOk(state.trackedFindings ?? []);
+  }
+
+  const record = state.runRecords?.find((candidate) => candidate.runId === runId);
+
+  if (record === undefined) {
+    return resultErr(
+      createSurfaceError("run_not_found", "No stored run matched the requested run id.", {
+        details: { runId },
+      }),
+    );
+  }
+
+  return resultOk(record.trackedFindings);
+}
+
 async function validateRun(
   composition: SurfaceComposition,
   options: ValidateCommandOptions,
 ): Promise<Result<ValidateOutput>> {
-  void options;
-
   const state = await composition.stateStore.readState();
 
   if (!isResultOk(state)) {
     return state;
   }
 
-  const trackedFindings = state.value.trackedFindings ?? [];
+  const trackedFindings = trackedFindingsForRunOption(state.value, options.run);
+
+  if (!isResultOk(trackedFindings)) {
+    return trackedFindings;
+  }
 
   return resultOk({
-    checks: trackedFindings.map((trackedFinding) => ({
+    checks: trackedFindings.value.map((trackedFinding) => ({
       id: trackedFinding.identityKey,
       passed: trackedFinding.status !== "identity-broken",
       validation: trackedFinding.validation,
@@ -1136,25 +1195,31 @@ async function evaluateGate(
   composition: SurfaceComposition,
   options: GateCommandOptions,
 ): Promise<Result<GateOutput>> {
-  void options;
-
   const state = await composition.stateStore.readState();
 
   if (!isResultOk(state)) {
     return state;
   }
 
+  const policy = await gatePolicyForOptions(options);
+
+  if (!isResultOk(policy)) {
+    return policy;
+  }
+
+  const trackedFindings = trackedFindingsForRunOption(state.value, options.run);
+
+  if (!isResultOk(trackedFindings)) {
+    return trackedFindings;
+  }
+
   const latestBaseline = state.value.baselines?.at(-1);
   const findings = (state.value.findings ?? []) as readonly Finding[];
 
-  const gateResult = await composition.gateEvaluator.evaluate(
-    findings,
-    DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
-    {
-      ...(latestBaseline === undefined ? {} : { baseline: latestBaseline }),
-      trackedFindings: state.value.trackedFindings ?? [],
-    },
-  );
+  const gateResult = await composition.gateEvaluator.evaluate(findings, policy.value, {
+    ...(latestBaseline === undefined ? {} : { baseline: latestBaseline }),
+    trackedFindings: trackedFindings.value,
+  });
 
   if (!isResultOk(gateResult)) {
     return gateResult;

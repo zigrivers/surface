@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { createSurfaceComposition, ok } from "@surface/core";
@@ -435,6 +439,7 @@ describe("@surface/cli findings and loop verbs", () => {
       argv: ["node", "surface", "--json", "validate", "--run", "run_eval"],
       composition: createSurfaceComposition({
         stateStore: new MemoryStateStore({
+          runRecords: [{ runId: "run_eval", trackedFindings: [testTrackedFinding()] }],
           trackedFindings: [testTrackedFinding()],
           version: "1.0",
         }),
@@ -455,6 +460,75 @@ describe("@surface/cli findings and loop verbs", () => {
         ],
       },
       ok: true,
+    });
+  });
+
+  it("uses validate --run to select tracked findings from the requested run", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "validate", "--run", "run_selected"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          runRecords: [
+            {
+              runId: "run_other",
+              trackedFindings: [
+                testTrackedFinding({
+                  currentFindingId: "finding_other",
+                  identityKey: "identity_other",
+                }),
+              ],
+            },
+            {
+              runId: "run_selected",
+              trackedFindings: [testTrackedFinding()],
+            },
+          ],
+          trackedFindings: [
+            testTrackedFinding({
+              currentFindingId: "finding_top_level",
+              identityKey: "identity_top_level",
+            }),
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "validate",
+      data: {
+        checks: [
+          {
+            findingId: "finding_button_contrast",
+            id: "identity_button_contrast",
+          },
+        ],
+      },
+      ok: true,
+    });
+  });
+
+  it("returns run_not_found when validate --run references a missing run", async () => {
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "validate", "--run", "missing"],
+      composition: createSurfaceComposition({
+        stateStore: new MemoryStateStore({
+          runRecords: [{ runId: "run_eval", trackedFindings: [testTrackedFinding()] }],
+          version: "1.0",
+        }),
+      }),
+      io: { stderr: (chunk) => stderr.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stderr.join(""))).toMatchObject({
+      command: "validate",
+      error: { code: "run_not_found", kind: "RuntimeError" },
+      ok: false,
     });
   });
 
@@ -483,6 +557,49 @@ describe("@surface/cli findings and loop verbs", () => {
       },
       ok: true,
     });
+  });
+
+  it("uses gate --policy to load a gate policy file", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-cli-gate-policy-"));
+    const policyPath = join(root, "gate-policy.json");
+    const stdout: string[] = [];
+
+    try {
+      await writeFile(
+        policyPath,
+        JSON.stringify({
+          failOnNewMeasuredAtOrAbove: "P0",
+          thresholds: {},
+          neverFailOn: ["judged", "gatedForHuman"],
+        }),
+      );
+
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "gate", "--policy", policyPath],
+        composition: createSurfaceComposition({
+          stateStore: new MemoryStateStore({
+            findings: [testFinding()],
+            version: "1.0",
+          }),
+        }),
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        command: "gate",
+        data: {
+          gateResult: {
+            exitCode: 0,
+            failingFindingIds: [],
+            passed: true,
+          },
+        },
+        ok: true,
+      });
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("traces a tracked finding by current finding id", async () => {
