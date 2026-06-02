@@ -7,6 +7,7 @@ import {
   DepthSchema,
   PresetSchema,
   SurfaceSarifLogSchema,
+  createGitHubChecksExporter,
   createSurfaceComposition,
   createSurfaceError,
   createSarifRenderer,
@@ -14,6 +15,8 @@ import {
   toCliErrorEnvelope,
   type Backlog as CoreBacklog,
   type Finding as CoreFinding,
+  type GitHubChecksExport,
+  type GitHubChecksExporterOptions,
   type SurfaceSarifLog,
 } from "@surface/core";
 import { Command, CommanderError } from "commander";
@@ -178,10 +181,12 @@ export type SurfaceCliIo = {
   readonly stdout?: (chunk: string) => void;
   readonly stderr?: (chunk: string) => void;
 };
+export type SurfaceCliEnv = Readonly<Record<string, string | undefined>>;
 
 export type RunSurfaceCliOptions = SurfaceCompositionOptions & {
   readonly argv?: readonly string[];
   readonly composition?: CoreSurfaceComposition | SurfaceComposition;
+  readonly env?: SurfaceCliEnv;
   readonly io?: SurfaceCliIo;
 };
 
@@ -230,6 +235,9 @@ type BacklogOutput = {
 };
 type SarifExportOutput = {
   readonly sarif: SurfaceSarifLog;
+};
+type GitHubChecksExportOutput = {
+  readonly checkRun: GitHubChecksExport;
 };
 type ValidateOutput = {
   readonly checks: readonly {
@@ -316,8 +324,9 @@ const DEFAULT_LOCALHOST_TARGET = "http://localhost:3000";
 
 export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise<CliExitCode> {
   const composition = options.composition ?? createSurfaceComposition(options);
+  const env = options.env ?? process.env;
   const io = options.io ?? {};
-  const program = createSurfaceCliProgram({ composition, io });
+  const program = createSurfaceCliProgram({ composition, env, io });
 
   try {
     await program.parseAsync([...(options.argv ?? process.argv)], { from: "node" });
@@ -347,9 +356,11 @@ export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise
 
 export function createSurfaceCliProgram(input: {
   readonly composition: SurfaceComposition;
+  readonly env?: SurfaceCliEnv;
   readonly io?: SurfaceCliIo;
 }): Command {
   const program = new Command();
+  const env = input.env ?? process.env;
   const io = input.io ?? {};
 
   program
@@ -486,7 +497,7 @@ export function createSurfaceCliProgram(input: {
     .option("--run <runId>", "run id")
     .option("--all", "include all backlog details in human output")
     .action(async (options: BacklogCommandOptions) => {
-      const result = await readBacklog(input.composition, options);
+      const result = await readBacklog(input.composition, options, env);
 
       emitResult({
         command: "backlog",
@@ -859,8 +870,13 @@ async function explainFinding(
 async function readBacklog(
   composition: SurfaceComposition,
   options: BacklogCommandOptions,
-): Promise<Result<BacklogOutput | SarifExportOutput>> {
-  if (options.export !== undefined && options.export !== "sarif") {
+  env: SurfaceCliEnv,
+): Promise<Result<BacklogOutput | SarifExportOutput | GitHubChecksExportOutput>> {
+  if (
+    options.export !== undefined &&
+    options.export !== "sarif" &&
+    options.export !== "github-checks"
+  ) {
     return resultErr(
       createSurfaceError("unknown_export_target", "No CLI issue exporter matched the target.", {
         details: { exportTarget: options.export },
@@ -885,44 +901,128 @@ async function readBacklog(
   }
 
   if (options.export === "sarif") {
-    const rendered = await createSarifRenderer().render(
-      (state.value.findings ?? []) as readonly CoreFinding[],
-      backlog as CoreBacklog,
-    );
+    const sarif = await renderSarifForBacklog(state.value.findings, backlog);
 
-    if (!isResultOk(rendered)) {
-      return rendered;
-    }
-
-    let decoded: unknown;
-
-    try {
-      decoded = JSON.parse(new TextDecoder().decode(rendered.value.bytes)) as unknown;
-    } catch (cause) {
-      return resultErr(
-        createSurfaceError("export_failed", "SARIF export could not be decoded.", { cause }),
-      );
-    }
-
-    const sarif = SurfaceSarifLogSchema.safeParse(decoded);
-
-    if (!sarif.success) {
-      return resultErr(
-        createSurfaceError("export_failed", "SARIF export produced invalid output.", {
-          cause: sarif.error,
-        }),
-      );
+    if (!isResultOk(sarif)) {
+      return sarif;
     }
 
     return resultOk({
-      sarif: sarif.data,
+      sarif: sarif.value,
     });
+  }
+
+  if (options.export === "github-checks") {
+    const githubOptions = githubChecksOptionsFromEnv(env);
+
+    if (!isResultOk(githubOptions)) {
+      return githubOptions;
+    }
+
+    const sarif = await renderSarifForBacklog(state.value.findings, backlog);
+
+    if (!isResultOk(sarif)) {
+      return sarif;
+    }
+
+    const exported = await createGitHubChecksExporter(githubOptions.value).export({
+      backlog: backlog as CoreBacklog,
+      localArtifactPath: ".surface/state.json",
+      sarif: sarif.value,
+    });
+
+    if (!isResultOk(exported)) {
+      return exported;
+    }
+
+    return resultOk({ checkRun: exported.value });
   }
 
   return resultOk({
     backlog: backlog.entries,
     backlogId: backlog.id,
     runId: backlog.runId,
+  });
+}
+
+async function renderSarifForBacklog(
+  findings: ProjectStateSnapshot["findings"] | undefined,
+  backlog: ProjectStateSnapshot["backlog"],
+): Promise<Result<SurfaceSarifLog>> {
+  const rendered = await createSarifRenderer().render(
+    (findings ?? []) as readonly CoreFinding[],
+    backlog as CoreBacklog,
+  );
+
+  if (!isResultOk(rendered)) {
+    return rendered;
+  }
+
+  let decoded: unknown;
+
+  try {
+    decoded = JSON.parse(new TextDecoder().decode(rendered.value.bytes)) as unknown;
+  } catch (cause) {
+    return resultErr(
+      createSurfaceError("export_failed", "SARIF export could not be decoded.", { cause }),
+    );
+  }
+
+  const sarif = SurfaceSarifLogSchema.safeParse(decoded);
+
+  if (!sarif.success) {
+    return resultErr(
+      createSurfaceError("export_failed", "SARIF export produced invalid output.", {
+        cause: sarif.error,
+      }),
+    );
+  }
+
+  return resultOk(sarif.data);
+}
+
+function githubChecksOptionsFromEnv(env: SurfaceCliEnv): Result<GitHubChecksExporterOptions> {
+  const repository = env.SURFACE_GITHUB_REPOSITORY ?? env.GITHUB_REPOSITORY;
+  const headSha = env.SURFACE_GITHUB_HEAD_SHA ?? env.GITHUB_HEAD_SHA ?? env.GITHUB_SHA;
+  const token = env.SURFACE_GITHUB_TOKEN ?? env.GITHUB_TOKEN;
+  const checkName = env.SURFACE_GITHUB_CHECK_NAME;
+
+  if (repository === undefined || headSha === undefined || token === undefined) {
+    return resultErr(
+      createSurfaceError("export_failed", "GitHub Checks export requires PR context and token.", {
+        details: {
+          missing: [
+            repository === undefined ? "GITHUB_REPOSITORY" : undefined,
+            headSha === undefined ? "GITHUB_SHA" : undefined,
+            token === undefined ? "GITHUB_TOKEN" : undefined,
+          ].filter((name): name is string => name !== undefined),
+        },
+      }),
+    );
+  }
+
+  const [owner, repo, ...extra] = repository.split("/");
+
+  if (
+    owner === undefined ||
+    repo === undefined ||
+    extra.length > 0 ||
+    owner === "" ||
+    repo === ""
+  ) {
+    return resultErr(
+      createSurfaceError("export_failed", "GitHub Checks export requires owner/repo context.", {
+        details: { repository },
+      }),
+    );
+  }
+
+  return resultOk({
+    owner,
+    repo,
+    headSha,
+    token,
+    ...(checkName === undefined ? {} : { checkName }),
   });
 }
 
@@ -1328,6 +1428,26 @@ function humanizeAudit(data: unknown, options: { readonly all: boolean }): strin
 function humanizeBacklog(data: unknown, options: { readonly all: boolean }): string {
   if (!isRecord(data)) {
     return `surface backlog: ${JSON.stringify(data)}\n`;
+  }
+
+  if (isRecord(data.checkRun)) {
+    const checkRun = data.checkRun;
+    const target = stringValue(checkRun.target) ?? "github-checks";
+    const status = stringValue(checkRun.status) ?? "unknown";
+    const annotationCount = numberValue(checkRun.annotationCount) ?? 0;
+
+    return `surface backlog export: ${target} ${status} (${annotationCount} ${plural(
+      annotationCount,
+      "annotation",
+    )})\n`;
+  }
+
+  if (isRecord(data.sarif)) {
+    const resultCount = arrayValue(data.sarif.runs).flatMap((run) =>
+      isRecord(run) ? arrayValue(run.results) : [],
+    ).length;
+
+    return `surface backlog export: sarif ${resultCount} ${plural(resultCount, "result")}\n`;
   }
 
   const backlog = arrayValue(data.backlog);
