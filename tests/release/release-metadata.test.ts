@@ -93,4 +93,14 @@ describe("release package metadata", () => {
 
     expect(manifest.bin).toEqual({ surface: "./dist/index.js" });
   });
+
+  it("packs release tarballs into the root publish directory", async () => {
+    const workflow = await readFile(join(ROOT, ".github/workflows/release.yml"), "utf8");
+
+    expect(workflow).toContain('PACK_DIR="$PWD/.release-packs"');
+    for (const pkg of RELEASE_PACKAGES) {
+      expect(workflow).toContain(`pnpm --dir ${pkg.dir} pack --pack-destination "$PACK_DIR"`);
+    }
+    expect(workflow).not.toContain("pack --pack-destination .release-packs");
+  });
 });
