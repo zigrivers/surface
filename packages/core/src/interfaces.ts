@@ -89,6 +89,7 @@ export interface CaptureNetworkPolicy {
 export interface CaptureOptions {
   readonly config: SurfaceConfig["capture"];
   readonly artifactRoot?: string;
+  readonly artifactWriter?: ArtifactWriter;
   readonly authStateRef?: string;
   readonly computedStyleLimit?: number;
   readonly navigationTimeoutMs?: number;
@@ -293,6 +294,12 @@ export interface PersistArtifactIntent {
 export interface PersistedArtifactRef {
   readonly path: string;
   readonly sha256: string;
+}
+
+export interface ArtifactWriter {
+  writeArtifact(
+    intent: PersistArtifactIntent,
+  ): MaybePromise<Result<PersistedArtifactRef, SurfaceError>>;
 }
 
 export interface ProjectStateSnapshot {

@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -9,7 +9,7 @@ import { createStaticCaptureBackend } from "./capture.js";
 import { resolveSurfaceConfig } from "./config.js";
 import { createContextIngestor } from "./context-ingestor.js";
 import { createSurfaceError, isErr, isOk, ok } from "./errors.js";
-import type { FrameworkAdapter } from "./interfaces.js";
+import type { ArtifactWriter, FrameworkAdapter, PersistArtifactIntent } from "./interfaces.js";
 
 const clock = () => "2026-05-31T18:00:00.000Z";
 const oneByOnePngBase64 =
@@ -26,6 +26,58 @@ async function removeTemporaryRoots(...roots: readonly string[]): Promise<void> 
 }
 
 describe("createContextIngestor", () => {
+  it("materializes inline context inputs through the injected artifact writer", async () => {
+    const root = await createTemporaryRoot();
+    const writes: PersistArtifactIntent[] = [];
+    const artifactWriter: ArtifactWriter = {
+      writeArtifact: (intent) => {
+        writes.push(intent);
+
+        return ok({
+          path: `.surface/${intent.relativePath}`,
+          sha256: "sha256-context",
+        });
+      },
+    };
+
+    try {
+      const result = await createContextIngestor({
+        artifactWriter,
+        clock,
+        projectRoot: root,
+      }).ingest({
+        source: { contents: "<main>Inline source</main>" },
+      });
+
+      expect(isOk(result)).toBe(true);
+      expect(writes).toHaveLength(1);
+      const write = writes[0];
+      expect(write).toBeDefined();
+
+      if (write === undefined) {
+        return;
+      }
+
+      expect(write).toEqual({
+        bytes: Buffer.from("<main>Inline source</main>", "utf8"),
+        kind: "generated",
+        relativePath: write.relativePath,
+      });
+      expect(write.relativePath).toMatch(/^context-inputs\/source-[a-f0-9]{12}\.html$/u);
+      if (result.ok) {
+        expect(result.value.target).toEqual({
+          kind: "component",
+          ref: resolve(
+            root,
+            write.relativePath.replace(/^context-inputs/u, ".surface/context-inputs"),
+          ),
+        });
+      }
+    } finally {
+      await removeTemporaryRoots(root);
+    }
+  });
+
   it("constructs screenshot targets and provenance for contents-only screenshot inputs", async () => {
     const root = await createTemporaryRoot();
 

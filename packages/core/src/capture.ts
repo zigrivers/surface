@@ -1,9 +1,10 @@
 import { randomBytes } from "node:crypto";
 import { lookup } from "node:dns/promises";
 import { accessSync, constants as fsConstants } from "node:fs";
-import { mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { delimiter, extname, isAbsolute, join, relative, resolve } from "node:path";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
 
 import { execa } from "execa";
 
@@ -16,6 +17,7 @@ import type {
   CaptureBackend,
   CaptureNetworkPolicy,
   CaptureOptions,
+  ArtifactWriter,
   Target,
 } from "./interfaces.js";
 
@@ -101,6 +103,7 @@ export interface CaptureService {
 }
 
 export interface CaptureServiceOptions {
+  readonly artifactWriter?: ArtifactWriter;
   readonly backends: readonly CaptureBackend[];
   readonly staticFallback: CaptureBackend;
 }
@@ -181,7 +184,7 @@ interface PlaywrightPage {
     url: string,
     options: { readonly timeout: number; readonly waitUntil: "domcontentloaded" | "load" },
   ): Promise<unknown>;
-  screenshot(options: { readonly fullPage: true; readonly path: string }): Promise<unknown>;
+  screenshot(options: { readonly fullPage: true; readonly path?: string }): Promise<Buffer>;
   url(): string;
 }
 
@@ -221,7 +224,17 @@ export function createCaptureService(options: CaptureServiceOptions): CaptureSer
         return err(authorization.error);
       }
 
-      const authorizedOptions = withCaptureNetworkPolicy(captureOptions, authorization.value);
+      const authorizedOptions = withCaptureNetworkPolicy(
+        {
+          ...captureOptions,
+          ...(captureOptions.artifactRoot !== undefined ||
+          captureOptions.artifactWriter !== undefined ||
+          options.artifactWriter === undefined
+            ? {}
+            : { artifactWriter: options.artifactWriter }),
+        },
+        authorization.value,
+      );
       const detectedBackend = selectCaptureBackend(options.backends);
       const backend = detectedBackend ?? options.staticFallback;
       const result = await observeBackend(
@@ -249,6 +262,53 @@ export function createCaptureService(options: CaptureServiceOptions): CaptureSer
       return result;
     },
   };
+}
+
+function shouldUseStateArtifactWriter(
+  captureOptions: CaptureOptions,
+): captureOptions is CaptureOptions & { readonly artifactWriter: ArtifactWriter } {
+  return captureOptions.artifactRoot === undefined && captureOptions.artifactWriter !== undefined;
+}
+
+async function writeCaptureArtifact(input: {
+  readonly captureId: string;
+  readonly captureOptions: CaptureOptions;
+  readonly fileName: string;
+  readonly id: string;
+  readonly bytes: Uint8Array;
+  readonly redacted: boolean;
+  readonly type: CaptureArtifactType;
+}): Promise<Result<CaptureArtifact, SurfaceError>> {
+  if (shouldUseStateArtifactWriter(input.captureOptions)) {
+    const written = await input.captureOptions.artifactWriter.writeArtifact({
+      kind: "capture",
+      relativePath: `captures/${input.captureId}/${input.fileName}`,
+      bytes: input.bytes,
+    });
+
+    if (!written.ok) {
+      return written;
+    }
+
+    return ok({
+      id: input.id,
+      path: written.value.path,
+      redacted: input.redacted,
+      type: input.type,
+    });
+  }
+
+  const artifactRoot = input.captureOptions.artifactRoot ?? ".surface/captures";
+  const artifactPath = join(artifactRoot, input.captureId, input.fileName);
+  await mkdir(dirname(artifactPath), { recursive: true });
+  await writeFile(artifactPath, input.bytes);
+
+  return ok({
+    id: input.id,
+    path: artifactPath,
+    redacted: input.redacted,
+    type: input.type,
+  });
 }
 
 export function createPlaywrightCaptureBackend(
@@ -287,9 +347,6 @@ export function createPlaywrightCaptureBackend(
       const artifactRoot = captureOptions.artifactRoot ?? ".surface/captures";
       const captureRoot = join(artifactRoot, captureId);
       const screenshotPath = join(captureRoot, "screenshot.png");
-      const domPath = join(captureRoot, "dom.html");
-      const accessibilityPath = join(captureRoot, "accessibility-tree.json");
-      const computedStylesPath = join(captureRoot, "computed-styles.json");
       // Capture-write redaction is applied before artifacts become evidence.
       const redactionRules = compileCaptureRedactionRules(captureOptions.config.redactionRules);
 
@@ -314,7 +371,9 @@ export function createPlaywrightCaptureBackend(
         );
         page = await context.newPage();
 
-        await mkdir(captureRoot, { recursive: true });
+        if (!shouldUseStateArtifactWriter(captureOptions)) {
+          await mkdir(captureRoot, { recursive: true });
+        }
         await page.goto(targetUrl, {
           timeout: captureOptions.navigationTimeoutMs ?? 15_000,
           waitUntil: captureOptions.navigationWaitUntil ?? "load",
@@ -330,23 +389,63 @@ export function createPlaywrightCaptureBackend(
           return err(authInjectionVerificationError(verification));
         }
 
-        await page.screenshot({ fullPage: true, path: screenshotPath });
+        const screenshotBytes = shouldUseStateArtifactWriter(captureOptions)
+          ? await page.screenshot({ fullPage: true })
+          : await page
+              .screenshot({ fullPage: true, path: screenshotPath })
+              .then(async () => await readFile(screenshotPath));
         const screenshotRedaction = redactArtifactBytes(
-          await readFile(screenshotPath),
+          screenshotBytes,
           "screenshot",
           redactionRules.value,
         );
-        await writeFile(screenshotPath, screenshotRedaction.contents);
+        const screenshotArtifact = await writeCaptureArtifact({
+          bytes: screenshotRedaction.contents,
+          captureId,
+          captureOptions,
+          fileName: "screenshot.png",
+          id: "screenshot",
+          redacted: screenshotRedaction.redacted,
+          type: "screenshot",
+        });
+
+        if (!screenshotArtifact.ok) {
+          return err(screenshotArtifact.error);
+        }
 
         const domRedaction = redactArtifactText(await page.content(), "dom", redactionRules.value);
-        await writeFile(domPath, domRedaction.contents);
+        const domArtifact = await writeCaptureArtifact({
+          bytes: Buffer.from(domRedaction.contents, "utf8"),
+          captureId,
+          captureOptions,
+          fileName: "dom.html",
+          id: "dom",
+          redacted: domRedaction.redacted,
+          type: "dom-snapshot",
+        });
+
+        if (!domArtifact.ok) {
+          return err(domArtifact.error);
+        }
 
         const accessibilityRedaction = redactArtifactText(
           JSON.stringify(await playwrightAccessibilitySnapshot(page, context), null, 2),
           "dom",
           redactionRules.value,
         );
-        await writeFile(accessibilityPath, accessibilityRedaction.contents);
+        const accessibilityArtifact = await writeCaptureArtifact({
+          bytes: Buffer.from(accessibilityRedaction.contents, "utf8"),
+          captureId,
+          captureOptions,
+          fileName: "accessibility-tree.json",
+          id: "accessibility-tree",
+          redacted: accessibilityRedaction.redacted,
+          type: "accessibility-tree",
+        });
+
+        if (!accessibilityArtifact.ok) {
+          return err(accessibilityArtifact.error);
+        }
 
         const computedStylesRedaction = redactArtifactText(
           JSON.stringify(
@@ -357,34 +456,26 @@ export function createPlaywrightCaptureBackend(
           "dom",
           redactionRules.value,
         );
-        await writeFile(computedStylesPath, computedStylesRedaction.contents);
+        const computedStylesArtifact = await writeCaptureArtifact({
+          bytes: Buffer.from(computedStylesRedaction.contents, "utf8"),
+          captureId,
+          captureOptions,
+          fileName: "computed-styles.json",
+          id: "computed-styles",
+          redacted: computedStylesRedaction.redacted,
+          type: "computed-styles",
+        });
+
+        if (!computedStylesArtifact.ok) {
+          return err(computedStylesArtifact.error);
+        }
 
         return ok({
           artifacts: [
-            {
-              id: "screenshot",
-              path: screenshotPath,
-              redacted: screenshotRedaction.redacted,
-              type: "screenshot",
-            },
-            {
-              id: "dom",
-              path: domPath,
-              redacted: domRedaction.redacted,
-              type: "dom-snapshot",
-            },
-            {
-              id: "accessibility-tree",
-              path: accessibilityPath,
-              redacted: accessibilityRedaction.redacted,
-              type: "accessibility-tree",
-            },
-            {
-              id: "computed-styles",
-              path: computedStylesPath,
-              redacted: computedStylesRedaction.redacted,
-              type: "computed-styles",
-            },
+            screenshotArtifact.value,
+            domArtifact.value,
+            accessibilityArtifact.value,
+            computedStylesArtifact.value,
           ],
           backend: "playwright",
           capturedAt: clock(),
@@ -449,18 +540,26 @@ export function createAgentBrowserCaptureBackend(
       const artifactRoot = captureOptions.artifactRoot ?? ".surface/captures";
       const captureRoot = join(artifactRoot, captureId);
       const screenshotPath = join(captureRoot, "screenshot.png");
-      const domPath = join(captureRoot, "dom.html");
-      const accessibilityPath = join(captureRoot, "accessibility-tree.json");
-      const computedStylesPath = join(captureRoot, "computed-styles.json");
       const sessionName = options.sessionName ?? `surface-${captureId}`;
       const redactionRules = compileCaptureRedactionRules(captureOptions.config.redactionRules);
+      let temporaryCaptureRoot: string | undefined;
 
       if (!redactionRules.ok) {
         return err(redactionRules.error);
       }
 
       try {
-        await mkdir(captureRoot, { recursive: true });
+        temporaryCaptureRoot = shouldUseStateArtifactWriter(captureOptions)
+          ? await mkdtemp(join(tmpdir(), "surface-agent-browser-capture-"))
+          : undefined;
+        const screenshotOutputPath =
+          temporaryCaptureRoot === undefined
+            ? screenshotPath
+            : join(temporaryCaptureRoot, "screenshot.png");
+
+        if (!shouldUseStateArtifactWriter(captureOptions)) {
+          await mkdir(captureRoot, { recursive: true });
+        }
         await runAgentBrowserJson(
           runCommand,
           sessionName,
@@ -476,7 +575,7 @@ export function createAgentBrowserCaptureBackend(
         ]);
         await runAgentBrowserJson(runCommand, sessionName, "screenshot", [
           "--full",
-          screenshotPath,
+          screenshotOutputPath,
         ]);
 
         const snapshot = await runAgentBrowserJson(runCommand, sessionName, "snapshot", ["-i"]);
@@ -502,59 +601,87 @@ export function createAgentBrowserCaptureBackend(
         }
 
         const screenshotRedaction = redactArtifactBytes(
-          await readFile(screenshotPath),
+          await readFile(screenshotOutputPath),
           "screenshot",
           redactionRules.value,
         );
-        await writeFile(screenshotPath, screenshotRedaction.contents);
+        const screenshotArtifact = await writeCaptureArtifact({
+          bytes: screenshotRedaction.contents,
+          captureId,
+          captureOptions,
+          fileName: "screenshot.png",
+          id: "screenshot",
+          redacted: screenshotRedaction.redacted,
+          type: "screenshot",
+        });
+
+        if (!screenshotArtifact.ok) {
+          return err(screenshotArtifact.error);
+        }
 
         const domRedaction = redactArtifactText(
           agentBrowserDomHtml(dom),
           "dom",
           redactionRules.value,
         );
-        await writeFile(domPath, domRedaction.contents);
+        const domArtifact = await writeCaptureArtifact({
+          bytes: Buffer.from(domRedaction.contents, "utf8"),
+          captureId,
+          captureOptions,
+          fileName: "dom.html",
+          id: "dom",
+          redacted: domRedaction.redacted,
+          type: "dom-snapshot",
+        });
+
+        if (!domArtifact.ok) {
+          return err(domArtifact.error);
+        }
 
         const accessibilityRedaction = redactArtifactText(
           JSON.stringify(agentBrowserSnapshotWithRefs(snapshot), null, 2),
           "dom",
           redactionRules.value,
         );
-        await writeFile(accessibilityPath, accessibilityRedaction.contents);
+        const accessibilityArtifact = await writeCaptureArtifact({
+          bytes: Buffer.from(accessibilityRedaction.contents, "utf8"),
+          captureId,
+          captureOptions,
+          fileName: "accessibility-tree.json",
+          id: "accessibility-tree",
+          redacted: accessibilityRedaction.redacted,
+          type: "accessibility-tree",
+        });
+
+        if (!accessibilityArtifact.ok) {
+          return err(accessibilityArtifact.error);
+        }
 
         const computedStylesRedaction = redactArtifactText(
           JSON.stringify(styles, null, 2),
           "dom",
           redactionRules.value,
         );
-        await writeFile(computedStylesPath, computedStylesRedaction.contents);
+        const computedStylesArtifact = await writeCaptureArtifact({
+          bytes: Buffer.from(computedStylesRedaction.contents, "utf8"),
+          captureId,
+          captureOptions,
+          fileName: "computed-styles.json",
+          id: "computed-styles",
+          redacted: computedStylesRedaction.redacted,
+          type: "computed-styles",
+        });
+
+        if (!computedStylesArtifact.ok) {
+          return err(computedStylesArtifact.error);
+        }
 
         return ok({
           artifacts: [
-            {
-              id: "screenshot",
-              path: screenshotPath,
-              redacted: screenshotRedaction.redacted,
-              type: "screenshot",
-            },
-            {
-              id: "dom",
-              path: domPath,
-              redacted: domRedaction.redacted,
-              type: "dom-snapshot",
-            },
-            {
-              id: "accessibility-tree",
-              path: accessibilityPath,
-              redacted: accessibilityRedaction.redacted,
-              type: "accessibility-tree",
-            },
-            {
-              id: "computed-styles",
-              path: computedStylesPath,
-              redacted: computedStylesRedaction.redacted,
-              type: "computed-styles",
-            },
+            screenshotArtifact.value,
+            domArtifact.value,
+            accessibilityArtifact.value,
+            computedStylesArtifact.value,
           ],
           backend: "agent-browser",
           capturedAt: clock(),
@@ -569,6 +696,9 @@ export function createAgentBrowserCaptureBackend(
 
         return err(agentBrowserCaptureError(cause, target));
       } finally {
+        if (temporaryCaptureRoot !== undefined) {
+          await rm(temporaryCaptureRoot, { force: true, recursive: true }).catch(() => {});
+        }
         await runAgentBrowserJson(runCommand, sessionName, "close", []).catch(() => {});
       }
     },
@@ -751,8 +881,6 @@ export function createStaticCaptureBackend(
       const captureRoot = join(artifactRoot, captureId);
       const sourcePath = isStaticFileTarget(target) ? resolve(target.ref) : undefined;
       const extension = sourcePath === undefined ? undefined : extname(sourcePath).toLowerCase();
-      const screenshotPath = join(captureRoot, `screenshot${extension ?? ".png"}`);
-      const domPath = join(captureRoot, "dom.html");
       let captureRootCreated = false;
       const redactionRules = compileCaptureRedactionRules(captureOptions.config.redactionRules);
 
@@ -785,7 +913,6 @@ export function createStaticCaptureBackend(
           captureId,
           artifactRoot,
           captureRoot,
-          domPath,
           allowedSourceRoots,
           clock,
           redactionRules.value,
@@ -884,29 +1011,36 @@ export function createStaticCaptureBackend(
           redactionRules.value,
         );
 
-        await mkdir(artifactRoot, { recursive: true });
-        try {
-          await mkdir(captureRoot);
-        } catch (cause) {
-          if (isFileSystemError(cause, "EEXIST")) {
-            return err(staticCaptureRootExistsError(captureId, target));
+        if (!shouldUseStateArtifactWriter(captureOptions)) {
+          await mkdir(artifactRoot, { recursive: true });
+          try {
+            await mkdir(captureRoot);
+          } catch (cause) {
+            if (isFileSystemError(cause, "EEXIST")) {
+              return err(staticCaptureRootExistsError(captureId, target));
+            }
+
+            throw cause;
           }
-
-          throw cause;
+          captureRootCreated = true;
         }
-        captureRootCreated = true;
 
-        await writeFile(screenshotPath, screenshotRedaction.contents);
+        const screenshotArtifact = await writeCaptureArtifact({
+          bytes: screenshotRedaction.contents,
+          captureId,
+          captureOptions,
+          fileName: `screenshot${extension ?? ".png"}`,
+          id: "screenshot",
+          redacted: screenshotRedaction.redacted,
+          type: "screenshot",
+        });
+
+        if (!screenshotArtifact.ok) {
+          return err(screenshotArtifact.error);
+        }
 
         return ok({
-          artifacts: [
-            {
-              id: "screenshot",
-              path: screenshotPath,
-              redacted: screenshotRedaction.redacted,
-              type: "screenshot",
-            },
-          ],
+          artifacts: [screenshotArtifact.value],
           backend: "static",
           capturedAt: clock(),
           degradation: {
@@ -944,7 +1078,6 @@ async function captureStaticTextTarget(
   captureId: string,
   artifactRoot: string,
   captureRoot: string,
-  domPath: string,
   allowedSourceRoots: readonly string[] | undefined,
   clock: CaptureClock,
   redactionRules: readonly CompiledCaptureRedactionRule[],
@@ -1000,29 +1133,36 @@ async function captureStaticTextTarget(
     const sourceText = await readFile(sourceContainment.value, "utf8");
     const domRedaction = redactArtifactText(sourceText, "dom", redactionRules);
 
-    await mkdir(artifactRoot, { recursive: true });
-    try {
-      await mkdir(captureRoot);
-    } catch (cause) {
-      if (isFileSystemError(cause, "EEXIST")) {
-        return err(staticCaptureRootExistsError(captureId, target));
+    if (!shouldUseStateArtifactWriter(captureOptions)) {
+      await mkdir(artifactRoot, { recursive: true });
+      try {
+        await mkdir(captureRoot);
+      } catch (cause) {
+        if (isFileSystemError(cause, "EEXIST")) {
+          return err(staticCaptureRootExistsError(captureId, target));
+        }
+
+        throw cause;
       }
-
-      throw cause;
+      captureRootCreated = true;
     }
-    captureRootCreated = true;
 
-    await writeFile(domPath, domRedaction.contents);
+    const domArtifact = await writeCaptureArtifact({
+      bytes: Buffer.from(domRedaction.contents, "utf8"),
+      captureId,
+      captureOptions,
+      fileName: "dom.html",
+      id: "dom",
+      redacted: domRedaction.redacted,
+      type: "dom-snapshot",
+    });
+
+    if (!domArtifact.ok) {
+      return err(domArtifact.error);
+    }
 
     return ok({
-      artifacts: [
-        {
-          id: "dom",
-          path: domPath,
-          redacted: domRedaction.redacted,
-          type: "dom-snapshot",
-        },
-      ],
+      artifacts: [domArtifact.value],
       backend: "static",
       capturedAt: clock(),
       degradation: {
@@ -2572,7 +2712,13 @@ async function artifactsUnderCaptureRoot(
     return false;
   }
 
-  const captureRoot = resolve(options.artifactRoot ?? ".surface/captures", capture.id);
+  const captureId = capture.id;
+
+  if (shouldUseStateArtifactWriter(options)) {
+    return artifacts.every((artifact) => artifactUnderStateCaptureRoot(artifact.path, captureId));
+  }
+
+  const captureRoot = resolve(options.artifactRoot ?? ".surface/captures", captureId);
 
   try {
     const realArtifactRoot = await realpath(options.artifactRoot ?? ".surface/captures");
@@ -2615,6 +2761,25 @@ async function artifactsUnderCaptureRoot(
   } catch {
     return false;
   }
+}
+
+function artifactUnderStateCaptureRoot(artifactPath: string, captureId: string): boolean {
+  if (isAbsolute(artifactPath) || /^[A-Za-z]:[\\/]/u.test(artifactPath)) {
+    return false;
+  }
+
+  const normalized = artifactPath.replace(/\\/gu, "/");
+  const relativeStatePath = normalized.startsWith(".surface/")
+    ? normalized.slice(".surface/".length)
+    : normalized;
+  const segments = relativeStatePath.split("/");
+
+  return (
+    segments[0] === "captures" &&
+    segments[1] === captureId &&
+    segments.length > 2 &&
+    segments.slice(2).every((segment) => segment.length > 0 && segment !== "." && segment !== "..")
+  );
 }
 
 function artifactPathCandidates(

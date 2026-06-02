@@ -122,6 +122,7 @@ export function createSurfaceComposition(
   return {
     captureBackends,
     captureService: createCaptureService({
+      artifactWriter: stateStore,
       backends: browserBackends,
       staticFallback,
     }),
