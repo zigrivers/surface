@@ -5,6 +5,9 @@ import { createSurfaceError, err, isErr, isOk, ok } from "./errors.js";
 import { REDACTED_EXPORT_VALUE } from "./export-redaction.js";
 import { FindingsEnvelopeSchema, type Backlog, type Finding } from "./findings.js";
 import {
+  createAlternativesJsonRenderer,
+  createBoundedAlternatives,
+  createDiffJsonRenderer,
   createExplainJsonRenderer,
   createExplainMarkdownRenderer,
   createFindingsJsonRenderer,
@@ -359,6 +362,98 @@ describe("report renderers", () => {
       expect(text).toContain("Icon\\-only action lacks a clear label");
       expect(text).not.toContain("Secondary spacing issue is informational");
     }
+  });
+
+  it("renders bounded alternatives as byte-stable JSON", async () => {
+    const target = { kind: "dom", ref: "<main>Checkout secret-alpha</main>" } as const;
+    const renderer = createAlternativesJsonRenderer({
+      target,
+      redactionRules: exportRedactionRules,
+    });
+    const first = await renderer.render([], { id: "bk_empty", runId: "run_empty", entries: [] });
+    const second = await renderer.render([], { id: "bk_empty", runId: "run_empty", entries: [] });
+
+    expect(isOk(first)).toBe(true);
+    expect(isOk(second)).toBe(true);
+
+    if (!isOk(first) || !isOk(second)) {
+      return;
+    }
+
+    const text = textDecoder.decode(first.value.bytes);
+    const json: unknown = JSON.parse(text);
+
+    expect(first.value).toMatchObject({ format: "alternatives", byteStable: true });
+    expect(first.value.bytes).toEqual(second.value.bytes);
+    expect(text).not.toContain("secret-alpha");
+    expect(json).toMatchObject({
+      schemaVersion: "1.0",
+      alternatives: {
+        target: { kind: "dom" },
+        proposals: [
+          {
+            id: "alt_preserve_structure",
+          },
+          {
+            id: "alt_reduce_friction",
+          },
+        ],
+      },
+    });
+    expect(text).toContain(REDACTED_EXPORT_VALUE);
+    expect(text).toContain("Bounded to the captured view");
+    expect(text).not.toMatch(/blank canvas/i);
+    expect(createBoundedAlternatives(target).proposals).toHaveLength(2);
+  });
+
+  it("renders all-status diff output as byte-stable JSON", async () => {
+    const renderer = createDiffJsonRenderer({
+      beforeRunId: "run_before",
+      afterRunId: "run_after",
+      diff: {
+        identityBroken: [
+          {
+            identityKey: "identity_broken",
+            findingId: "finding_broken",
+            status: "identity-broken",
+          },
+        ],
+        introduced: [{ identityKey: "identity_new", findingId: "finding_new", status: "new" }],
+        regressed: [
+          {
+            identityKey: "identity_regressed",
+            findingId: "finding_regressed",
+            status: "regressed",
+          },
+        ],
+        resolved: [{ identityKey: "identity_resolved", status: "resolved" }],
+        stillFailing: [
+          { identityKey: "identity_still", findingId: "finding_still", status: "still-failing" },
+        ],
+      },
+    });
+    const first = await renderer.render([], { id: "bk_empty", runId: "run_empty", entries: [] });
+    const second = await renderer.render([], { id: "bk_empty", runId: "run_empty", entries: [] });
+
+    expect(isOk(first)).toBe(true);
+    expect(isOk(second)).toBe(true);
+
+    if (!isOk(first) || !isOk(second)) {
+      return;
+    }
+
+    expect(first.value).toMatchObject({ format: "diff", byteStable: true });
+    expect(first.value.bytes).toEqual(second.value.bytes);
+    expect(JSON.parse(textDecoder.decode(first.value.bytes))).toMatchObject({
+      schemaVersion: "1.0",
+      beforeRunId: "run_before",
+      afterRunId: "run_after",
+      identityBroken: [{ identityKey: "identity_broken" }],
+      introduced: [{ identityKey: "identity_new" }],
+      regressed: [{ identityKey: "identity_regressed" }],
+      resolved: [{ identityKey: "identity_resolved" }],
+      stillFailing: [{ identityKey: "identity_still" }],
+    });
   });
 
   it("returns an error when backlog entries reference missing findings", async () => {

@@ -5,6 +5,7 @@ import {
   createTrackedFinding,
   createSurfaceComposition,
   createSurfaceError,
+  diffTrackedFindings,
   err,
   instantiateLensExecutionPlan,
   isOk,
@@ -844,29 +845,7 @@ function callSurfaceDiff(
     );
   }
 
-  const beforeByIdentity = trackedByIdentityForRun(before);
-  const afterByIdentity = trackedByIdentityForRun(after);
-  const resolved = [...beforeByIdentity]
-    .filter(([identityKey]) => !afterByIdentity.has(identityKey))
-    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "resolved"));
-  const introduced = [...afterByIdentity]
-    .filter(([identityKey]) => !beforeByIdentity.has(identityKey))
-    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "new"));
-  const stillFailing = [...afterByIdentity]
-    .filter(([identityKey]) => beforeByIdentity.has(identityKey))
-    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "still-failing"));
-
-  return ok({
-    identityBroken: after.trackedFindings
-      .filter((trackedFinding) => trackedFinding.status === "identity-broken")
-      .map((trackedFinding) => diffEntryFor(trackedFinding, "identity-broken")),
-    introduced,
-    regressed: after.trackedFindings
-      .filter((trackedFinding) => trackedFinding.status === "regressed")
-      .map((trackedFinding) => diffEntryFor(trackedFinding, "regressed")),
-    resolved,
-    stillFailing,
-  });
+  return ok(diffTrackedFindings(before.trackedFindings, after.trackedFindings));
 }
 
 function callSurfaceTrace(
@@ -1146,25 +1125,6 @@ function trackedFindingForRunFinding(
   return record.trackedFindings.find(
     (trackedFinding) => trackedFinding.currentFindingId === findingId,
   );
-}
-
-function trackedByIdentityForRun(record: SurfaceMcpRunRecord): ReadonlyMap<string, TrackedFinding> {
-  return new Map(
-    record.trackedFindings.map((trackedFinding) => [trackedFinding.identityKey, trackedFinding]),
-  );
-}
-
-function diffEntryFor(
-  trackedFinding: TrackedFinding,
-  status: TrackedFinding["status"],
-): SurfaceMcpDiffEntry {
-  return {
-    ...(trackedFinding.currentFindingId === undefined
-      ? {}
-      : { findingId: trackedFinding.currentFindingId }),
-    identityKey: trackedFinding.identityKey,
-    status,
-  };
 }
 
 function findStoredTrackedFinding(

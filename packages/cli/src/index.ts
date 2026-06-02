@@ -8,9 +8,11 @@ import {
   PresetSchema,
   SurfaceSarifLogSchema,
   createGitHubChecksExporter,
+  createBoundedAlternatives,
   createSurfaceComposition,
   createSurfaceError,
   createSarifRenderer,
+  diffTrackedFindings,
   exitCodeForSurfaceError,
   toCliErrorEnvelope,
   type Backlog as CoreBacklog,
@@ -70,7 +72,7 @@ type TrackedFinding = {
   readonly currentFindingId?: string | undefined;
   readonly firstSeenRunId?: string;
   readonly gateDisposition?: "active" | "ignored-by-waiver";
-  readonly status: string;
+  readonly status: "new" | "still-failing" | "resolved" | "regressed" | "identity-broken";
   readonly validation: unknown;
   readonly identity?: {
     readonly anchorKind: "component" | "selector" | "file" | "element-ref";
@@ -1204,29 +1206,7 @@ async function diffRuns(
     );
   }
 
-  const beforeByIdentity = trackedByIdentity(before.trackedFindings);
-  const afterByIdentity = trackedByIdentity(after.trackedFindings);
-  const resolved = [...beforeByIdentity]
-    .filter(([identityKey]) => !afterByIdentity.has(identityKey))
-    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "resolved"));
-  const introduced = [...afterByIdentity]
-    .filter(([identityKey]) => !beforeByIdentity.has(identityKey))
-    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "new"));
-  const stillFailing = [...afterByIdentity]
-    .filter(([identityKey]) => beforeByIdentity.has(identityKey))
-    .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "still-failing"));
-
-  return resultOk({
-    identityBroken: after.trackedFindings
-      .filter((trackedFinding) => trackedFinding.status === "identity-broken")
-      .map((trackedFinding) => diffEntryFor(trackedFinding, "identity-broken")),
-    introduced,
-    regressed: after.trackedFindings
-      .filter((trackedFinding) => trackedFinding.status === "regressed")
-      .map((trackedFinding) => diffEntryFor(trackedFinding, "regressed")),
-    resolved,
-    stillFailing,
-  });
+  return resultOk(diffTrackedFindings(before.trackedFindings, after.trackedFindings));
 }
 
 async function suggestAlternatives(
@@ -1257,22 +1237,7 @@ async function suggestAlternatives(
   }
 
   return resultOk({
-    alternatives: {
-      proposals: [
-        {
-          id: "alt_preserve_structure",
-          rationale: "Bounded to the captured view; keeps the existing information architecture.",
-          title: "Keep the current layout and strengthen the weakest affordance",
-        },
-        {
-          id: "alt_reduce_friction",
-          rationale:
-            "Bounded to the captured view; reduces one interaction cost without a from-scratch redesign.",
-          title: "Reduce the highest-friction step while preserving the same task flow",
-        },
-      ],
-      target: target.value,
-    },
+    alternatives: createBoundedAlternatives(target.value),
   });
 }
 
@@ -1745,24 +1710,6 @@ function identityKeyForFinding(state: ProjectStateSnapshot, finding: Finding): s
     state.trackedFindings?.find((trackedFinding) => trackedFinding.currentFindingId === finding.id)
       ?.identityKey ?? finding.id
   );
-}
-
-function trackedByIdentity(
-  trackedFindings: readonly TrackedFinding[],
-): ReadonlyMap<string, TrackedFinding> {
-  return new Map(
-    trackedFindings.map((trackedFinding) => [trackedFinding.identityKey, trackedFinding]),
-  );
-}
-
-function diffEntryFor(trackedFinding: TrackedFinding, status: string): DiffEntry {
-  return {
-    ...(trackedFinding.currentFindingId === undefined
-      ? {}
-      : { findingId: trackedFinding.currentFindingId }),
-    identityKey: trackedFinding.identityKey,
-    status,
-  };
 }
 
 function backlogForState(

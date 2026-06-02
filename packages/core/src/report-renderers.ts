@@ -21,7 +21,9 @@ import type {
   Report,
   ReportRenderer,
   StateStore,
+  Target,
 } from "./interfaces.js";
+import type { TrackedFindingsDiff } from "./tracked-findings.js";
 
 const TEXT_ENCODER = new TextEncoder();
 const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
@@ -37,6 +39,19 @@ const C1_OSC_PATTERN = new RegExp(
 const DISALLOWED_CONTROL_PATTERN = /\p{Cc}/gu;
 const SINGLE_LINE_SEPARATOR_PATTERN = /[\t\r\n]+/g;
 const MAX_TERMINAL_SANITIZE_DEPTH = 32;
+const DEFAULT_ALTERNATIVE_PROPOSALS = [
+  {
+    id: "alt_preserve_structure",
+    rationale: "Bounded to the captured view; keeps the existing information architecture.",
+    title: "Keep the current layout and strengthen the weakest affordance",
+  },
+  {
+    id: "alt_reduce_friction",
+    rationale:
+      "Bounded to the captured view; reduces one interaction cost without a from-scratch redesign.",
+    title: "Reduce the highest-friction step while preserving the same task flow",
+  },
+] as const satisfies readonly AlternativeProposal[];
 
 export type FindingsJsonRendererOptions = {
   readonly generatedAt: string;
@@ -121,6 +136,28 @@ export type ExplainRendererOptions = {
   readonly redactionRules?: readonly RedactionRule[];
 };
 
+export type AlternativeProposal = {
+  readonly id: string;
+  readonly rationale: string;
+  readonly title: string;
+};
+
+export type AlternativesReportData = {
+  readonly proposals: readonly AlternativeProposal[];
+  readonly target: Target;
+};
+
+export type AlternativesRendererOptions = ReportRendererRedactionOptions & {
+  readonly proposals?: readonly AlternativeProposal[];
+  readonly target: Target;
+};
+
+export type DiffRendererOptions = ReportRendererRedactionOptions & {
+  readonly afterRunId: string;
+  readonly beforeRunId: string;
+  readonly diff: TrackedFindingsDiff;
+};
+
 type ExplanationContext = {
   readonly finding: Finding;
   readonly citedHeuristics: readonly KnowledgeEntry[];
@@ -187,6 +224,32 @@ export function createExplainJsonRenderer(options: ExplainRendererOptions): Repo
   return {
     format: "explain-json",
     render: (findings) => renderExplainJson(findings, options),
+  };
+}
+
+export function createAlternativesJsonRenderer(
+  options: AlternativesRendererOptions,
+): ReportRenderer {
+  return {
+    format: "alternatives",
+    render: () => renderAlternativesJson(options),
+  };
+}
+
+export function createDiffJsonRenderer(options: DiffRendererOptions): ReportRenderer {
+  return {
+    format: "diff",
+    render: () => renderDiffJson(options),
+  };
+}
+
+export function createBoundedAlternatives(
+  target: Target,
+  proposals: readonly AlternativeProposal[] = DEFAULT_ALTERNATIVE_PROPOSALS,
+): AlternativesReportData {
+  return {
+    proposals,
+    target,
   };
 }
 
@@ -467,6 +530,50 @@ async function renderExplainJson(
 
   return ok({
     format: "explain-json",
+    bytes: encodeStableJson(redacted.value),
+    byteStable: true,
+  });
+}
+
+function renderAlternativesJson(
+  options: AlternativesRendererOptions,
+): Result<Report, SurfaceError> {
+  const redacted = redactExportValue(
+    sanitizeTerminalControlValue({
+      schemaVersion: "1.0",
+      alternatives: createBoundedAlternatives(options.target, options.proposals),
+    }),
+    options.redactionRules,
+  );
+
+  if (!redacted.ok) {
+    return redacted;
+  }
+
+  return ok({
+    format: "alternatives",
+    bytes: encodeStableJson(redacted.value),
+    byteStable: true,
+  });
+}
+
+function renderDiffJson(options: DiffRendererOptions): Result<Report, SurfaceError> {
+  const redacted = redactExportValue(
+    sanitizeTerminalControlValue({
+      schemaVersion: "1.0",
+      beforeRunId: options.beforeRunId,
+      afterRunId: options.afterRunId,
+      ...options.diff,
+    }),
+    options.redactionRules,
+  );
+
+  if (!redacted.ok) {
+    return redacted;
+  }
+
+  return ok({
+    format: "diff",
     bytes: encodeStableJson(redacted.value),
     byteStable: true,
   });

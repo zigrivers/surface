@@ -158,7 +158,8 @@ export type BuiltInReportFormat =
   | "explain-md"
   | "explain-json"
   | "sarif"
-  | "alternatives";
+  | "alternatives"
+  | "diff";
 
 export type ReportFormat = string;
 
