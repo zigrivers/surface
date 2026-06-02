@@ -24,6 +24,7 @@ export * from "./pipeline-orchestrator.js";
 export * from "./report-renderers.js";
 export * from "./responsiveness-states-lens.js";
 export * from "./state-store.js";
+export * from "./third-party-issue-exporter.js";
 export * from "./usability-heuristic-lens.js";
 export * from "./visual-hierarchy-lens.js";
 export {

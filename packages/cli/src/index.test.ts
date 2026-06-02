@@ -325,6 +325,56 @@ describe("@surface/cli findings and loop verbs", () => {
     });
   });
 
+  it("exports stored backlog entries through registered issue exporters", async () => {
+    const stdout: string[] = [];
+    const exportedRefs: unknown[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "backlog", "--export", "linear"],
+      composition: createSurfaceComposition({
+        issueExporters: [
+          {
+            target: "linear",
+            export: (backlogRef) => {
+              exportedRefs.push(backlogRef);
+
+              return ok({
+                id: "linear:backlog_run_eval",
+                target: "linear",
+                synced: ["finding_button_contrast"],
+                unsynced: [],
+                status: "complete",
+              });
+            },
+          },
+        ],
+        stateStore: new MemoryStateStore({
+          backlog: {
+            entries: [{ findingId: "finding_button_contrast", priority: 1, rank: 1 }],
+            id: "backlog_run_eval",
+            runId: "run_eval",
+          },
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(exportedRefs).toEqual([{ backlogId: "backlog_run_eval", path: ".surface/test" }]);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "backlog",
+      data: {
+        export: {
+          id: "linear:backlog_run_eval",
+          target: "linear",
+          synced: ["finding_button_contrast"],
+          status: "complete",
+        },
+      },
+      ok: true,
+    });
+  });
+
   it("summarizes backlog human output by default and reveals details with --all", async () => {
     const createStateStore = () =>
       new MemoryStateStore({

@@ -114,6 +114,17 @@ type DiffEntry = {
   readonly identityKey: string;
   readonly status: string;
 };
+type PersistedArtifactRef = {
+  readonly path: string;
+  readonly sha256: string;
+};
+type IssueExporterRecord = {
+  readonly target: string;
+  export(backlogRef: {
+    readonly backlogId: string;
+    readonly path: string;
+  }): MaybePromise<Result<unknown>>;
+};
 type CliRunRecord = {
   readonly runId: string;
   readonly trackedFindings: readonly TrackedFinding[];
@@ -155,6 +166,7 @@ type SurfaceComposition = {
   readonly lensRegistry: readonly {
     readonly id: string;
   }[];
+  readonly issueExporters: readonly IssueExporterRecord[];
   readonly pipelineOrchestrator: {
     run(input: { readonly config: SurfaceConfig; readonly runId: string }): Promise<
       Result<{
@@ -165,6 +177,11 @@ type SurfaceComposition = {
   readonly stateStore: {
     readState(): MaybePromise<Result<ProjectStateSnapshot>>;
     writeState(state: ProjectStateSnapshot): MaybePromise<Result<ProjectStateSnapshot>>;
+    writeArtifact(input: {
+      readonly kind: "capture" | "report" | "generated";
+      readonly relativePath: string;
+      readonly bytes: Uint8Array;
+    }): MaybePromise<Result<PersistedArtifactRef>>;
   };
 };
 
@@ -252,6 +269,9 @@ type SarifExportOutput = {
 };
 type GitHubChecksExportOutput = {
   readonly checkRun: GitHubChecksExport;
+};
+type IssueExportOutput = {
+  readonly export: unknown;
 };
 type ValidateOutput = {
   readonly checks: readonly {
@@ -885,11 +905,14 @@ async function readBacklog(
   composition: SurfaceComposition,
   options: BacklogCommandOptions,
   env: SurfaceCliEnv,
-): Promise<Result<BacklogOutput | SarifExportOutput | GitHubChecksExportOutput>> {
+): Promise<
+  Result<BacklogOutput | SarifExportOutput | GitHubChecksExportOutput | IssueExportOutput>
+> {
   if (
     options.export !== undefined &&
     options.export !== "sarif" &&
-    options.export !== "github-checks"
+    options.export !== "github-checks" &&
+    composition.issueExporters.every((exporter) => exporter.target !== options.export)
   ) {
     return resultErr(
       createSurfaceError("unknown_export_target", "No CLI issue exporter matched the target.", {
@@ -950,6 +973,41 @@ async function readBacklog(
     }
 
     return resultOk({ checkRun: exported.value });
+  }
+
+  if (options.export !== undefined) {
+    const exporter = composition.issueExporters.find(
+      (candidate) => candidate.target === options.export,
+    );
+
+    if (exporter === undefined) {
+      return resultErr(
+        createSurfaceError("unknown_export_target", "No CLI issue exporter matched the target.", {
+          details: { exportTarget: options.export },
+        }),
+      );
+    }
+
+    const artifact = await composition.stateStore.writeArtifact({
+      kind: "report",
+      relativePath: "reports/backlog.json",
+      bytes: new TextEncoder().encode(JSON.stringify({ backlog })),
+    });
+
+    if (!isResultOk(artifact)) {
+      return artifact;
+    }
+
+    const exported = await exporter.export({
+      backlogId: backlog.id,
+      path: artifact.value.path,
+    });
+
+    if (!isResultOk(exported)) {
+      return exported;
+    }
+
+    return resultOk({ export: exported.value });
   }
 
   return resultOk({
