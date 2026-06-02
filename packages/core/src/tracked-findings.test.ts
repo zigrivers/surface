@@ -6,9 +6,11 @@ import {
   applyWaiversToTrackedFindings,
   createBaseline,
   createTrackedFinding,
+  diffTrackedFindings,
   isWaiverActive,
   TrackedFindingSchema,
   transitionTrackedFinding,
+  type DiffableTrackedFinding,
 } from "./tracked-findings.js";
 
 const baseFinding = {
@@ -74,7 +76,78 @@ function findingWith(overrides: Partial<Finding>): Finding {
   };
 }
 
+function diffableTrackedFinding(
+  identityKey: string,
+  currentFindingId: string | undefined,
+  status: DiffableTrackedFinding["status"],
+): DiffableTrackedFinding {
+  return {
+    ...(currentFindingId === undefined ? {} : { currentFindingId }),
+    identityKey,
+    status,
+  };
+}
+
 describe("tracked finding state machine", () => {
+  it("diffs tracked findings into all lifecycle status buckets without duplication", () => {
+    const before = [
+      diffableTrackedFinding("identity_resolved", "finding_resolved", "still-failing"),
+      diffableTrackedFinding("identity_regressed", "finding_regressed_old", "resolved"),
+      diffableTrackedFinding("identity_still", "finding_still_old", "still-failing"),
+      diffableTrackedFinding("identity_broken", "finding_broken_old", "still-failing"),
+      diffableTrackedFinding("identity_removed", "finding_removed", "still-failing"),
+    ];
+    const after = [
+      diffableTrackedFinding("identity_resolved", undefined, "resolved"),
+      diffableTrackedFinding("identity_regressed", "finding_regressed_new", "regressed"),
+      diffableTrackedFinding("identity_still", "finding_still_new", "still-failing"),
+      diffableTrackedFinding("identity_broken", "finding_broken_new", "identity-broken"),
+      diffableTrackedFinding("identity_introduced", "finding_introduced", "new"),
+    ];
+
+    expect(diffTrackedFindings(before, after)).toEqual({
+      identityBroken: [
+        {
+          findingId: "finding_broken_new",
+          identityKey: "identity_broken",
+          status: "identity-broken",
+        },
+      ],
+      introduced: [
+        {
+          findingId: "finding_introduced",
+          identityKey: "identity_introduced",
+          status: "new",
+        },
+      ],
+      regressed: [
+        {
+          findingId: "finding_regressed_new",
+          identityKey: "identity_regressed",
+          status: "regressed",
+        },
+      ],
+      resolved: [
+        {
+          findingId: "finding_removed",
+          identityKey: "identity_removed",
+          status: "resolved",
+        },
+        {
+          identityKey: "identity_resolved",
+          status: "resolved",
+        },
+      ],
+      stillFailing: [
+        {
+          findingId: "finding_still_new",
+          identityKey: "identity_still",
+          status: "still-failing",
+        },
+      ],
+    });
+  });
+
   it("creates a tracked finding as new with matching identity and history", () => {
     const tracked = createTrackedFinding({
       finding: baseFinding,

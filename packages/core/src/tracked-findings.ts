@@ -188,6 +188,26 @@ export type ApplyWaiversInput = {
   readonly now: Date | string;
 };
 
+export type DiffableTrackedFinding = {
+  readonly currentFindingId?: string | undefined;
+  readonly identityKey: string;
+  readonly status: FindingStatus;
+};
+
+export type TrackedFindingsDiffEntry = {
+  readonly findingId?: string;
+  readonly identityKey: string;
+  readonly status: FindingStatus;
+};
+
+export type TrackedFindingsDiff = {
+  readonly identityBroken: readonly TrackedFindingsDiffEntry[];
+  readonly introduced: readonly TrackedFindingsDiffEntry[];
+  readonly regressed: readonly TrackedFindingsDiffEntry[];
+  readonly resolved: readonly TrackedFindingsDiffEntry[];
+  readonly stillFailing: readonly TrackedFindingsDiffEntry[];
+};
+
 /**
  * Create the first tracked lifecycle record for a finding identity.
  *
@@ -284,6 +304,58 @@ export function isWaiverActive(waiver: Waiver, now: Date | string): boolean {
   const nowMs = timestampMs(now, "now");
 
   return waiverActiveAt(parsedWaiver, nowMs);
+}
+
+export function diffTrackedFindings(
+  before: readonly DiffableTrackedFinding[],
+  after: readonly DiffableTrackedFinding[],
+): TrackedFindingsDiff {
+  const beforeByIdentity = diffableByIdentity(before);
+  const afterByIdentity = diffableByIdentity(after);
+  const resolved = [
+    ...[...beforeByIdentity]
+      .filter(([identityKey]) => !afterByIdentity.has(identityKey))
+      .map(([, trackedFinding]) => diffEntryFor(trackedFinding, "resolved")),
+    ...after
+      .filter(
+        (trackedFinding) =>
+          beforeByIdentity.has(trackedFinding.identityKey) && trackedFinding.status === "resolved",
+      )
+      .map((trackedFinding) => diffEntryFor(trackedFinding, "resolved")),
+  ];
+  const introduced = after
+    .filter((trackedFinding) => !beforeByIdentity.has(trackedFinding.identityKey))
+    .map((trackedFinding) => diffEntryFor(trackedFinding, "new"));
+  const regressed = after
+    .filter(
+      (trackedFinding) =>
+        beforeByIdentity.has(trackedFinding.identityKey) && trackedFinding.status === "regressed",
+    )
+    .map((trackedFinding) => diffEntryFor(trackedFinding, "regressed"));
+  const identityBroken = after
+    .filter(
+      (trackedFinding) =>
+        beforeByIdentity.has(trackedFinding.identityKey) &&
+        trackedFinding.status === "identity-broken",
+    )
+    .map((trackedFinding) => diffEntryFor(trackedFinding, "identity-broken"));
+  const stillFailing = after
+    .filter((trackedFinding) => {
+      if (!beforeByIdentity.has(trackedFinding.identityKey)) {
+        return false;
+      }
+
+      return trackedFinding.status === "new" || trackedFinding.status === "still-failing";
+    })
+    .map((trackedFinding) => diffEntryFor(trackedFinding, "still-failing"));
+
+  return {
+    identityBroken,
+    introduced,
+    regressed,
+    resolved,
+    stillFailing,
+  };
 }
 
 function identityForFinding(
@@ -391,4 +463,25 @@ function timestampMs(value: Date | string, fieldName: string): number {
   }
 
   return milliseconds;
+}
+
+function diffableByIdentity(
+  trackedFindings: readonly DiffableTrackedFinding[],
+): ReadonlyMap<string, DiffableTrackedFinding> {
+  return new Map(
+    trackedFindings.map((trackedFinding) => [trackedFinding.identityKey, trackedFinding]),
+  );
+}
+
+function diffEntryFor(
+  trackedFinding: DiffableTrackedFinding,
+  status: FindingStatus,
+): TrackedFindingsDiffEntry {
+  return {
+    ...(trackedFinding.currentFindingId === undefined
+      ? {}
+      : { findingId: trackedFinding.currentFindingId }),
+    identityKey: trackedFinding.identityKey,
+    status,
+  };
 }
