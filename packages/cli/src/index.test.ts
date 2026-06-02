@@ -114,6 +114,17 @@ type TestTrackedFinding = {
 };
 
 describe("@zigrivers/surface bootstrap", () => {
+  it("reports the package version", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--version"],
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.join("").trim()).toBe("0.1.1");
+  });
+
   it("emits a machine-readable success envelope for --json commands", async () => {
     const stdout: string[] = [];
     const exitCode = await runSurfaceCli({

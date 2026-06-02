@@ -16,11 +16,11 @@ Formula source template: `packaging/homebrew/surface.rb`.
 ## Release Flow
 
 1. Publish `@zigrivers/surface` to npm.
-2. Create the GitHub release tag, for example `v0.1.0`.
+2. Create the GitHub release tag, for example `v0.1.1`.
 3. Compute the npm tarball checksum:
 
    ```bash
-   npm view @zigrivers/surface@0.1.0 dist.tarball dist.shasum dist.integrity
+   npm view @zigrivers/surface@0.1.1 dist.tarball dist.shasum dist.integrity
    ```
 
 4. Update the tap formula URL and checksum.

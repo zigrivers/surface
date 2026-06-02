@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { realpathSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
@@ -222,6 +222,9 @@ type TargetCommandOptions = ConfigCommandOptions & {
 const CLI_SCHEMA_VERSION = "1.0";
 const DEFAULT_STATE_DIR = ".surface";
 const DEFAULT_LOCALHOST_TARGET = "http://localhost:3000";
+const SURFACE_CLI_VERSION = JSON.parse(
+  readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+) as { version: string };
 
 export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise<CliExitCode> {
   const composition = options.composition ?? createSurfaceComposition(options);
@@ -267,7 +270,7 @@ export function createSurfaceCliProgram(input: {
   program
     .name("surface")
     .description("Audit running UIs and produce agent-readable findings.")
-    .version("0.0.0")
+    .version(SURFACE_CLI_VERSION.version)
     .exitOverride()
     .configureOutput({
       writeErr: (chunk) => {

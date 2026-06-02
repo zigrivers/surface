@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Semver tag to release, for example v0.1.0"
+        description: "Semver tag to release, for example v0.1.1"
         required: true
         type: string
       publish:
@@ -60,14 +60,14 @@ jobs:
           pnpm --dir packages/adapters/svelte pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/adapters/vue pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/cli pack --pack-destination "$PACK_DIR"
-          npm publish "$PACK_DIR"/zigrivers-surface-core-0.1.0.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-grounding-0.1.0.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-mcp-0.1.0.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-agnostic-0.1.0.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-react-0.1.0.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-svelte-0.1.0.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-vue-0.1.0.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-0.1.0.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-core-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-grounding-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-mcp-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-agnostic-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-react-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-svelte-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-adapter-vue-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR"/zigrivers-surface-0.1.1.tgz --access public --provenance
       - name: Create GitHub release
         if: inputs.publish == 'true'
         env:

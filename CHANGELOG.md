@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.1.0 - Initial Release Candidate
+## 0.1.1 - Initial Release Candidate
 
 - Adds the Surface CLI package under `@zigrivers/surface`.
 - Adds core audit orchestration, state, scoring, reporting, integration, MCP, grounding, and framework adapter packages.

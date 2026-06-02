@@ -43,6 +43,7 @@ const RELEASE_PACKAGES = [
     dependencies: ["@zigrivers/surface-core"],
   },
 ] as const;
+const RELEASE_VERSION = "0.1.1";
 
 type PackageJson = {
   name: string;
@@ -69,7 +70,7 @@ describe("release package metadata", () => {
     const manifest = await readPackageJson(pkg.dir);
 
     expect(manifest.name).toBe(pkg.name);
-    expect(manifest.version).toMatch(/^0\.1\.0$/);
+    expect(manifest.version).toBe(RELEASE_VERSION);
     expect(manifest.private).not.toBe(true);
     expect(manifest.license).toBe("MIT");
     expect(manifest.description).toBeTruthy();
