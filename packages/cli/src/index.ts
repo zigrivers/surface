@@ -17,181 +17,54 @@ import {
   diffTrackedFindings,
   exitCodeForSurfaceError,
   toCliErrorEnvelope,
-  type Backlog as CoreBacklog,
-  type Finding as CoreFinding,
+  type Backlog,
+  type Baseline,
+  type CliExitCode,
+  type Finding,
   type GitHubChecksExport,
   type GitHubChecksExporterOptions,
+  type Result,
   type SurfaceSarifLog,
+  type SurfaceError,
+  type TrackedFinding,
+  type TrackedFindingsDiffEntry,
 } from "@surface/core";
+import type {
+  Capture,
+  GateResult,
+  ProjectStateSnapshot as CoreProjectStateSnapshot,
+  Target,
+} from "@surface/core/interfaces";
 import { Command, CommanderError } from "commander";
 
-type CliExitCode = 0 | 1 | 2;
-type SurfaceError = ReturnType<typeof createSurfaceError>;
-type Result<T> =
-  | { readonly ok: true; readonly value: T }
-  | { readonly ok: false; readonly error: SurfaceError };
 type SurfaceConfig = typeof DEFAULT_SURFACE_CONFIG;
 type ExecutablePipelineStageId = (typeof DEFAULT_COMPOSITION_STAGE_IDS)[number];
 type SurfaceCompositionOptions = NonNullable<Parameters<typeof createSurfaceComposition>[0]>;
 type CoreSurfaceComposition = ReturnType<typeof createSurfaceComposition>;
 type MaybePromise<T> = T | Promise<T>;
-type Target = {
-  readonly kind: "url" | "localhost" | "route" | "screenshot" | "component" | "dom";
-  readonly ref: string;
-};
-type CaptureArtifact = {
-  readonly id: string;
-  readonly type: string;
-  readonly path: string;
-  readonly redacted: boolean;
-};
-type Capture = {
-  readonly id: string;
-  readonly backend: string;
-  readonly artifacts: readonly CaptureArtifact[];
-  readonly degradation?: {
-    readonly skippedArtifacts: readonly string[];
-    readonly skippedReason: string;
-  };
-};
-type Finding = {
-  readonly id: string;
-  readonly citedHeuristics?: readonly string[];
-  readonly evidence: readonly unknown[];
-  readonly gatedForHuman?: boolean;
-  readonly method?: "measured" | "judged";
-  readonly rationale: string;
-  readonly severityBand?: "P0" | "P1" | "P2" | "P3";
-  readonly title?: string;
-};
-type Backlog = {
-  readonly id: string;
-  readonly runId: string;
-  readonly entries: readonly unknown[];
-};
-type TrackedFinding = {
-  readonly identityKey: string;
-  readonly currentFindingId?: string | undefined;
-  readonly firstSeenRunId?: string;
-  readonly gateDisposition?: "active" | "ignored-by-waiver";
-  readonly status: "new" | "still-failing" | "resolved" | "regressed" | "identity-broken";
-  readonly validation: unknown;
-  readonly identity?: {
-    readonly anchorKind: "component" | "selector" | "file" | "element-ref";
-    readonly identityKey: string;
-    readonly issueType: string;
-    readonly lens: string;
-    readonly locationAnchor: string;
-  };
-  readonly lastSeenRunId?: string;
-  readonly history?: readonly {
-    readonly runId: string;
-    readonly status: string;
-  }[];
-};
-type GateResult = {
-  readonly passed: boolean;
-  readonly failingFindingIds: readonly string[];
-  readonly exitCode: 0 | 1 | 2;
-};
-type BaselineRecord = {
-  readonly baselineId: string;
-  readonly identityKeys: readonly string[];
-  readonly reason?: string | undefined;
-  readonly waivers: readonly WaiverRecord[];
-};
-type WaiverRecord = {
-  readonly findingIdentityKey: string;
-  readonly reason: string;
-  readonly owner: string;
-  readonly expiry?: string | undefined;
-};
 type VerdictRecord = {
   readonly decision: "accept" | "reject" | "correct" | "defer";
   readonly findingId: string;
   readonly rationale: string;
 };
-type DiffEntry = {
-  readonly findingId?: string;
-  readonly identityKey: string;
-  readonly status: string;
-};
-type PersistedArtifactRef = {
-  readonly path: string;
-  readonly sha256: string;
-};
-type IssueExporterRecord = {
-  readonly target: string;
-  export(backlogRef: {
-    readonly backlogId: string;
-    readonly path: string;
-  }): MaybePromise<Result<unknown>>;
-};
 type CliRunRecord = {
   readonly runId: string;
   readonly trackedFindings: readonly TrackedFinding[];
 };
-type ProjectStateSnapshot = {
-  readonly version: string;
-  readonly baselines?: readonly BaselineRecord[];
-  readonly currentStage?: string;
+type CliProjectStateSnapshot = CoreProjectStateSnapshot & {
+  readonly baselines?: readonly Baseline[];
   readonly backlog?: Backlog;
-  readonly findings?: readonly StoredFindingSnapshot[];
-  readonly pipeline?: {
-    readonly lastCompletedStage?: string | undefined;
-  };
+  readonly findings?: readonly Finding[];
   readonly runRecords?: readonly CliRunRecord[];
-  readonly trackedFindings?: readonly TrackedFinding[];
-  readonly verdicts?: readonly StoredVerdictSnapshot[];
+  readonly verdicts?: readonly VerdictRecord[];
 };
-type StoredFindingSnapshot = {
-  readonly id: string;
+type CliStateStore = Omit<CoreSurfaceComposition["stateStore"], "readState" | "writeState"> & {
+  readState(): MaybePromise<Result<CliProjectStateSnapshot>>;
+  writeState(state: CliProjectStateSnapshot): MaybePromise<Result<CliProjectStateSnapshot>>;
 };
-type StoredVerdictSnapshot = {
-  readonly decision: string;
-  readonly findingId: string;
-  readonly rationale: string;
-};
-type SurfaceComposition = {
-  readonly captureService: {
-    capture(
-      target: Target,
-      options: {
-        readonly config: SurfaceConfig["capture"];
-        readonly authStateRef?: string;
-      },
-    ): Promise<Result<Capture>>;
-  };
-  readonly gateEvaluator: {
-    evaluate(
-      findings: readonly Finding[],
-      policy: SurfaceConfig["reporting"]["gatePolicy"],
-      context?: {
-        readonly baseline?: BaselineRecord;
-        readonly trackedFindings?: readonly TrackedFinding[];
-        readonly now?: Date | string;
-      },
-    ): MaybePromise<Result<GateResult>>;
-  };
-  readonly lensRegistry: readonly {
-    readonly id: string;
-  }[];
-  readonly issueExporters: readonly IssueExporterRecord[];
-  readonly pipelineOrchestrator: {
-    run(input: { readonly config: SurfaceConfig; readonly runId: string }): Promise<
-      Result<{
-        readonly runId: string;
-      }>
-    >;
-  };
+type SurfaceComposition = Omit<CoreSurfaceComposition, "stateStore"> & {
   readonly stateStore: {
-    readState(): MaybePromise<Result<ProjectStateSnapshot>>;
-    writeState(state: ProjectStateSnapshot): MaybePromise<Result<ProjectStateSnapshot>>;
-    writeArtifact(input: {
-      readonly kind: "capture" | "report" | "generated";
-      readonly relativePath: string;
-      readonly bytes: Uint8Array;
-    }): MaybePromise<Result<PersistedArtifactRef>>;
+    readonly [Key in keyof CliStateStore]: CliStateStore[Key];
   };
 };
 
@@ -303,11 +176,11 @@ type VerdictOutput = {
   readonly verdict: VerdictRecord;
 };
 type DiffOutput = {
-  readonly identityBroken: readonly DiffEntry[];
-  readonly introduced: readonly DiffEntry[];
-  readonly regressed: readonly DiffEntry[];
-  readonly resolved: readonly DiffEntry[];
-  readonly stillFailing: readonly DiffEntry[];
+  readonly identityBroken: readonly TrackedFindingsDiffEntry[];
+  readonly introduced: readonly TrackedFindingsDiffEntry[];
+  readonly regressed: readonly TrackedFindingsDiffEntry[];
+  readonly resolved: readonly TrackedFindingsDiffEntry[];
+  readonly stillFailing: readonly TrackedFindingsDiffEntry[];
 };
 type AlternativesOutput = {
   readonly alternatives: {
@@ -973,7 +846,7 @@ async function readBacklog(
     }
 
     const exported = await createGitHubChecksExporter(githubOptions.value).export({
-      backlog: backlog as CoreBacklog,
+      backlog,
       localArtifactPath: ".surface/state.json",
       sarif: sarif.value,
     });
@@ -1028,13 +901,10 @@ async function readBacklog(
 }
 
 async function renderSarifForBacklog(
-  findings: ProjectStateSnapshot["findings"] | undefined,
-  backlog: ProjectStateSnapshot["backlog"],
+  findings: CliProjectStateSnapshot["findings"] | undefined,
+  backlog: Backlog,
 ): Promise<Result<SurfaceSarifLog>> {
-  const rendered = await createSarifRenderer().render(
-    (findings ?? []) as readonly CoreFinding[],
-    backlog as CoreBacklog,
-  );
+  const rendered = await createSarifRenderer().render(findings ?? [], backlog);
 
   if (!isResultOk(rendered)) {
     return rendered;
@@ -1143,7 +1013,7 @@ async function gatePolicyForOptions(
 }
 
 function trackedFindingsForRunOption(
-  state: ProjectStateSnapshot,
+  state: CliProjectStateSnapshot,
   runId: string | undefined,
 ): Result<readonly TrackedFinding[]> {
   if (runId === undefined) {
@@ -1214,7 +1084,7 @@ async function evaluateGate(
   }
 
   const latestBaseline = state.value.baselines?.at(-1);
-  const findings = (state.value.findings ?? []) as readonly Finding[];
+  const findings = state.value.findings ?? [];
 
   const gateResult = await composition.gateEvaluator.evaluate(findings, policy.value, {
     ...(latestBaseline === undefined ? {} : { baseline: latestBaseline }),
@@ -1246,7 +1116,7 @@ async function createBaseline(
     );
   }
 
-  const baseline: BaselineRecord = {
+  const baseline: Baseline = {
     baselineId: `baseline_${Date.now().toString(36)}`,
     identityKeys,
     waivers: [],
@@ -1756,7 +1626,10 @@ async function observeCliTarget(
     return resultOk({
       artifacts: [],
       backend: "static",
+      capturedAt: new Date(0).toISOString(),
       id: `capture_${nextCliRunId()}`,
+      status: "completed",
+      target,
     });
   }
 
@@ -1784,12 +1657,12 @@ function inputLensExists(composition: SurfaceComposition, lens: string): boolean
   return composition.lensRegistry.some((registration) => registration.id === lens);
 }
 
-function findStoredFinding(state: ProjectStateSnapshot, findingId: string): Finding | undefined {
-  return state.findings?.find((finding) => finding.id === findingId) as Finding | undefined;
+function findStoredFinding(state: CliProjectStateSnapshot, findingId: string): Finding | undefined {
+  return state.findings?.find((finding) => finding.id === findingId);
 }
 
 function findStoredTrackedFinding(
-  state: ProjectStateSnapshot,
+  state: CliProjectStateSnapshot,
   findingId: string,
 ): TrackedFinding | undefined {
   return state.trackedFindings?.find(
@@ -1826,21 +1699,17 @@ function decisionFromOptions(options: VerdictCommandOptions): Result<VerdictReco
   return resultOk(decision);
 }
 
-function identityKeysForBaseline(state: ProjectStateSnapshot): readonly string[] {
+function identityKeysForBaseline(state: CliProjectStateSnapshot): readonly string[] {
   if (state.trackedFindings !== undefined && state.trackedFindings.length > 0) {
     return [...new Set(state.trackedFindings.map((trackedFinding) => trackedFinding.identityKey))];
   }
 
   return [
-    ...new Set(
-      ((state.findings ?? []) as readonly Finding[]).map((finding) =>
-        identityKeyForFinding(state, finding),
-      ),
-    ),
+    ...new Set((state.findings ?? []).map((finding) => identityKeyForFinding(state, finding))),
   ];
 }
 
-function identityKeyForFinding(state: ProjectStateSnapshot, finding: Finding): string {
+function identityKeyForFinding(state: CliProjectStateSnapshot, finding: Finding): string {
   return (
     state.trackedFindings?.find((trackedFinding) => trackedFinding.currentFindingId === finding.id)
       ?.identityKey ?? finding.id
@@ -1848,7 +1717,7 @@ function identityKeyForFinding(state: ProjectStateSnapshot, finding: Finding): s
 }
 
 function backlogForState(
-  state: ProjectStateSnapshot,
+  state: CliProjectStateSnapshot,
   runId: string | undefined,
 ): Backlog | undefined {
   if (state.backlog !== undefined && (runId === undefined || state.backlog.runId === runId)) {
@@ -1860,7 +1729,7 @@ function backlogForState(
   }
 
   const effectiveRunId = runId ?? "current";
-  const findings = (state.findings ?? []) as readonly Finding[];
+  const findings = state.findings ?? [];
 
   return backlogFromFindings(effectiveRunId, findings);
 }
@@ -1869,6 +1738,7 @@ function backlogFromFindings(runId: string, findings: readonly Finding[]): Backl
   return {
     entries: findings.map((finding, index) => ({
       findingId: finding.id,
+      priority: Math.max(0, findings.length - index),
       rank: index + 1,
       severityBand: finding.severityBand ?? "P3",
       title: finding.title ?? finding.rationale,
@@ -1901,11 +1771,25 @@ function findingsForSeededFixture(target: Target): readonly Finding[] {
           measuredValue: ".low-contrast: foreground #b7bdd1 on #f8fafc",
           rule: "color-contrast",
           threshold: "4.5:1",
-          tool: "seeded-fixture",
+          tool: "backend",
         },
       ],
+      confidenceBand: "assert",
+      dimensions: {
+        a11yLegalRisk: 0.8,
+        agentImplementability: 0.9,
+        businessImpact: 0.4,
+        confidence: 1,
+        effort: 0.2,
+        evidenceQuality: 1,
+        severity: 0.8,
+        userImpact: 0.7,
+      },
       gatedForHuman: false,
       id: "seeded_low_contrast",
+      issueType: "contrast-insufficient",
+      lens: "accessibility",
+      location: { selector: ".low-contrast" },
       method: "measured",
       rationale: "The seeded low-contrast paragraph does not meet the AA contrast threshold.",
       severityBand: "P1",
@@ -1915,7 +1799,7 @@ function findingsForSeededFixture(target: Target): readonly Finding[] {
 }
 
 function trackedFindingsForAudit(
-  state: ProjectStateSnapshot,
+  state: CliProjectStateSnapshot,
   runId: string,
   findings: readonly Finding[],
 ): readonly TrackedFinding[] {
