@@ -1,0 +1,4 @@
+interface:
+  display_name: Surface Runner
+  short_description: Map natural-language Surface requests to CLI or MCP commands.
+  default_prompt: Use $surface-runner to map my Surface UI audit request to the right command and confirmation.
