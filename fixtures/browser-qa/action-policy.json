@@ -1,0 +1,55 @@
+{
+  "allowedDomains": ["http://127.0.0.1:*", "http://localhost:*"],
+  "environmentGroups": [
+    {
+      "id": "seeded-local",
+      "origins": ["http://127.0.0.1", "http://localhost"]
+    }
+  ],
+  "fixtureAccounts": [
+    {
+      "id": "seed-user"
+    }
+  ],
+  "resetEndpoints": [
+    {
+      "id": "seeded-profile-reset",
+      "method": "POST",
+      "origin": "http://127.0.0.1:*",
+      "path": "/reset/profile"
+    }
+  ],
+  "rules": [
+    {
+      "id": "allow-seeded-checkout-navigation",
+      "actions": ["open"],
+      "categories": ["payment"],
+      "decision": "allow",
+      "routes": ["/checkout"],
+      "origins": ["http://127.0.0.1:*", "http://localhost:*"]
+    },
+    {
+      "id": "allow-seeded-checkout-validation",
+      "actions": ["click"],
+      "categories": ["payment"],
+      "decision": "allow",
+      "locators": [{ "role": "button", "name": "Pay now" }],
+      "routes": ["/checkout"],
+      "origins": ["http://127.0.0.1:*", "http://localhost:*"]
+    },
+    {
+      "id": "allow-seeded-profile-save",
+      "actions": ["click", "fill", "type", "press"],
+      "categories": ["save", "persistent"],
+      "decision": "allow",
+      "locators": [{ "role": "button", "name": "Save profile" }],
+      "routes": ["/settings/profile"],
+      "origins": ["http://127.0.0.1:*", "http://localhost:*"]
+    },
+    {
+      "id": "deny-seeded-billing-and-account-actions",
+      "categories": ["account", "delete"],
+      "decision": "deny"
+    }
+  ]
+}

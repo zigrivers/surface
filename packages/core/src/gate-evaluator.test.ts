@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { DEFAULT_SURFACE_CONFIG } from "./config.js";
 import { isErr, isOk } from "./errors.js";
 import type { Finding } from "./findings.js";
-import { createGateEvaluator } from "./gate-evaluator.js";
+import { createGateEvaluator, evaluateGateWithQaFlows } from "./gate-evaluator.js";
 import type { GatePolicy } from "./interfaces.js";
 import { createBaseline, createTrackedFinding } from "./tracked-findings.js";
 
@@ -231,4 +231,76 @@ describe("GateEvaluator", () => {
       },
     });
   });
+
+  it("fails with flows when reviewed high-severity flow failures exist", () => {
+    const result = evaluateGateWithQaFlows({
+      findings: [],
+      policy: makeGatePolicy({ failOnFlowSeverityAtOrAbove: "high" }),
+      qaFlowRuns: [
+        {
+          flowId: "checkout",
+          gateEligible: true,
+          highestFailedSeverity: "high",
+          id: "flowrun_checkout",
+          status: "failed",
+        },
+      ],
+    });
+
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) {
+      return;
+    }
+
+    expect(result.value.passed).toBe(false);
+    expect(result.value.failingFlowRunIds).toEqual(["flowrun_checkout"]);
+  });
+
+  it("does not fail gates on unverified exploratory candidates", () => {
+    const result = evaluateGateWithQaFlows({
+      candidateFindings: [{ gateEligible: false, id: "qfc_candidate", severity: "critical" }],
+      findings: [],
+      policy: makeGatePolicy({ failOnFlowSeverityAtOrAbove: "high" }),
+    });
+
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) {
+      return;
+    }
+
+    expect(result.value.passed).toBe(true);
+    expect(result.value.failingFlowRunIds).toEqual([]);
+  });
+
+  it("requires explicit QA flow gate eligibility", () => {
+    const result = evaluateGateWithQaFlows({
+      findings: [],
+      policy: makeGatePolicy({ failOnFlowSeverityAtOrAbove: "high" }),
+      qaFlowRuns: [
+        {
+          flowId: "checkout",
+          highestFailedSeverity: "critical",
+          id: "flowrun_unreviewed",
+          status: "failed",
+        },
+      ],
+    });
+
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) {
+      return;
+    }
+
+    expect(result.value.passed).toBe(true);
+    expect(result.value.failingFlowRunIds).toEqual([]);
+  });
 });
+
+function makeGatePolicy(options: { readonly failOnFlowSeverityAtOrAbove: "high" }): GatePolicy & {
+  readonly failOnFlowSeverityAtOrAbove: "high";
+} {
+  return {
+    ...DEFAULT_SURFACE_CONFIG.reporting.gatePolicy,
+    failOnFlowSeverityAtOrAbove: options.failOnFlowSeverityAtOrAbove,
+  };
+}

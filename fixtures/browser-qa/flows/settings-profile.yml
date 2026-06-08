@@ -1,0 +1,36 @@
+schemaVersion: "1.0"
+id: settings-profile
+title: Seeded settings profile save
+severity: medium
+target:
+  kind: url
+  ref: http://127.0.0.1:3000/settings/profile
+actionPolicy:
+  ref: fixtures/browser-qa/action-policy.json
+isolation:
+  mode: isolated
+  mutatesState: true
+  resetRequired: true
+  resetEndpointId: seeded-profile-reset
+steps:
+  - id: open-settings-profile
+    action: open
+    url: /settings/profile
+  - id: focus-profile-name
+    action: focus
+    locator:
+      label: Profile name
+  - id: save-profile
+    action: click
+    locator:
+      role: button
+      name: Save profile
+  - id: assert-profile-saved
+    action: assert
+    expect:
+      text: "Profile saved"
+teardown:
+  always:
+    - id: reset-profile
+      action: open
+      url: /settings/profile

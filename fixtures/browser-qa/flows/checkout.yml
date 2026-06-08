@@ -1,0 +1,24 @@
+schemaVersion: "1.0"
+id: checkout
+title: Seeded checkout validation
+severity: high
+target:
+  kind: url
+  ref: http://127.0.0.1:3000/checkout
+actionPolicy:
+  ref: fixtures/browser-qa/action-policy.json
+steps:
+  - id: open-checkout
+    action: open
+    url: /checkout
+    capture: true
+  - id: click-pay-now
+    action: click
+    locator:
+      role: button
+      name: Pay now
+  - id: submit-empty-payment
+    action: assert
+    severity: high
+    expect:
+      text: "Card number is required"

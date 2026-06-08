@@ -13,6 +13,7 @@ import type {
   ProjectStateSnapshot,
   StateStore,
 } from "./interfaces.js";
+import { isNodeErrorWithCode, isSameOrChildPath } from "./path-safety.js";
 import { BaselineSchema, TrackedFindingSchema } from "./tracked-findings.js";
 
 /** Default project-local directory used for Surface state and artifacts. */
@@ -580,29 +581,12 @@ async function tryWriteMigratedState(filePath: string, value: ProjectStateSnapsh
   }
 }
 
-function isSameOrChildPath(candidate: string, reservedPath: string): boolean {
-  const relative = path.relative(path.resolve(reservedPath), path.resolve(candidate));
-  return (
-    relative === "" ||
-    (relative !== ".." && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative))
-  );
-}
-
 /** Case-insensitive containment is only used for reserved metadata names across OSes. */
 function isSameOrChildPathCaseInsensitive(candidate: string, reservedPath: string): boolean {
   const candidatePath = path.resolve(candidate).toLowerCase();
   const reserved = path.resolve(reservedPath).toLowerCase();
   const reservedPrefix = reserved.endsWith(path.sep) ? reserved : `${reserved}${path.sep}`;
   return candidatePath === reserved || candidatePath.startsWith(reservedPrefix);
-}
-
-function isNodeErrorWithCode(error: unknown, code: string): boolean {
-  return (
-    typeof error === "object" &&
-    error !== null &&
-    "code" in error &&
-    (error as { readonly code?: unknown }).code === code
-  );
 }
 
 function toWarningMessage(error: unknown): string {

@@ -1,14 +1,19 @@
+import path from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
   DEFAULT_COMPOSITION_STAGE_IDS,
   DEFAULT_SURFACE_CONFIG,
+  browserQaFlowRunsForGate,
+  browserQaFlowSeverityFromWithFlows,
+  browserQaGateTargetCli,
   createBoundedAlternatives,
   createTrackedFinding,
   createSurfaceComposition,
   createSurfaceError,
   diffTrackedFindings,
   err,
+  evaluateGateWithQaFlows,
   instantiateLensExecutionPlan,
   isOk,
   ok,
@@ -40,6 +45,16 @@ import type {
 } from "@zigrivers/surface-core/interfaces";
 import { z } from "zod";
 
+import {
+  BROWSER_QA_MCP_SERVER_INPUT_SCHEMAS,
+  BROWSER_QA_MCP_SERVER_TOOL_METADATA,
+  BROWSER_QA_MCP_SERVER_TOOL_NAMES,
+  callBrowserQaMcpTool,
+  createBrowserQaMcpHandlers,
+  isBrowserQaMcpServerToolName,
+  type BrowserQaMcpServerToolOutputMap,
+} from "./browser-qa-tools.js";
+
 export const SURFACE_MCP_SERVER_NAME = "surface";
 export const SURFACE_MCP_SERVER_VERSION = "1.0.0";
 export const SURFACE_MCP_TOOL_SCHEMA_VERSION = "1.0.0";
@@ -59,6 +74,7 @@ const TOOL_ORDER = [
   "surface_run",
   "surface_next",
   "surface_status",
+  ...BROWSER_QA_MCP_SERVER_TOOL_NAMES,
 ] as const;
 
 export type SurfaceMcpToolName = (typeof TOOL_ORDER)[number];
@@ -153,8 +169,9 @@ export type SurfaceMcpBaselineOutput = {
 };
 
 export type SurfaceMcpVerdictOutput = {
-  readonly findingId: string;
   readonly decision: "accept" | "reject" | "correct" | "defer";
+  readonly findingId: string;
+  readonly promotion?: unknown;
   readonly rationale: string;
 };
 
@@ -205,7 +222,7 @@ export type SurfaceMcpToolOutputMap = {
   readonly surface_trace: SurfaceMcpTraceOutput;
   readonly surface_run: SurfaceMcpRunOutput;
   readonly surface_next: SurfaceMcpNextOutput;
-};
+} & BrowserQaMcpServerToolOutputMap;
 
 export type SurfaceMcpToolOutput = SurfaceMcpToolOutputMap[SurfaceMcpToolName];
 
@@ -257,16 +274,31 @@ const TOOL_INPUT_SCHEMAS = {
     .strict(),
   surface_gate: z
     .object({
+      actionPolicyRef: z.string().min(1).optional(),
+      baseUrl: z.string().min(1).optional(),
+      ci: z.boolean().optional(),
+      localhost: z.boolean().optional(),
       policy: GatePolicyInputSchema.optional(),
       runId: z.string().min(1).optional(),
+      target: z.string().min(1).optional(),
+      url: z.string().min(1).optional(),
+      withFlows: z.union([z.boolean(), z.string().min(1)]).optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (input) =>
+        [input.target, input.url, input.localhost === true ? "localhost" : undefined].filter(
+          (value) => value !== undefined,
+        ).length <= 1,
+      "Pass at most one of target, url, or localhost.",
+    ),
   surface_validate: z.object({ runId: z.string().min(1) }).strict(),
   surface_baseline: z.object({ reason: z.string().min(1).optional() }).strict(),
   surface_verdict: z
     .object({
       decision: z.enum(["accept", "reject", "correct", "defer"]),
       findingId: z.string().min(1),
+      promote: z.boolean().optional(),
       rationale: z.string().min(1),
     })
     .strict(),
@@ -286,6 +318,7 @@ const TOOL_INPUT_SCHEMAS = {
     .strict(),
   surface_next: z.object({}).strict(),
   surface_status: z.object({}).strict(),
+  ...BROWSER_QA_MCP_SERVER_INPUT_SCHEMAS,
 } as const satisfies Record<SurfaceMcpToolName, z.ZodType>;
 
 const TOOL_METADATA = {
@@ -345,6 +378,7 @@ const TOOL_METADATA = {
     title: "Read Status",
     description: "Read Surface project status.",
   },
+  ...BROWSER_QA_MCP_SERVER_TOOL_METADATA,
 } as const satisfies Record<
   SurfaceMcpToolName,
   { readonly title: string; readonly description: string }
@@ -384,8 +418,9 @@ export function createSurfaceMcpToolRegistry(): SurfaceMcpToolRegistry {
 
 export function createSurfaceMcpServer(options: SurfaceMcpServerOptions = {}): SurfaceMcpServer {
   const registry = createSurfaceMcpToolRegistry();
+  const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
   const composition = options.composition ?? createSurfaceComposition(options);
-  const session = createSurfaceMcpSessionState();
+  const session = createSurfaceMcpSessionState(projectRoot);
 
   return {
     composition,
@@ -450,6 +485,7 @@ type SurfaceMcpSessionState = {
   readonly baselineOrder: string[];
   readonly runs: Map<string, SurfaceMcpRunRecord>;
   readonly runOrder: string[];
+  readonly projectRoot: string;
   readonly trackedByIdentity: Map<string, TrackedFinding>;
   readonly verdicts: Map<string, SurfaceMcpVerdictOutput>;
   nextBaselineSequence: number;
@@ -479,12 +515,13 @@ type CallSurfaceMcpToolInput = {
   readonly session: SurfaceMcpSessionState;
 };
 
-function createSurfaceMcpSessionState(): SurfaceMcpSessionState {
+function createSurfaceMcpSessionState(projectRoot: string): SurfaceMcpSessionState {
   return {
     baselines: new Map(),
     baselineOrder: [],
     runs: new Map(),
     runOrder: [],
+    projectRoot,
     trackedByIdentity: new Map(),
     verdicts: new Map(),
     nextBaselineSequence: 1,
@@ -693,6 +730,14 @@ function nextSequenceFromIds(ids: readonly string[], prefix: string): number {
 async function callSurfaceMcpTool(
   input: CallSurfaceMcpToolInput,
 ): Promise<Result<SurfaceMcpToolOutput>> {
+  if (isBrowserQaMcpServerToolName(input.name)) {
+    return await callBrowserQaMcpTool({
+      handlers: createBrowserQaMcpHandlers(input.composition),
+      input: input.input,
+      name: input.name,
+    });
+  }
+
   switch (input.name) {
     case "surface_capture":
       return await callSurfaceCapture(input.composition, input.input);
@@ -959,7 +1004,38 @@ async function callSurfaceGate(
       ? DEFAULT_SURFACE_CONFIG.reporting.gatePolicy
       : (parsed.value.policy as SurfaceConfig["reporting"]["gatePolicy"]);
 
-  return await composition.gateEvaluator.evaluate(findings, policy);
+  if (parsed.value.withFlows === undefined) {
+    return await composition.gateEvaluator.evaluate(findings, policy);
+  }
+
+  const targetCli = browserQaGateTargetCli(parsed.value);
+  if (!targetCli.ok) {
+    return targetCli;
+  }
+
+  const flowRuns = await browserQaFlowRunsForGate(composition, {
+    ...(parsed.value.actionPolicyRef === undefined
+      ? {}
+      : { actionPolicyRef: parsed.value.actionPolicyRef }),
+    ci: parsed.value.ci === true,
+    projectRoot: session.projectRoot,
+    ...(targetCli.value === undefined ? {} : { targetCli: targetCli.value }),
+    withFlows: parsed.value.withFlows,
+  });
+  if (!flowRuns.ok) {
+    return flowRuns;
+  }
+
+  const flowAwareGate = evaluateGateWithQaFlows({
+    findings,
+    policy: {
+      ...policy,
+      failOnFlowSeverityAtOrAbove: browserQaFlowSeverityFromWithFlows(parsed.value.withFlows),
+    },
+    qaFlowRuns: flowRuns.value,
+  });
+
+  return flowAwareGate;
 }
 
 function callSurfaceValidate(
@@ -1046,6 +1122,33 @@ async function callSurfaceVerdict(
 
   if (!parsed.ok) {
     return parsed;
+  }
+
+  if (parsed.value.findingId.startsWith("qfc_")) {
+    if (parsed.value.promote !== true) {
+      return err(
+        createSurfaceError("finding_not_found", "Browser QA candidate verdicts require promote.", {
+          details: { findingId: parsed.value.findingId },
+        }),
+      );
+    }
+
+    const promotion = await composition.browserQa.orchestrator.promoteCandidateByVerdict({
+      refId: parsed.value.findingId,
+      reason: parsed.value.rationale,
+      verdictId: `verdict_${Date.now().toString(36)}`,
+    });
+
+    if (!promotion.ok) {
+      return promotion;
+    }
+
+    return ok({
+      decision: parsed.value.decision,
+      findingId: parsed.value.findingId,
+      promotion: promotion.value,
+      rationale: parsed.value.rationale,
+    });
   }
 
   const finding = findStoredFinding(session, parsed.value.findingId);

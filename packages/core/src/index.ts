@@ -2,6 +2,7 @@ export const CORE_PACKAGE_NAME = "@zigrivers/surface-core";
 
 export { createAccessibilityLens } from "./accessibility-lens.js";
 export * from "./app-type-overlays.js";
+export * from "./browser-qa/index.js";
 export * from "./capture.js";
 export * from "./composition-factory.js";
 export * from "./config.js";
@@ -13,8 +14,17 @@ export * from "./export-redaction.js";
 export * from "./findings.js";
 export * from "./flow-lenses.js";
 export * from "./gate-evaluator.js";
+export {
+  evaluateGateWithQaFlows,
+  type FlowAwareGateInput,
+  type FlowAwareGatePolicy,
+  type FlowAwareGateResult,
+  type QaGateCandidateFinding,
+  type QaGateFlowRun,
+} from "./gate-evaluator.js";
 export * from "./github-checks-exporter.js";
 export * from "./github-issue-exporter.js";
+export * from "./glob-utils.js";
 export * from "./identity.js";
 export * from "./knowledge-source.js";
 export { LIGHTHOUSE_ACCESSIBILITY_AUDIT_IDS } from "./lighthouse-audits.js";

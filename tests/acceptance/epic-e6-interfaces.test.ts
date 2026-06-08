@@ -167,6 +167,15 @@ describe("E6 Interfaces", () => {
         "surface_run",
         "surface_next",
         "surface_status",
+        "surface_qa",
+        "surface_explore",
+        "surface_flow_run",
+        "surface_flow_list",
+        "surface_flow_promote",
+        "surface_evidence",
+        "surface_replay",
+        "surface_report_qa",
+        "surface_artifact_read",
       ]);
       expect(tools.every((tool) => tool.schemaVersion === "1.0.0")).toBe(true);
       expect(tools.find((tool) => tool.name === "surface_capture")?.inputSchema).toMatchObject({

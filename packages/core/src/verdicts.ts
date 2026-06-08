@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { CandidateFindingSchema, type CandidateFinding } from "./browser-qa/schemas.js";
 import { createSurfaceError, err, ok, type Result } from "./errors.js";
 import { BacklogSchema, FindingSchema, type Backlog, type Finding } from "./findings.js";
 import { deriveFindingIdentity } from "./identity.js";
@@ -31,6 +32,19 @@ export const VerdictSchema = z
   .strict();
 export type Verdict = z.infer<typeof VerdictSchema>;
 
+export const CandidateVerdictPromotionSchema = z
+  .object({
+    candidateFindingId: nonEmptyStringSchema,
+    gateEligible: z.literal(true),
+    promotionSource: z.literal("human-verdict"),
+    reason: nonEmptyStringSchema,
+    recordedAt: timestampSchema,
+    replayEligible: z.literal(false),
+    verdictId: nonEmptyStringSchema.optional(),
+  })
+  .strict();
+export type CandidateVerdictPromotion = z.infer<typeof CandidateVerdictPromotionSchema>;
+
 export const SelfGroundingReportSchema = z
   .object({
     sampleSize: z.number().int().nonnegative(),
@@ -57,6 +71,22 @@ export type CreateVerdictInput = {
   readonly rationale: string;
   readonly recordedAt?: string | Date;
   readonly reusePolicy?: VerdictReusePolicy;
+};
+
+const CreateCandidateVerdictPromotionInputSchema = z
+  .object({
+    candidate: CandidateFindingSchema,
+    reason: nonEmptyStringSchema,
+    recordedAt: z.union([timestampSchema, z.date()]).optional(),
+    verdictId: nonEmptyStringSchema.optional(),
+  })
+  .strict();
+
+export type CreateCandidateVerdictPromotionInput = {
+  readonly candidate: CandidateFinding;
+  readonly reason: string;
+  readonly recordedAt?: string | Date;
+  readonly verdictId?: string;
 };
 
 export type CreateSelfGroundingReportInput = {
@@ -104,6 +134,44 @@ export function createVerdict(input: CreateVerdictInput): Result<Verdict> {
   }
 
   return ok(verdict.data);
+}
+
+export function createCandidateVerdictPromotion(
+  input: CreateCandidateVerdictPromotionInput,
+): Result<CandidateVerdictPromotion> {
+  const parsedInput = CreateCandidateVerdictPromotionInputSchema.safeParse(input);
+
+  if (!parsedInput.success) {
+    return err(
+      createSurfaceError("invalid_verdict_transition", "Candidate promotion input is invalid.", {
+        cause: parsedInput.error,
+      }),
+    );
+  }
+
+  const recordedAt =
+    parsedInput.data.recordedAt instanceof Date
+      ? parsedInput.data.recordedAt.toISOString()
+      : (parsedInput.data.recordedAt ?? new Date().toISOString());
+  const promotion = CandidateVerdictPromotionSchema.safeParse({
+    candidateFindingId: parsedInput.data.candidate.id,
+    gateEligible: true,
+    promotionSource: "human-verdict",
+    reason: parsedInput.data.reason,
+    recordedAt,
+    replayEligible: false,
+    ...(parsedInput.data.verdictId === undefined ? {} : { verdictId: parsedInput.data.verdictId }),
+  });
+
+  if (!promotion.success) {
+    return err(
+      createSurfaceError("invalid_verdict_transition", "Candidate promotion output is invalid.", {
+        cause: promotion.error,
+      }),
+    );
+  }
+
+  return ok(promotion.data);
 }
 
 export function createSelfGroundingReport(

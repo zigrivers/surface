@@ -113,6 +113,50 @@ describe("surface CLI e2e smoke", () => {
       ok: true,
     });
   });
+
+  it("keeps core command envelopes compatible after browser QA additions", async () => {
+    const cwd = await tempProjectRoot();
+    const html = await readFile(fixturePath, "utf8");
+
+    const status = await runSurface(["--json", "status"], cwd);
+    expect(status.exitCode).toBe(0);
+    expect(JSON.parse(status.stdout)).toMatchObject({
+      command: "status",
+      data: { currentStage: "new" },
+      ok: true,
+    });
+
+    const capture = await runSurface(["--json", "capture", "--dom", html], cwd);
+    expect(capture.exitCode).toBe(0);
+    expect(JSON.parse(capture.stdout)).toMatchObject({
+      command: "capture",
+      data: { captureId: expect.stringMatching(/^(cap|capture)_/u) },
+      ok: true,
+    });
+
+    const audit = await runSurface(["--json", "audit", "--dom", html], cwd);
+    expect(audit.exitCode).toBe(0);
+    const auditEnvelope = JSON.parse(audit.stdout) as { readonly data: { readonly runId: string } };
+
+    const validate = await runSurface(
+      ["--json", "validate", "--run", auditEnvelope.data.runId],
+      cwd,
+    );
+    expect(validate.exitCode).toBe(0);
+    expect(JSON.parse(validate.stdout)).toMatchObject({
+      command: "validate",
+      data: { checks: [{ findingId: "seeded_low_contrast", passed: true }] },
+      ok: true,
+    });
+
+    const run = await runSurface(["--json", "run", "all"], cwd);
+    expect(run.exitCode).toBe(0);
+    expect(JSON.parse(run.stdout)).toMatchObject({
+      command: "run",
+      data: { stage: "all", status: "completed" },
+      ok: true,
+    });
+  });
 });
 
 async function tempProjectRoot(): Promise<string> {

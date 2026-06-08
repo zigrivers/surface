@@ -2,8 +2,10 @@ import { describe, expect, it } from "vitest";
 
 import { isOk } from "./errors.js";
 import { type Backlog, type Finding } from "./findings.js";
+import type { CandidateFinding } from "./browser-qa/schemas.js";
 import {
   applyVerdictsToBacklog,
+  createCandidateVerdictPromotion,
   createSelfGroundingReport,
   createVerdict,
   VerdictSchema,
@@ -198,4 +200,49 @@ describe("Verdict adjudication", () => {
       rank: 2,
     });
   });
+
+  it("creates candidate promotion verdict metadata without changing normal verdict behavior", () => {
+    const result = createCandidateVerdictPromotion({
+      candidate: candidateFinding,
+      reason: "Confirmed during manual QA",
+      recordedAt: "2026-06-08T12:00:00.000Z",
+      verdictId: "verdict_manual",
+    });
+
+    expect(isOk(result)).toBe(true);
+    if (!isOk(result)) {
+      return;
+    }
+
+    expect(result.value).toEqual({
+      candidateFindingId: "qfc_checkout",
+      gateEligible: true,
+      promotionSource: "human-verdict",
+      reason: "Confirmed during manual QA",
+      recordedAt: "2026-06-08T12:00:00.000Z",
+      replayEligible: false,
+      verdictId: "verdict_manual",
+    });
+  });
 });
+
+const candidateFinding = {
+  actionPath: [
+    {
+      action: "click",
+      locator: { name: "Pay now", refHint: "@e12", role: "button" },
+    },
+  ],
+  category: "functional",
+  confidence: "candidate",
+  evidenceBundleId: "ev_checkout",
+  gateEligible: false,
+  id: "qfc_checkout",
+  identityConfidence: "medium",
+  qaRunId: "qa_seed",
+  replayStatus: "not-run",
+  replayable: true,
+  severity: "high",
+  sourceRunManifestDigest: "sha256:abc123",
+  title: "Checkout submit lacks payment validation feedback",
+} satisfies CandidateFinding;
