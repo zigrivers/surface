@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Semver tag to release, for example v0.1.1"
+        description: "Semver tag to release, for example v0.2.0"
         required: true
         type: string
       publish:
@@ -20,7 +20,7 @@ permissions:
 
 concurrency:
   group: release-${{ inputs.tag }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   release:
@@ -30,7 +30,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag }}
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 0
+      - name: Validate and checkout release tag
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Invalid release tag: $RELEASE_TAG" >&2
+            exit 1
+          fi
+          git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"
+          git checkout --detach "$RELEASE_TAG"
+          TAG_COMMIT="$(git rev-list -n 1 "$RELEASE_TAG")"
+          HEAD_COMMIT="$(git rev-parse HEAD)"
+          if [[ "$TAG_COMMIT" != "$HEAD_COMMIT" ]]; then
+            echo "Release tag $RELEASE_TAG does not match checked-out HEAD" >&2
+            exit 1
+          fi
       - name: Enable Corepack
         run: corepack enable
       - uses: actions/setup-node@v4
@@ -41,15 +58,93 @@ jobs:
       - name: Ensure npm supports trusted publishing
         run: npm install --global npm@^11.5.1
       - run: pnpm install --frozen-lockfile
+      - name: Validate package versions
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          EXPECTED_VERSION="$VERSION" node --input-type=module <<'NODE'
+          import { readFileSync } from "node:fs";
+
+          const expected = process.env.EXPECTED_VERSION;
+          const manifests = [
+            "packages/core/package.json",
+            "packages/grounding/package.json",
+            "packages/mcp/package.json",
+            "packages/adapters/agnostic/package.json",
+            "packages/adapters/react/package.json",
+            "packages/adapters/svelte/package.json",
+            "packages/adapters/vue/package.json",
+            "packages/cli/package.json",
+          ];
+
+          for (const manifestPath of manifests) {
+            const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+            if (manifest.version !== expected) {
+              throw new Error(`${manifestPath} version ${manifest.version} does not match ${expected}`);
+            }
+          }
+          NODE
       - name: Local quality gate
         run: pnpm run check
       - name: Release artifact validation
         run: pnpm run release:verify
+      - name: Prepare GitHub release notes
+        if: github.event.inputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          RELEASE_NOTES="$RUNNER_TEMP/release-notes.md"
+          awk -v version="$VERSION" '
+            BEGIN {
+              escaped = version
+              gsub(/\./, "\\.", escaped)
+              heading = "^##[[:space:]]+" escaped "([[:space:]]|$)"
+            }
+            $0 ~ heading { in_section = 1; print; next }
+            in_section && /^##[[:space:]]+/ { exit }
+            in_section { print }
+          ' CHANGELOG.md > "$RELEASE_NOTES"
+          if [[ ! -s "$RELEASE_NOTES" ]]; then
+            echo "No changelog section found for $VERSION" >&2
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY" --silent
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "GitHub release $RELEASE_TAG already exists" >&2
+            exit 1
+          fi
+      - name: Check npm package versions are unpublished
+        if: github.event.inputs.publish == 'true'
+        env:
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          VERSION="${RELEASE_TAG#v}"
+          packages=(
+            "@zigrivers/surface-core"
+            "@zigrivers/surface-grounding"
+            "@zigrivers/surface-mcp"
+            "@zigrivers/surface-adapter-agnostic"
+            "@zigrivers/surface-adapter-react"
+            "@zigrivers/surface-adapter-svelte"
+            "@zigrivers/surface-adapter-vue"
+            "@zigrivers/surface"
+          )
+          for package_name in "${packages[@]}"; do
+            if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then
+              echo "$package_name@$VERSION already exists on npm" >&2
+              exit 1
+            fi
+          done
       - name: Publish npm packages
-        if: inputs.publish == 'true'
+        if: github.event.inputs.publish == 'true'
         env:
           NPM_CONFIG_PROVENANCE: "true"
+          RELEASE_TAG: ${{ inputs.tag }}
         run: |
+          VERSION="${RELEASE_TAG#v}"
           PACK_DIR="$PWD/.release-packs"
           mkdir -p "$PACK_DIR"
           pnpm --dir packages/core pack --pack-destination "$PACK_DIR"
@@ -60,16 +155,23 @@ jobs:
           pnpm --dir packages/adapters/svelte pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/adapters/vue pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/cli pack --pack-destination "$PACK_DIR"
-          npm publish "$PACK_DIR"/zigrivers-surface-core-0.1.1.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-grounding-0.1.1.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-mcp-0.1.1.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-agnostic-0.1.1.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-react-0.1.1.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-svelte-0.1.1.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-adapter-vue-0.1.1.tgz --access public --provenance
-          npm publish "$PACK_DIR"/zigrivers-surface-0.1.1.tgz --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-core-$VERSION.tgz" --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-grounding-$VERSION.tgz" --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-mcp-$VERSION.tgz" --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-adapter-agnostic-$VERSION.tgz" --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-adapter-react-$VERSION.tgz" --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-adapter-svelte-$VERSION.tgz" --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-adapter-vue-$VERSION.tgz" --access public --provenance
+          npm publish "$PACK_DIR/zigrivers-surface-$VERSION.tgz" --access public --provenance
       - name: Create GitHub release
-        if: inputs.publish == 'true'
+        if: github.event.inputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${{ inputs.tag }}" --title "${{ inputs.tag }}" --notes-file CHANGELOG.md --verify-tag
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: |
+          RELEASE_NOTES="$RUNNER_TEMP/release-notes.md"
+          if [[ ! -s "$RELEASE_NOTES" ]]; then
+            echo "Prepared release notes not found" >&2
+            exit 1
+          fi
+          gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --notes-file "$RELEASE_NOTES" --verify-tag
