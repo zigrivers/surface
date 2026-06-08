@@ -43,7 +43,7 @@ const RELEASE_PACKAGES = [
     dependencies: ["@zigrivers/surface-core"],
   },
 ] as const;
-const RELEASE_VERSION = "0.1.1";
+const RELEASE_VERSION = "0.2.0";
 
 type PackageJson = {
   name: string;
@@ -98,10 +98,45 @@ describe("release package metadata", () => {
   it("packs release tarballs into the root publish directory", async () => {
     const workflow = await readFile(join(ROOT, ".github/workflows/release.yml"), "utf8");
 
+    expect(workflow).toContain("RELEASE_TAG: ${{ inputs.tag }}");
+    expect(workflow).toContain("cancel-in-progress: false");
+    expect(workflow).toContain("ref: ${{ github.event.repository.default_branch }}");
+    expect(workflow).toContain('VERSION="${RELEASE_TAG#v}"');
+    expect(workflow).toContain('EXPECTED_VERSION="$VERSION"');
+    expect(workflow).toContain("run: pnpm run check");
+    expect(workflow).toContain("run: pnpm run release:verify");
     expect(workflow).toContain('PACK_DIR="$PWD/.release-packs"');
     for (const pkg of RELEASE_PACKAGES) {
       expect(workflow).toContain(`pnpm --dir ${pkg.dir} pack --pack-destination "$PACK_DIR"`);
     }
+    expect(workflow).toContain('"$PACK_DIR/zigrivers-surface-$VERSION.tgz"');
+    expect(workflow).not.toContain("-0.1.1.tgz");
     expect(workflow).not.toContain("pack --pack-destination .release-packs");
+  });
+
+  it("uses the requested semver tag safely for release publication", async () => {
+    const workflow = await readFile(join(ROOT, ".github/workflows/release.yml"), "utf8");
+
+    expect(workflow).toContain(
+      'if [[ ! "$RELEASE_TAG" =~ ^v[0-9]+\\.[0-9]+\\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then',
+    );
+    expect(workflow).toContain(
+      'git fetch --force origin "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"',
+    );
+    expect(workflow).toContain('git checkout --detach "$RELEASE_TAG"');
+    expect(workflow).toContain('if [[ "$TAG_COMMIT" != "$HEAD_COMMIT" ]]; then');
+    expect(workflow).toContain('awk -v version="$VERSION"');
+    expect(workflow).toContain('heading = "^##[[:space:]]+" escaped "([[:space:]]|$)"');
+    expect(workflow).toContain("$0 ~ heading { in_section = 1; print; next }");
+    expect(workflow).toContain('gh api "repos/$GITHUB_REPOSITORY" --silent');
+    expect(workflow).toContain('if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then');
+    expect(workflow).toContain(
+      'if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then',
+    );
+    expect(workflow).toContain("if: github.event.inputs.publish == 'true'");
+    expect(workflow).toContain('gh release create "$RELEASE_TAG" --title "$RELEASE_TAG"');
+    expect(workflow).not.toContain("ref: ${{ inputs.tag }}");
+    expect(workflow).not.toContain('gh release create "${{ inputs.tag }}"');
+    expect(workflow).not.toContain("--notes-file CHANGELOG.md");
   });
 });
