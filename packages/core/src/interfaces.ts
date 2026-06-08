@@ -297,6 +297,12 @@ export interface PersistedArtifactRef {
   readonly sha256: string;
 }
 
+export interface QaSidecarRef {
+  readonly id: string;
+  readonly manifestDigest?: string;
+  readonly path: string;
+}
+
 export interface ArtifactWriter {
   writeArtifact(
     intent: PersistArtifactIntent,

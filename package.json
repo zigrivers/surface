@@ -13,7 +13,7 @@
     "test": "turbo run test",
     "test:watch": "turbo run test:watch",
     "test:evals": "vitest run tests/evals",
-    "test:e2e": "pnpm --filter @zigrivers/surface build && vitest run tests/e2e",
+    "test:e2e": "pnpm --filter @zigrivers/surface-core build && pnpm --filter @zigrivers/surface build && vitest run tests/e2e",
     "benchmark:sc6": "pnpm --filter @zigrivers/surface build && vitest run tests/benchmark",
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",

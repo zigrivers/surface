@@ -12,10 +12,14 @@ import {
   GatePolicySchema,
   PresetSchema,
   SurfaceSarifLogSchema,
+  browserQaFlowRunsForGate,
+  browserQaFlowSeverityFromWithFlows,
+  browserQaGateTargetCli,
   createGitHubChecksExporter,
   createBoundedAlternatives,
   createSurfaceComposition,
   createSurfaceError,
+  evaluateGateWithQaFlows,
   createSarifRenderer,
   diffTrackedFindings,
   exitCodeForSurfaceError,
@@ -39,6 +43,8 @@ import type {
   Target,
 } from "@zigrivers/surface-core/interfaces";
 import { Command, CommanderError } from "commander";
+
+import { registerBrowserQaCommands } from "./browser-qa-commands.js";
 
 type SurfaceConfig = typeof DEFAULT_SURFACE_CONFIG;
 type ExecutablePipelineStageId = (typeof DEFAULT_COMPOSITION_STAGE_IDS)[number];
@@ -157,6 +163,7 @@ type BaselineOutput = {
   readonly reason?: string;
 };
 type VerdictOutput = {
+  readonly promotion?: unknown;
   readonly verdict: VerdictRecord;
 };
 type DiffOutput = {
@@ -189,9 +196,15 @@ type BacklogCommandOptions = {
   readonly run?: string;
 };
 type GateCommandOptions = {
+  readonly actionPolicy?: string;
+  readonly baseUrl?: string;
   readonly ci?: boolean;
+  readonly localhost?: boolean | string;
   readonly policy?: string;
   readonly run?: string;
+  readonly target?: string;
+  readonly url?: string;
+  readonly withFlows?: boolean | string;
 };
 type ValidateCommandOptions = {
   readonly run?: string;
@@ -203,6 +216,7 @@ type VerdictCommandOptions = {
   readonly accept?: boolean;
   readonly correct?: boolean;
   readonly defer?: boolean;
+  readonly promote?: boolean;
   readonly reason?: string;
   readonly reject?: boolean;
 };
@@ -432,9 +446,15 @@ export function createSurfaceCliProgram(input: {
   program
     .command("gate")
     .description("Evaluate the Surface quality gate.")
+    .option("--action-policy <path>", "browser QA flow action policy file")
     .option("--ci", "use CI-oriented exit codes")
+    .option("--base-url <url>", "browser QA flow base URL override")
+    .option("--localhost", "run browser QA flows against http://localhost:3000")
     .option("--policy <file>", "gate policy file")
     .option("--run <runId>", "run id")
+    .option("--target <url>", "browser QA flow target URL")
+    .option("--url <url>", "browser QA flow target URL")
+    .option("--with-flows [globOrSeverity]", "include verified browser QA flow results")
     .action(async (options: GateCommandOptions) => {
       const result = await evaluateGate(input.composition, options);
 
@@ -470,6 +490,7 @@ export function createSurfaceCliProgram(input: {
     .option("--reject", "reject the finding")
     .option("--correct", "mark the finding corrected")
     .option("--defer", "defer the finding")
+    .option("--promote", "promote a browser QA candidate finding")
     .option("--reason <reason>", "verdict rationale")
     .action(async (findingId: string, options: VerdictCommandOptions) => {
       const result = await recordVerdict(input.composition, findingId, options);
@@ -525,6 +546,17 @@ export function createSurfaceCliProgram(input: {
         result,
       });
     });
+
+  registerBrowserQaCommands(program, {
+    composition: input.composition,
+    emitResult: ({ command, result }) =>
+      emitResult({
+        command,
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      }),
+  });
 
   return program;
 }
@@ -1073,16 +1105,49 @@ async function evaluateGate(
   const latestBaseline = state.value.baselines?.at(-1);
   const findings = fullFindingsForState(state.value);
 
-  const gateResult = await composition.gateEvaluator.evaluate(findings, policy.value, {
+  const gateContext = {
     ...(latestBaseline === undefined ? {} : { baseline: latestBaseline }),
     trackedFindings: trackedFindings.value,
-  });
+  };
+  const gateResult = await composition.gateEvaluator.evaluate(findings, policy.value, gateContext);
 
   if (!isResultOk(gateResult)) {
     return gateResult;
   }
 
-  return resultOk({ gateResult: gateResult.value });
+  if (options.withFlows === undefined) {
+    return resultOk({ gateResult: gateResult.value });
+  }
+
+  const targetCli = browserQaGateTargetCli(options);
+
+  if (!isResultOk(targetCli)) {
+    return targetCli;
+  }
+
+  const qaFlowRuns = await browserQaFlowRunsForGate(composition, {
+    ...(options.actionPolicy === undefined ? {} : { actionPolicyRef: options.actionPolicy }),
+    ci: options.ci === true,
+    projectRoot: process.cwd(),
+    ...(targetCli.value === undefined ? {} : { targetCli: targetCli.value }),
+    withFlows: options.withFlows,
+  });
+
+  if (!isResultOk(qaFlowRuns)) {
+    return qaFlowRuns;
+  }
+
+  const flowAwareGate = evaluateGateWithQaFlows({
+    context: gateContext,
+    findings,
+    policy: {
+      ...policy.value,
+      failOnFlowSeverityAtOrAbove: browserQaFlowSeverityFromWithFlows(options.withFlows),
+    },
+    qaFlowRuns: qaFlowRuns.value,
+  });
+
+  return isResultOk(flowAwareGate) ? resultOk({ gateResult: flowAwareGate.value }) : flowAwareGate;
 }
 
 async function createBaseline(
@@ -1130,6 +1195,50 @@ async function recordVerdict(
   findingId: string,
   options: VerdictCommandOptions,
 ): Promise<Result<VerdictOutput>> {
+  if (findingId.startsWith("qfc_")) {
+    if (options.promote !== true) {
+      return resultErr(
+        createSurfaceError(
+          "finding_not_found",
+          "Browser QA candidate verdicts require --promote.",
+          {
+            details: { findingId },
+          },
+        ),
+      );
+    }
+
+    if (options.reason === undefined || options.reason.length === 0) {
+      return resultErr(
+        createSurfaceError("no_decision_flag", "Browser QA candidate promotion requires --reason."),
+      );
+    }
+
+    const decision = candidateVerdictDecisionFromOptions(options);
+    if (!isResultOk(decision)) {
+      return decision;
+    }
+
+    const promotion = await composition.browserQa.orchestrator.promoteCandidateByVerdict({
+      refId: findingId,
+      reason: options.reason,
+      verdictId: `verdict_${Date.now().toString(36)}`,
+    });
+
+    if (!isResultOk(promotion)) {
+      return promotion;
+    }
+
+    return resultOk({
+      promotion: promotion.value,
+      verdict: {
+        decision: decision.value,
+        findingId,
+        rationale: options.reason,
+      },
+    });
+  }
+
   const decision = decisionFromOptions(options);
 
   if (!isResultOk(decision)) {
@@ -1686,6 +1795,28 @@ function decisionFromOptions(options: VerdictCommandOptions): Result<VerdictReco
   return resultOk(decision);
 }
 
+function candidateVerdictDecisionFromOptions(
+  options: VerdictCommandOptions,
+): Result<VerdictRecord["decision"]> {
+  const decisions = [
+    options.accept === true ? "accept" : undefined,
+    options.reject === true ? "reject" : undefined,
+    options.correct === true ? "correct" : undefined,
+    options.defer === true ? "defer" : undefined,
+  ].filter((decision): decision is VerdictRecord["decision"] => decision !== undefined);
+
+  if (decisions.length > 1) {
+    return resultErr(
+      createSurfaceError(
+        "no_decision_flag",
+        "Pass at most one of --accept, --reject, --correct, or --defer for candidate promotion.",
+      ),
+    );
+  }
+
+  return resultOk(decisions[0] ?? "accept");
+}
+
 function identityKeysForBaseline(state: CliProjectStateSnapshot): readonly string[] {
   if (state.trackedFindings !== undefined && state.trackedFindings.length > 0) {
     return [...new Set(state.trackedFindings.map((trackedFinding) => trackedFinding.identityKey))];
@@ -1859,7 +1990,7 @@ function surfaceErrorForThrown(cause: unknown): SurfaceError {
   if (cause instanceof CommanderError) {
     return createSurfaceError("unknown_step", "Unknown or invalid surface command.", {
       cause,
-      details: { commanderCode: cause.code },
+      details: { commanderCode: cause.code, commanderMessage: cause.message },
     });
   }
 

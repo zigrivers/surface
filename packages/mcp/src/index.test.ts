@@ -2,7 +2,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   createSurfaceComposition,
@@ -31,7 +31,7 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
       name: SURFACE_MCP_SERVER_NAME,
       version: SURFACE_MCP_SERVER_VERSION,
     });
-    expect(tools).toHaveLength(14);
+    expect(tools).toHaveLength(23);
     expect(tools[0]).toMatchObject({
       name: "surface_capture",
       schemaVersion: "1.0.0",
@@ -43,6 +43,40 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
 
     expect(server.composition.lensRegistry.length).toBeGreaterThan(0);
     expect(server.listTools().map((tool) => tool.name)).toContain("surface_status");
+  });
+
+  it("appends browser QA MCP tools after existing analytical tools", () => {
+    const tools = createSurfaceMcpToolRegistry()
+      .listTools()
+      .map((tool) => tool.name);
+
+    expect(tools.slice(0, 14)).toEqual([
+      "surface_capture",
+      "surface_audit",
+      "surface_explain",
+      "surface_backlog",
+      "surface_gate",
+      "surface_validate",
+      "surface_baseline",
+      "surface_verdict",
+      "surface_diff",
+      "surface_alternatives",
+      "surface_trace",
+      "surface_run",
+      "surface_next",
+      "surface_status",
+    ]);
+    expect(tools.slice(14)).toEqual([
+      "surface_qa",
+      "surface_explore",
+      "surface_flow_run",
+      "surface_flow_list",
+      "surface_flow_promote",
+      "surface_evidence",
+      "surface_replay",
+      "surface_report_qa",
+      "surface_artifact_read",
+    ]);
   });
 
   it("keeps a stable compact schema snapshot for MCP compatibility checks", () => {
@@ -143,6 +177,69 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
         {
           "name": "surface_status",
           "required": [],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_qa",
+          "required": [
+            "target",
+          ],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_explore",
+          "required": [
+            "target",
+          ],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_flow_run",
+          "required": [
+            "flowPath",
+          ],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_flow_list",
+          "required": [],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_flow_promote",
+          "required": [
+            "candidateFlowId",
+            "outPath",
+          ],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_evidence",
+          "required": [
+            "refId",
+          ],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_replay",
+          "required": [
+            "refId",
+          ],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_report_qa",
+          "required": [
+            "runId",
+          ],
+          "schemaVersion": "1.0.0",
+        },
+        {
+          "name": "surface_artifact_read",
+          "required": [
+            "artifactId",
+            "refId",
+          ],
           "schemaVersion": "1.0.0",
         },
       ]
@@ -469,6 +566,118 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
       error: { code: "unknown_step", kind: "UsageError" },
     });
   });
+
+  it("runs matching browser QA flows for surface_gate withFlows", async () => {
+    const capture = captureFixture();
+    const base = compositionFixture({ capture });
+    const flowService = {
+      runFlowFile: vi.fn(() =>
+        Promise.resolve(
+          ok({
+            flowRun: {
+              degradation: [],
+              evidenceBundles: [],
+              findingIds: [],
+              flowId: "checkout",
+              gateEligible: true,
+              highestFailedSeverity: "high" as const,
+              id: "flowrun_checkout",
+              isolation: {
+                mode: "isolated" as const,
+                mutatesState: false,
+                resetSatisfied: false,
+              },
+              severity: "high" as const,
+              source: {
+                kind: "file" as const,
+                ref: "../../fixtures/browser-qa/flows/checkout.yml",
+              },
+              status: "failed" as const,
+              steps: [],
+              target: { kind: "url" as const, ref: "http://localhost:3000" },
+            },
+            qaRunId: "qa_checkout",
+          }),
+        ),
+      ),
+    };
+    const server = createSurfaceMcpServer({
+      composition: {
+        ...base,
+        browserQa: {
+          ...base.browserQa,
+          flowService: {
+            ...base.browserQa.flowService,
+            ...flowService,
+          },
+          qaStore: {
+            ...base.browserQa.qaStore,
+            listFlowRuns: () => Promise.resolve(ok([])),
+          },
+        },
+      },
+    });
+    const before = await server.callTool("surface_audit", { target: capture.target });
+
+    if (!before.ok) {
+      throw new Error(before.error.message);
+    }
+
+    const gate = await server.callTool("surface_gate", {
+      actionPolicyRef: "fixtures/browser-qa/action-policy.json",
+      runId: before.value.runId,
+      withFlows: "../../fixtures/browser-qa/flows/checkout.yml",
+    });
+
+    expect(flowService.runFlowFile).toHaveBeenCalledWith({
+      actionPolicyRef: "fixtures/browser-qa/action-policy.json",
+      flowPath: "../../fixtures/browser-qa/flows/checkout.yml",
+      writeRun: false,
+    });
+    expect(gate).toMatchObject({
+      ok: true,
+      value: { exitCode: 1, failingFlowRunIds: ["flowrun_checkout"] },
+    });
+  });
+
+  it("reads browser QA artifacts through bounded registered refs", async () => {
+    const server = createSurfaceMcpServer({
+      composition: compositionFixtureWithBrowserQa({
+        evidenceStore: {
+          readArtifactByRegisteredRef: () =>
+            Promise.resolve(
+              ok({
+                artifactId: "art_console",
+                mediaType: "text/plain",
+                sha256: "sha256:abc123",
+                sizeBytes: 24,
+                text: "redacted console summary",
+                truncated: false,
+              }),
+            ),
+        },
+      }),
+    });
+
+    await expect(
+      server.callTool("surface_artifact_read", {
+        artifactId: "art_console",
+        refId: "ev_checkout",
+      }),
+    ).resolves.toMatchObject({
+      ok: true,
+      value: {
+        artifactId: "art_console",
+        text: "redacted console summary",
+      },
+    });
+    await expect(
+      server.callTool("surface_artifact_read", {
+        artifactId: "art_console",
+        refId: "../secret",
+      }),
+    ).resolves.toMatchObject({ ok: false });
+  });
 });
 
 function captureFixture(): Capture {
@@ -515,6 +724,20 @@ function compositionFixture(input: {
       capture: () => Promise.resolve(ok(input.capture)),
     },
   };
+}
+
+function compositionFixtureWithBrowserQa(browserQa: Record<string, unknown>): SurfaceComposition {
+  const base = createSurfaceComposition();
+  const existingBrowserQa = (base as unknown as { readonly browserQa: Record<string, unknown> })
+    .browserQa;
+
+  return {
+    ...base,
+    browserQa: {
+      ...existingBrowserQa,
+      ...browserQa,
+    },
+  } as SurfaceComposition;
 }
 
 function findingDraftFixture(

@@ -2,7 +2,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createSurfaceComposition, ok } from "@zigrivers/surface-core";
 
@@ -631,6 +631,132 @@ describe("@zigrivers/surface findings and loop verbs", () => {
     }
   });
 
+  it("fails gate --with-flows on eligible reviewed QA flow failures", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "gate", "--with-flows"],
+      composition: createCompositionWithQaStore({
+        listFlowRuns: () =>
+          Promise.resolve(
+            ok([
+              {
+                evidenceBundles: [],
+                findingIds: [],
+                flowId: "checkout",
+                gateEligible: true,
+                highestFailedSeverity: "high",
+                id: "flowrun_checkout",
+                isolation: { mode: "isolated", mutatesState: false, resetSatisfied: true },
+                severity: "high",
+                source: { kind: "file", ref: "surface-flows/checkout.yml" },
+                status: "failed",
+                steps: [],
+                target: { kind: "url", ref: "http://localhost:3000" },
+              },
+            ]),
+          ),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "gate",
+      data: {
+        gateResult: {
+          exitCode: 1,
+          failingFindingIds: [],
+          failingFlowRunIds: ["flowrun_checkout"],
+          passed: false,
+        },
+      },
+      ok: true,
+    });
+  });
+
+  it("passes action policy to discovered gate flows without writing QA run manifests", async () => {
+    const stdout: string[] = [];
+    const flowService = {
+      runFlowFile: vi.fn(() =>
+        Promise.resolve(
+          ok({
+            flowRun: {
+              evidenceBundles: [],
+              findingIds: [],
+              flowId: "checkout",
+              gateEligible: true,
+              highestFailedSeverity: "high" as const,
+              id: "flowrun_checkout",
+              isolation: { mode: "isolated" as const, mutatesState: false, resetSatisfied: true },
+              severity: "high" as const,
+              source: {
+                kind: "file" as const,
+                ref: "../../fixtures/browser-qa/flows/checkout.yml",
+              },
+              status: "failed" as const,
+              steps: [],
+              target: { kind: "url" as const, ref: "http://localhost:3000" },
+            },
+          }),
+        ),
+      ),
+    };
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "gate",
+        "--with-flows",
+        "../../fixtures/browser-qa/flows/checkout.yml",
+        "--action-policy",
+        "fixtures/browser-qa/action-policy.json",
+      ],
+      composition: createCompositionWithQaStore(
+        { listFlowRuns: () => Promise.resolve(ok([])) },
+        { flowService },
+      ),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(flowService.runFlowFile).toHaveBeenCalledWith({
+      actionPolicyRef: "fixtures/browser-qa/action-policy.json",
+      flowPath: "../../fixtures/browser-qa/flows/checkout.yml",
+      writeRun: false,
+    });
+  });
+
+  it("rejects invalid gate flow target flag combinations", async () => {
+    const stderr: string[] = [];
+    const flowService = { runFlowFile: vi.fn() };
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "gate",
+        "--with-flows",
+        "--target",
+        "http://localhost:3000",
+        "--url",
+        "http://localhost:3001",
+      ],
+      composition: createCompositionWithQaStore(
+        { listFlowRuns: () => Promise.resolve(ok([])) },
+        { flowService },
+      ),
+      io: { stderr: (chunk) => stderr.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(flowService.runFlowFile).not.toHaveBeenCalled();
+    expect(JSON.parse(stderr.join(""))).toMatchObject({
+      error: { code: "no_target" },
+      ok: false,
+    });
+  });
+
   it("traces a tracked finding by current finding id", async () => {
     const stdout: string[] = [];
     const exitCode = await runSurfaceCli({
@@ -770,6 +896,50 @@ describe("@zigrivers/surface findings and loop verbs", () => {
           decision: "reject",
           findingId: "finding_button_contrast",
           rationale: "False positive in reviewed theme",
+        },
+      },
+      ok: true,
+    });
+  });
+
+  it("promotes browser QA candidates from human verdicts without requiring replay", async () => {
+    const stdout: string[] = [];
+    const orchestrator = {
+      promoteCandidateByVerdict: vi.fn(() =>
+        Promise.resolve(ok({ promotion: { findingId: "f_checkout" }, replayStatus: "not-run" })),
+      ),
+    };
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "verdict",
+        "qfc_checkout",
+        "--promote",
+        "--reason",
+        "Confirmed during manual QA",
+      ],
+      composition: createSurfaceComposition({
+        browserQa: { orchestrator } as never,
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(orchestrator.promoteCandidateByVerdict).toHaveBeenCalledWith(
+      expect.objectContaining({
+        reason: "Confirmed during manual QA",
+        refId: "qfc_checkout",
+      }),
+    );
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "verdict",
+      data: {
+        verdict: {
+          decision: "accept",
+          findingId: "qfc_checkout",
+          rationale: "Confirmed during manual QA",
         },
       },
       ok: true,
@@ -951,4 +1121,30 @@ function testTrackedFinding(overrides: Partial<TestTrackedFinding> = {}): TestTr
     },
     ...overrides,
   };
+}
+
+function createCompositionWithQaStore(
+  qaStore: { readonly listFlowRuns: () => Promise<unknown> },
+  options: { readonly flowService?: Record<string, unknown> } = {},
+) {
+  const base = createSurfaceComposition({
+    stateStore: new MemoryStateStore({ version: "1.0" }),
+  });
+  const browserQa = (base as unknown as { readonly browserQa: Record<string, unknown> }).browserQa;
+
+  return {
+    ...base,
+    browserQa: {
+      ...browserQa,
+      ...(options.flowService === undefined
+        ? {}
+        : {
+            flowService: {
+              ...(browserQa.flowService as Record<string, unknown>),
+              ...options.flowService,
+            },
+          }),
+      qaStore,
+    },
+  } as ReturnType<typeof createSurfaceComposition>;
 }
