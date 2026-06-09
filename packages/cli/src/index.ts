@@ -304,10 +304,13 @@ export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise
   const composition = options.composition ?? createSurfaceComposition(options);
   const env = options.env ?? process.env;
   const io = options.io ?? {};
-  const program = createSurfaceCliProgram({ composition, env, io });
+  const argv = [...(options.argv ?? process.argv)];
+  const rawJsonRequested = argvContainsJsonFlag(argv);
+  let program: Command | undefined;
 
   try {
-    await program.parseAsync([...(options.argv ?? process.argv)], { from: "node" });
+    program = createSurfaceCliProgram({ composition, env, io, jsonRequested: rawJsonRequested });
+    await program.parseAsync(argv, { from: "node" });
 
     return 0;
   } catch (cause) {
@@ -320,11 +323,11 @@ export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise
     }
 
     const error = surfaceErrorForThrown(cause);
-    const command = commandNameFor(program, options.argv ?? process.argv);
+    const command = commandNameFor(program, argv);
     const exitCode = exitCodeForSurfaceError(error);
 
     writeEnvelope(
-      io.stderr ?? ((chunk) => process.stderr.write(chunk)),
+      errorEnvelopeSink(io, jsonRequested(program, argv)),
       errorEnvelope(command, error, exitCode),
     );
 
@@ -336,6 +339,7 @@ export function createSurfaceCliProgram(input: {
   readonly composition: SurfaceComposition;
   readonly env?: SurfaceCliEnv;
   readonly io?: SurfaceCliIo;
+  readonly jsonRequested?: boolean;
 }): Command {
   const program = new Command();
   const env = input.env ?? process.env;
@@ -348,13 +352,14 @@ export function createSurfaceCliProgram(input: {
     .exitOverride()
     .configureOutput({
       writeErr: (chunk) => {
-        if (!program.opts<{ json?: boolean }>().json) {
+        if (program.opts<{ json?: boolean }>().json !== true && input.jsonRequested !== true) {
           (io.stderr ?? ((value) => process.stderr.write(value)))(chunk);
         }
       },
       writeOut: (chunk) => (io.stdout ?? ((value) => process.stdout.write(value)))(chunk),
     })
     .option("--json", "emit machine-readable JSON")
+    // Pre-parse error recovery derives boolean globals from no-value Commander options.
     .option("--verbose", "emit verbose human output");
 
   program
@@ -1638,11 +1643,9 @@ function emitResult<T>(input: {
   readonly result: Result<T>;
   readonly successExitCode?: CliExitCode;
 }): void {
-  const write = input.result.ok ? input.io.stdout : input.io.stderr;
-  const fallback = input.result.ok
-    ? (chunk: string) => process.stdout.write(chunk)
-    : (chunk: string) => process.stderr.write(chunk);
-  const sink = write ?? fallback;
+  const sink = input.result.ok
+    ? (input.io.stdout ?? ((chunk: string) => process.stdout.write(chunk)))
+    : errorEnvelopeSink(input.io, input.json === true);
 
   if (input.result.ok) {
     const envelope = successEnvelope(input.command, input.result.value);
@@ -1711,6 +1714,48 @@ function errorEnvelope(
 
 function writeEnvelope(write: (chunk: string) => void, envelope: CliEnvelope<never>): void {
   write(`${JSON.stringify(envelope)}\n`);
+}
+
+function errorEnvelopeSink(io: SurfaceCliIo, json: boolean): (chunk: string) => void {
+  if (json) {
+    return io.stdout ?? ((chunk: string) => process.stdout.write(chunk));
+  }
+
+  return io.stderr ?? ((chunk: string) => process.stderr.write(chunk));
+}
+
+function jsonRequested(program: Command | undefined, argv: readonly string[]): boolean {
+  try {
+    const json = program?.opts<{ json?: boolean }>()?.json;
+
+    if (json === true) {
+      return true;
+    }
+  } catch {
+    // Fall through to argv inspection for parse failures before Commander finalizes opts.
+  }
+
+  return argvContainsJsonFlag(argv);
+}
+
+function argvContainsJsonFlag(argv: readonly string[]): boolean {
+  let requested = false;
+
+  for (const arg of argv.slice(2)) {
+    if (arg === "--") {
+      break;
+    }
+
+    // Pre-parse recovery intentionally recognizes only the declared bare global flag.
+    // Use `--` before positional values that must literally contain `--json`.
+    if (arg === "--json") {
+      requested = true;
+    } else if (arg === "--no-json") {
+      requested = false;
+    }
+  }
+
+  return requested;
 }
 
 function humanizeSuccess<T>(command: string, data: T, options: { readonly all: boolean }): string {
@@ -3027,8 +3072,95 @@ function isMissingConfigFileError(error: unknown): boolean {
   );
 }
 
-function commandNameFor(program: Command, argv: readonly string[]): string {
-  return program.args[0] ?? argv.find((arg) => !arg.startsWith("-") && arg !== "node") ?? "surface";
+function commandNameFor(program: Command | undefined, argv: readonly string[]): string {
+  const parsedCommand = program?.args[0];
+
+  if (parsedCommand !== undefined) {
+    return parsedCommand;
+  }
+
+  const commandNames = new Set(program?.commands.map((command) => command.name()) ?? []);
+  const knownCommand = commandFromArgv(argv, commandNames);
+
+  if (knownCommand !== undefined) {
+    return knownCommand;
+  }
+
+  return attemptedCommandFromArgv(argv, booleanCliOptionsFor(program)) ?? "surface";
+}
+
+function commandFromArgv(
+  argv: readonly string[],
+  commandNames: ReadonlySet<string>,
+): string | undefined {
+  if (commandNames.size === 0) {
+    return undefined;
+  }
+
+  for (const arg of argv.slice(2)) {
+    if (arg === "--") {
+      break;
+    }
+
+    if (commandNames.has(arg)) {
+      return arg;
+    }
+  }
+
+  return undefined;
+}
+
+function attemptedCommandFromArgv(
+  argv: readonly string[],
+  booleanCliOptions: ReadonlySet<string>,
+): string | undefined {
+  let skipPotentialOptionValue = false;
+
+  for (const arg of argv.slice(2)) {
+    if (arg === "--") {
+      break;
+    }
+
+    if (skipPotentialOptionValue && !arg.startsWith("-")) {
+      skipPotentialOptionValue = false;
+      continue;
+    }
+
+    skipPotentialOptionValue = false;
+
+    if (arg.startsWith("-")) {
+      skipPotentialOptionValue = !arg.includes("=") && !isBooleanCliOption(arg, booleanCliOptions);
+      continue;
+    }
+
+    return arg;
+  }
+
+  return undefined;
+}
+
+function booleanCliOptionsFor(program: Command | undefined): ReadonlySet<string> {
+  const options = new Set<string>(["--help", "-h"]);
+
+  for (const option of program?.options ?? []) {
+    if (option.required || option.optional) {
+      continue;
+    }
+
+    if (option.short !== undefined) {
+      options.add(option.short);
+    }
+
+    if (option.long !== undefined) {
+      options.add(option.long);
+    }
+  }
+
+  return options;
+}
+
+function isBooleanCliOption(arg: string, booleanCliOptions: ReadonlySet<string>): boolean {
+  return booleanCliOptions.has(arg);
 }
 
 function whatFailedFor(command: string, error: SurfaceError): string {

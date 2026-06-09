@@ -44,27 +44,31 @@ describe("E6 Interfaces", () => {
     });
 
     it("[US-050][AC2] unknown subcommand → exit 2 usage error (e2e)", async () => {
+      const stdout: string[] = [];
       const stderr: string[] = [];
       const exitCode = await runSurfaceCli({
         argv: ["node", "surface", "--json", "unknown-command"],
-        io: { stderr: (chunk) => stderr.push(chunk) },
+        io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
       });
 
       expect(exitCode).toBe(2);
-      expect(JSON.parse(stderr.at(-1) ?? "")).toMatchObject({
+      expect(stderr.join("")).toBe("");
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
         error: { code: "unknown_step", exitCode: 2 },
         ok: false,
       });
     });
 
     it("[US-050][AC3] every error states what failed, likely cause, next command (US-050 actionable errors) (unit)", async () => {
+      const stdout: string[] = [];
       const stderr: string[] = [];
       await runSurfaceCli({
         argv: ["node", "surface", "--json", "unknown-command"],
-        io: { stderr: (chunk) => stderr.push(chunk) },
+        io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
       });
 
-      expect(JSON.parse(stderr.at(-1) ?? "")).toMatchObject({
+      expect(stderr.join("")).toBe("");
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
         error: {
           likelyCause: expect.any(String),
           nextCommand: "surface --help",
@@ -120,9 +124,35 @@ describe("E6 Interfaces", () => {
                 findings: [
                   {
                     citedHeuristics: ["wcag-1.4.3"],
-                    evidence: [{ kind: "tool-result", tool: "axe" }],
+                    confidenceBand: "assert",
+                    dimensions: {
+                      a11yLegalRisk: 0.9,
+                      agentImplementability: 0.9,
+                      businessImpact: 0.5,
+                      confidence: 1,
+                      effort: 0.2,
+                      evidenceQuality: 1,
+                      severity: 0.8,
+                      userImpact: 0.7,
+                    },
+                    evidence: [
+                      {
+                        kind: "tool-result",
+                        measuredValue: "3.1:1",
+                        rule: "color-contrast",
+                        threshold: "4.5:1",
+                        tool: "axe",
+                      },
+                    ],
+                    gatedForHuman: false,
                     id: "finding_acceptance",
+                    issueType: "contrast-insufficient",
+                    lens: "accessibility",
+                    location: { selector: ".btn-primary" },
+                    method: "measured",
                     rationale: "Acceptance finding rationale.",
+                    severityBand: "P1",
+                    title: "Button contrast is below AA",
                   },
                 ],
                 version: "1.0",

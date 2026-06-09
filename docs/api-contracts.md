@@ -14,18 +14,21 @@
 - **Transport:** CLI over argv/stdout/stderr; MCP over stdio (local). No network listener.
 - **Exit codes (NFR-CLI-1):** `0` success · `1` runtime error · `2` usage error. Every command
   supports `--json` (machine-readable on stdout; diagnostics to stderr; byte-stable, NFR-OWNOUT-1).
+  Boolean flags use their declared bare forms such as `--json`; value-bearing forms such as
+  `--json=true` are outside the CLI contract and may be reported as usage errors.
 - **JSON success envelope (`--json`):**
   ```jsonc
   { "ok": true, "command": "audit", "schemaVersion": "1.0", "data": { /* command-specific */ } }
   ```
-- **JSON error envelope (maps the SurfaceError taxonomy, ADR-014):**
+- **JSON error envelope (`--json`, stdout; maps the SurfaceError taxonomy, ADR-014):**
   ```jsonc
   { "ok": false, "command": "audit", "schemaVersion": "1.0",
     "error": { "code": "capture_backend_unavailable", "kind": "CaptureError",
                "message": "what failed, likely cause, next command", "exitCode": 1 } }
   ```
   `error.code` is a stable snake_case reason phrase (≥2 domain-specific codes per command, §6);
-  `message` is actionable (US-050).
+  `message` is actionable (US-050). Error envelopes are part of the machine-readable `--json`
+  stream and are emitted on stdout; stderr remains reserved for human diagnostics.
 - **Versioning:** CLI follows semver; `schemaVersion` versions the JSON envelope + output
   schemas; the **MCP tool schema** is versioned and a breaking change forces a **major bump**
   (NFR-MCP-1), enforced by schema snapshot tests. No endpoint/tool is removed or renamed without

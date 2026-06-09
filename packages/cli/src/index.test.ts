@@ -76,14 +76,16 @@ describe("@zigrivers/surface bootstrap", () => {
   });
 
   it("maps unknown subcommands to exit 2 usage errors with actionable JSON", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runSurfaceCli({
       argv: ["node", "surface", "--json", "bogus"],
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(2);
-    const parsed = JSON.parse(stderr.at(-1) ?? "") as ParsedErrorEnvelope;
+    expect(stderr.join("")).toBe("");
+    const parsed = JSON.parse(stdout.join("")) as ParsedErrorEnvelope;
 
     expect(parsed).toMatchObject({
       error: {
@@ -97,6 +99,69 @@ describe("@zigrivers/surface bootstrap", () => {
     });
     expect(parsed.error.likelyCause).toContain("command");
     expect(parsed.error.whatFailed).toContain("unknown_step");
+  });
+
+  it("emits top-level parse errors to stdout when --json appears after the command", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "status", "--bogus", "--json"],
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "status",
+      error: {
+        code: "unknown_step",
+        exitCode: 2,
+        kind: "UsageError",
+      },
+      ok: false,
+    });
+  });
+
+  it("does not treat literal arguments after -- as a JSON mode request", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "status", "--bogus", "--", "--json"],
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stdout.join("")).toBe("");
+    const envelope = stderr.join("").trim().split("\n").at(-1) ?? "";
+    expect(JSON.parse(envelope)).toMatchObject({
+      command: "status",
+      error: {
+        code: "unknown_step",
+        exitCode: 2,
+      },
+      ok: false,
+    });
+  });
+
+  it("does not treat unsupported --json value forms as JSON mode requests", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "status", "--bogus", "--json=true"],
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stdout.join("")).toBe("");
+    const envelope = stderr.join("").trim().split("\n").at(-1) ?? "";
+    expect(JSON.parse(envelope)).toMatchObject({
+      command: "status",
+      error: {
+        code: "unknown_step",
+        exitCode: 2,
+      },
+      ok: false,
+    });
   });
 });
 
@@ -226,16 +291,18 @@ describe("@zigrivers/surface core verbs", () => {
   });
 
   it("rejects model-backed judgement on the legacy run pipeline", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runSurfaceCli({
       argv: ["node", "surface", "--json", "run", "all"],
       composition: createSurfaceComposition({ stateStore: new TestMemoryStateStore() }),
       env: { SURFACE_MODEL_FALLBACK: "direct" },
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.join(""))).toMatchObject({
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "run",
       error: {
         code: "config_invalid",
@@ -270,14 +337,16 @@ describe("@zigrivers/surface core verbs", () => {
   });
 
   it("rejects capture without a target as a usage error", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runSurfaceCli({
       argv: ["node", "surface", "--json", "capture"],
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(2);
-    expect(JSON.parse(stderr.join(""))).toMatchObject({
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "capture",
       error: { code: "no_target", exitCode: 2 },
       ok: false,
@@ -697,6 +766,7 @@ describe("@zigrivers/surface core verbs", () => {
 
   it("reports project config model path details for invalid subscription channels", async () => {
     const root = await mkdtemp(join(tmpdir(), "surface-invalid-project-config-"));
+    const stdout: string[] = [];
     const stderr: string[] = [];
 
     try {
@@ -711,11 +781,12 @@ describe("@zigrivers/surface core verbs", () => {
         argv: ["node", "surface", "--json", "audit", "--dom", "<main>Checkout</main>"],
         composition: compositionWithAuditSpy([]),
         env: { SURFACE_PROJECT_CONFIG_PATH: configPath, SURFACE_USER_CONFIG_PATH: "off" },
-        io: { stderr: (chunk) => stderr.push(chunk) },
+        io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
       });
 
       expect(exitCode).toBe(1);
-      expect(JSON.parse(stderr.join(""))).toMatchObject({
+      expect(stderr.join("")).toBe("");
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
         error: {
           code: "config_invalid",
           details: {
@@ -986,6 +1057,7 @@ describe("@zigrivers/surface core verbs", () => {
 
   it("rejects invalid model-depth CLI option values", async () => {
     for (const value of ["not-a-number", "5abc"]) {
+      const stdout: string[] = [];
       const stderr: string[] = [];
       const exitCode = await runSurfaceCli({
         argv: [
@@ -999,11 +1071,12 @@ describe("@zigrivers/surface core verbs", () => {
           value,
         ],
         composition: compositionWithAuditSpy([]),
-        io: { stderr: (chunk) => stderr.push(chunk) },
+        io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
       });
 
       expect(exitCode).toBe(1);
-      expect(JSON.parse(stderr.join(""))).toMatchObject({
+      expect(stderr.join("")).toBe("");
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
         error: {
           code: "config_invalid",
           message: "Model depth must be an integer from 1 to 5.",
@@ -1014,15 +1087,17 @@ describe("@zigrivers/surface core verbs", () => {
   });
 
   it("rejects partially numeric evaluation depth values", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runSurfaceCli({
       argv: ["node", "surface", "--json", "init", "--depth", "5abc"],
       composition: createSurfaceComposition({ stateStore: new TestMemoryStateStore() }),
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.join(""))).toMatchObject({
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
       error: {
         code: "config_invalid",
         message: "Evaluation depth must be an integer from 1 to 5.",
@@ -1048,6 +1123,7 @@ describe("@zigrivers/surface core verbs", () => {
     ];
 
     for (const testCase of cases) {
+      const stdout: string[] = [];
       const stderr: string[] = [];
       const exitCode = await runSurfaceCli({
         argv: [
@@ -1060,11 +1136,12 @@ describe("@zigrivers/surface core verbs", () => {
           ...testCase.args,
         ],
         composition: compositionWithAuditSpy([]),
-        io: { stderr: (chunk) => stderr.push(chunk) },
+        io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
       });
 
       expect(exitCode).toBe(1);
-      expect(JSON.parse(stderr.join(""))).toMatchObject({
+      expect(stderr.join("")).toBe("");
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
         error: {
           code: "config_invalid",
           message: testCase.message,
@@ -2198,6 +2275,7 @@ describe("@zigrivers/surface findings and loop verbs", () => {
   });
 
   it("returns run_not_found when validate --run references a missing run", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runSurfaceCli({
       argv: ["node", "surface", "--json", "validate", "--run", "missing"],
@@ -2207,11 +2285,12 @@ describe("@zigrivers/surface findings and loop verbs", () => {
           version: "1.0",
         }),
       }),
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(1);
-    expect(JSON.parse(stderr.join(""))).toMatchObject({
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "validate",
       error: { code: "run_not_found", kind: "RuntimeError" },
       ok: false,
@@ -2385,6 +2464,7 @@ describe("@zigrivers/surface findings and loop verbs", () => {
   });
 
   it("rejects invalid gate flow target flag combinations", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const flowService = { runFlowFile: vi.fn() };
     const exitCode = await runSurfaceCli({
@@ -2403,12 +2483,13 @@ describe("@zigrivers/surface findings and loop verbs", () => {
         { listFlowRuns: () => Promise.resolve(ok([])) },
         { flowService },
       ),
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(2);
     expect(flowService.runFlowFile).not.toHaveBeenCalled();
-    expect(JSON.parse(stderr.join(""))).toMatchObject({
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
       error: { code: "no_target" },
       ok: false,
     });
