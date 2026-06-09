@@ -8,8 +8,10 @@ import { describe, expect, it, vi } from "vitest";
 import {
   createAccessibilityLens,
   createSurfaceComposition,
+  createSurfaceError,
   createUsabilityHeuristicLens,
   deriveFindingIdentity,
+  err,
   ok,
   type AuditRunnerInput,
   type AuditRunnerResult,
@@ -33,6 +35,7 @@ type ParsedErrorEnvelope = {
   readonly schemaVersion: "1.0";
   readonly error: {
     readonly code: string;
+    readonly details?: Record<string, unknown>;
     readonly exitCode: number;
     readonly kind: string;
     readonly likelyCause: string;
@@ -90,7 +93,7 @@ describe("@zigrivers/surface bootstrap", () => {
 
     expect(parsed).toMatchObject({
       error: {
-        code: "unknown_step",
+        code: "unknown_command",
         exitCode: 2,
         kind: "UsageError",
         nextCommand: "surface --help",
@@ -99,7 +102,7 @@ describe("@zigrivers/surface bootstrap", () => {
       schemaVersion: "1.0",
     });
     expect(parsed.error.likelyCause).toContain("command");
-    expect(parsed.error.whatFailed).toContain("unknown_step");
+    expect(parsed.error.whatFailed).toContain("unknown_command");
   });
 
   it("emits top-level parse errors to stdout when --json appears after the command", async () => {
@@ -115,9 +118,90 @@ describe("@zigrivers/surface bootstrap", () => {
     expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "status",
       error: {
-        code: "unknown_step",
+        code: "unknown_option",
         exitCode: 2,
         kind: "UsageError",
+        nextCommand: "surface status --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("emits command-specific recovery guidance for unknown options", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "status", "--bogus"],
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "status",
+      error: {
+        code: "unknown_option",
+        nextCommand: "surface status --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("falls back to top-level help for top-level unknown options", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "--bogus"],
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "surface",
+      error: {
+        code: "unknown_option",
+        nextCommand: "surface --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("does not use a later command for unknown global option recovery guidance", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "--bogus", "status"],
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "surface",
+      error: {
+        code: "unknown_option",
+        nextCommand: "surface --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("does not use a later command after unknown global options with values", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "--bogus=value", "status"],
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "surface",
+      error: {
+        code: "unknown_option",
+        nextCommand: "surface --help",
       },
       ok: false,
     });
@@ -137,7 +221,7 @@ describe("@zigrivers/surface bootstrap", () => {
     expect(JSON.parse(envelope)).toMatchObject({
       command: "status",
       error: {
-        code: "unknown_step",
+        code: "unknown_option",
         exitCode: 2,
       },
       ok: false,
@@ -158,9 +242,31 @@ describe("@zigrivers/surface bootstrap", () => {
     expect(JSON.parse(envelope)).toMatchObject({
       command: "status",
       error: {
-        code: "unknown_step",
+        code: "unknown_option",
         exitCode: 2,
       },
+      ok: false,
+    });
+  });
+
+  it("does not suggest repeating status for corrupt state", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "status"],
+      composition: createSurfaceComposition({
+        stateStore: {
+          readState: () => err(createSurfaceError("state_corrupt", "State file is corrupt.")),
+          writeArtifact: () =>
+            Promise.resolve(ok({ path: ".surface/test", sha256: "sha256:test" })),
+          writeState: (state) => ok(state),
+        },
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      error: { code: "state_corrupt", nextCommand: "surface init --force --json" },
       ok: false,
     });
   });
@@ -390,6 +496,64 @@ describe("@zigrivers/surface core verbs", () => {
     }
   });
 
+  it("suggests allowlisted URL recovery for allowlist capture rejections", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-capture-allowlist-recovery-"));
+    const stdout: string[] = [];
+
+    try {
+      await mkdir(join(root, ".surface"), { recursive: true });
+      await writeFile(
+        join(root, ".surface", "config.yml"),
+        ["capture:", "  allowlist:", "    - https://allowed.example.com", ""].join("\n"),
+      );
+
+      const exitCode = await runSurfaceCli({
+        argv: [
+          "node",
+          "surface",
+          "--json",
+          "capture",
+          "--url",
+          "https://example.com/private?token=secret",
+        ],
+        composition: createSurfaceComposition({
+          captureBackends: [
+            {
+              id: "test",
+              detect: () => true,
+              observe: () => {
+                throw new Error("capture backend should not run for rejected targets");
+              },
+            },
+          ],
+          lensFactoryOptions: { projectRoot: root },
+        }),
+        env: { SURFACE_USER_CONFIG_PATH: "off" },
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+      const parsed = JSON.parse(stdout.join("")) as ParsedErrorEnvelope;
+
+      expect(exitCode).toBe(1);
+      expect(parsed).toMatchObject({
+        command: "capture",
+        error: {
+          code: "target_not_allowed",
+          details: {
+            reason: "allowlist-mismatch",
+            targetOrigin: "https://example.com",
+          },
+          nextCommand: "surface capture --url <allowlisted-url> --json",
+        },
+        ok: false,
+      });
+      expect(JSON.stringify(parsed.error.details)).not.toContain("targetRef");
+      expect(JSON.stringify(parsed.error.details)).not.toContain("secret");
+      expect(JSON.stringify(parsed.error.details)).not.toContain("allowed.example.com");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
   it("applies project capture redaction rules to inline DOM capture artifacts", async () => {
     const root = await mkdtemp(join(tmpdir(), "surface-inline-dom-capture-config-"));
     const stdout: string[] = [];
@@ -453,6 +617,364 @@ describe("@zigrivers/surface core verbs", () => {
     expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "capture",
       error: { code: "no_target", exitCode: 2 },
+      ok: false,
+    });
+  });
+
+  it("reports unresolved public capture hosts as unreachable URL targets", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "https://surface-unresolved.invalid"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () => {
+              throw new Error("capture backend should not run for unresolved hosts");
+            },
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "capture_unreachable",
+        details: {
+          reason: "host-unresolved",
+          targetKind: "url",
+        },
+        nextCommand: "surface capture --url <url> --json",
+      },
+      ok: false,
+    });
+  });
+
+  it("suggests localhost auth-state recovery for localhost capture targets", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--localhost"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () =>
+              err(
+                createSurfaceError(
+                  "auth_injection_failed",
+                  "Auth state must be a valid Playwright storage-state JSON file.",
+                  {
+                    details: { reason: "invalid-storage-state", targetKind: "localhost" },
+                  },
+                ),
+              ),
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "auth_injection_failed",
+        nextCommand: "surface capture --localhost <url> --auth-state <path> --json",
+      },
+      ok: false,
+    });
+  });
+
+  it("suggests localhost auth recovery for localhost target verification failures", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--localhost"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () =>
+              err(
+                createSurfaceError(
+                  "auth_injection_failed",
+                  "Authenticated capture did not land on the requested target.",
+                  {
+                    details: { reason: "target-verification-failed", targetKind: "localhost" },
+                  },
+                ),
+              ),
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "auth_injection_failed",
+        nextCommand: "surface capture --localhost <url> --auth-state <path> --json",
+      },
+      ok: false,
+    });
+  });
+
+  it("suggests URL capture recovery for unreachable URL targets", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "https://example.com"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () =>
+              err(
+                createSurfaceError("capture_unreachable", "Capture target is unreachable.", {
+                  details: { targetKind: "url" },
+                }),
+              ),
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "capture_unreachable",
+        nextCommand: "surface capture --url <url> --json",
+      },
+      ok: false,
+    });
+  });
+
+  it("uses the generic recovery command for non-capture target_not_allowed errors", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "https://example.com"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () => err(createSurfaceError("target_not_allowed", "Target is not allowed.")),
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "target_not_allowed",
+        nextCommand: "surface status --json",
+      },
+      ok: false,
+    });
+  });
+
+  it("does not suggest localhost recovery for unsafe non-loopback URL targets", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "http://169.254.169.254"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () => {
+              throw new Error("capture backend should not run for unsafe hosts");
+            },
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "target_not_allowed",
+        details: { host: "169.254.169.254", reason: "unsafe-host", targetKind: "url" },
+        nextCommand: "surface capture --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("rejects unsafe metadata hostnames before DNS resolution", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "http://metadata.google.internal"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () => {
+              throw new Error("capture backend should not run for unsafe metadata hosts");
+            },
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "target_not_allowed",
+        details: {
+          host: "metadata.google.internal",
+          reason: "unsafe-host",
+          targetKind: "url",
+        },
+        nextCommand: "surface capture --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("does not treat hostnames that start with 127 as loopback recovery targets", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "https://example.com"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () =>
+              err(
+                createSurfaceError("target_not_allowed", "Capture target host is not allowed.", {
+                  details: { host: "127.example.com", reason: "unsafe-host", targetKind: "url" },
+                }),
+              ),
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "target_not_allowed",
+        nextCommand: "surface capture --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("does not treat nonzero IPv6-compatible hosts as loopback recovery targets", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "https://example.com"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () =>
+              err(
+                createSurfaceError("target_not_allowed", "Capture target host is not allowed.", {
+                  details: {
+                    host: "::1234:5678:7f00:1",
+                    reason: "unsafe-host",
+                    targetKind: "url",
+                  },
+                }),
+              ),
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "target_not_allowed",
+        nextCommand: "surface capture --help",
+      },
+      ok: false,
+    });
+  });
+
+  it("suggests localhost recovery for URL targets using local bind hosts", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--url", "http://0.0.0.0:3000"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () => {
+              throw new Error("capture backend should not run for local bind hosts");
+            },
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "target_not_allowed",
+        details: { host: "0.0.0.0", reason: "unsafe-host", targetKind: "url" },
+        nextCommand: "surface capture --localhost <url> --json",
+      },
+      ok: false,
+    });
+  });
+
+  it("suggests localhost capture recovery for unreachable localhost targets", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "capture", "--localhost"],
+      composition: createSurfaceComposition({
+        captureBackends: [
+          {
+            id: "test",
+            detect: () => true,
+            observe: () =>
+              err(
+                createSurfaceError("capture_unreachable", "Capture target is unreachable.", {
+                  details: { targetKind: "localhost" },
+                }),
+              ),
+          },
+        ],
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "capture_unreachable",
+        nextCommand: "surface capture --localhost <url> --json",
+      },
       ok: false,
     });
   });

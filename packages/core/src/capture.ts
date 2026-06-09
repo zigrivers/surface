@@ -62,6 +62,7 @@ const STATIC_SCREENSHOT_EXTENSIONS = new Set([".png"]);
 const STATIC_CAPTURE_ID_PATTERN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]*[A-Za-z0-9_-])?$/;
 const STATIC_MAX_SCREENSHOT_BYTES = 100 * 1024 * 1024;
 const STATIC_MAX_TEXT_BYTES = 2 * 1024 * 1024;
+const MAX_AGENT_BROWSER_FAILURE_TEXT_PART_CHARS = 10_000;
 const STATIC_SCREENSHOT_SKIPPED_REASON = "static screenshot input; live DOM artifacts unavailable";
 const STATIC_TEXT_SKIPPED_REASON =
   "static context input; screenshot and live browser artifacts unavailable";
@@ -351,7 +352,10 @@ export function createPlaywrightCaptureBackend(
         );
       }
 
-      const authStateValidation = await validateAuthStateRef(captureOptions.authStateRef);
+      const authStateValidation = await validateAuthStateRef(
+        captureOptions.authStateRef,
+        target.kind,
+      );
 
       if (!authStateValidation.ok) {
         return err(authStateValidation.error);
@@ -400,7 +404,7 @@ export function createPlaywrightCaptureBackend(
         ) {
           await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
 
-          return err(authInjectionVerificationError(verification));
+          return err(authInjectionVerificationError(verification, target.kind));
         }
 
         const screenshotBytes = shouldUseStateArtifactWriter(captureOptions)
@@ -537,8 +541,9 @@ export function createAgentBrowserCaptureBackend(
         );
       }
 
-      const authStateValidation = await validateAgentBrowserAuthStateRef(
+      const authStateValidation = await validateAuthStateRef(
         captureOptions.authStateRef,
+        target.kind,
       );
 
       if (!authStateValidation.ok) {
@@ -612,7 +617,7 @@ export function createAgentBrowserCaptureBackend(
         ) {
           await rm(captureRoot, { force: true, recursive: true }).catch(() => {});
 
-          return err(authInjectionVerificationError(verification));
+          return err(authInjectionVerificationError(verification, target.kind));
         }
 
         const screenshotRedaction = redactArtifactBytes(
@@ -720,29 +725,9 @@ export function createAgentBrowserCaptureBackend(
   };
 }
 
-async function validateAgentBrowserAuthStateRef(
-  authStateRef: string | undefined,
-): Promise<Result<void, SurfaceError>> {
-  if (authStateRef === undefined) {
-    return ok(undefined);
-  }
-
-  try {
-    await stat(authStateRef);
-
-    return ok(undefined);
-  } catch (cause) {
-    return err(
-      createSurfaceError("auth_injection_failed", "Auth state file could not be read.", {
-        cause,
-        details: { reason: "auth-state-unreadable", authStateRef },
-      }),
-    );
-  }
-}
-
 async function validateAuthStateRef(
   authStateRef: string | undefined,
+  targetKind: Target["kind"],
 ): Promise<Result<void, SurfaceError>> {
   if (authStateRef === undefined) {
     return ok(undefined);
@@ -757,7 +742,7 @@ async function validateAuthStateRef(
           "auth_injection_failed",
           "Auth state must be a valid Playwright storage-state JSON file.",
           {
-            details: { reason: "invalid-storage-state", authStateRef },
+            details: { reason: "invalid-storage-state", authStateRef, targetKind },
           },
         ),
       );
@@ -772,7 +757,7 @@ async function validateAuthStateRef(
           "Auth state must be a valid Playwright storage-state JSON file.",
           {
             cause,
-            details: { reason: "invalid-storage-state", authStateRef },
+            details: { reason: "invalid-storage-state", authStateRef, targetKind },
           },
         ),
       );
@@ -781,7 +766,7 @@ async function validateAuthStateRef(
     return err(
       createSurfaceError("auth_injection_failed", "Auth state file could not be read.", {
         cause,
-        details: { reason: "auth-state-unreadable", authStateRef },
+        details: { reason: "auth-state-unreadable", authStateRef, targetKind },
       }),
     );
   }
@@ -854,12 +839,15 @@ function landedUrlMatchesRequestedUrl(landedUrl: string, requestedUrl: string): 
   }
 }
 
-function authInjectionVerificationError(verification: {
-  readonly authInjectedBeforeNavigation: boolean;
-  readonly isRequestedTarget: boolean;
-  readonly landedUrl: string;
-  readonly requestedUrl: string;
-}): SurfaceError {
+function authInjectionVerificationError(
+  verification: {
+    readonly authInjectedBeforeNavigation: boolean;
+    readonly isRequestedTarget: boolean;
+    readonly landedUrl: string;
+    readonly requestedUrl: string;
+  },
+  targetKind: Target["kind"],
+): SurfaceError {
   return createSurfaceError(
     "auth_injection_failed",
     "Authenticated capture did not land on the requested target.",
@@ -870,6 +858,7 @@ function authInjectionVerificationError(verification: {
         landedUrl: verification.landedUrl,
         reason: "target-verification-failed",
         requestedUrl: verification.requestedUrl,
+        targetKind,
       },
     },
   );
@@ -2027,16 +2016,109 @@ function playwrightCaptureError(cause: unknown, target: Target): SurfaceError {
 function agentBrowserCaptureError(cause: unknown, target: Target): SurfaceError {
   const isCommandError = cause instanceof AgentBrowserCommandError;
   const commandError = isCommandError ? cause : undefined;
+  const classification = classifyAgentBrowserCaptureError(cause);
 
-  return createSurfaceError("capture_failed", "agent-browser could not capture the target.", {
+  return createSurfaceError(classification.code, classification.message, {
     cause,
     details: {
       backendId: "agent-browser",
       ...safeAgentBrowserCommandErrorDetails(commandError),
-      reason: isCommandError ? "agent-browser-command-failed" : errorMessage(cause),
+      reason: classification.reason,
       targetKind: target.kind,
     },
   });
+}
+
+function classifyAgentBrowserCaptureError(cause: unknown): {
+  readonly code: "capture_failed" | "capture_unreachable";
+  readonly message: string;
+  readonly reason: string;
+} {
+  const message = agentBrowserFailureText(cause).toLowerCase();
+
+  if (isAgentBrowserUnreachableText(message)) {
+    return {
+      code: "capture_unreachable",
+      message: "agent-browser could not reach the target.",
+      reason: "target-unreachable",
+    };
+  }
+
+  return {
+    code: "capture_failed",
+    message: "agent-browser could not capture the target.",
+    reason:
+      cause instanceof AgentBrowserCommandError
+        ? "agent-browser-command-failed"
+        : errorMessage(cause),
+  };
+}
+
+function isAgentBrowserUnreachableText(message: string): boolean {
+  return [
+    /\b(?:net::)?err_(?:address_unreachable|connection_refused|connection_timed_out|timed_out)\b/u,
+    /\b(?:econnrefused|ehostunreach|enetunreach|etimedout)\b/u,
+    /\bconnection (?:refused|timed out)\b/u,
+    /\bcould not connect\b/u,
+  ].some((pattern) => pattern.test(message));
+}
+
+function agentBrowserFailureText(cause: unknown): string {
+  if (cause instanceof AgentBrowserCommandError) {
+    return [
+      cause.message,
+      boundedAgentBrowserFailureText(cause.result?.stderr),
+      boundedAgentBrowserFailureText(cause.result?.stdout),
+      agentBrowserErrorText(cause.agentBrowserError),
+    ]
+      .filter((part) => part.trim().length > 0)
+      .join("\n");
+  }
+
+  return errorMessage(cause);
+}
+
+function boundedAgentBrowserFailureText(text: string | undefined): string {
+  if (text === undefined || text.length <= MAX_AGENT_BROWSER_FAILURE_TEXT_PART_CHARS) {
+    return text ?? "";
+  }
+
+  const edgeLength = Math.floor(MAX_AGENT_BROWSER_FAILURE_TEXT_PART_CHARS / 2);
+
+  return `${text.slice(0, edgeLength)}\n...[truncated]...\n${text.slice(-edgeLength)}`;
+}
+
+function agentBrowserErrorText(agentBrowserError: unknown): string {
+  if (typeof agentBrowserError === "string") {
+    return agentBrowserError;
+  }
+
+  if (agentBrowserError === undefined || agentBrowserError === null) {
+    return "";
+  }
+
+  if (
+    typeof agentBrowserError === "bigint" ||
+    typeof agentBrowserError === "boolean" ||
+    typeof agentBrowserError === "number" ||
+    typeof agentBrowserError === "symbol"
+  ) {
+    return agentBrowserError.toString();
+  }
+
+  if (typeof agentBrowserError === "function") {
+    return "[function]";
+  }
+
+  if (agentBrowserError instanceof Error) {
+    return agentBrowserError.message;
+  }
+
+  try {
+    return JSON.stringify(agentBrowserError) ?? "";
+  } catch {
+    return "[unserializable agent-browser error]";
+  }
 }
 
 function safeAgentBrowserCommandErrorDetails(
@@ -2047,9 +2129,9 @@ function safeAgentBrowserCommandErrorDetails(
   }
 
   return {
-    exitCode: commandError.result.exitCode,
-    stderrPresent: commandError.result.stderr.trim().length > 0,
-    stdoutPresent: commandError.result.stdout.trim().length > 0,
+    exitCode: commandError.result?.exitCode,
+    stderrPresent: (commandError.result?.stderr ?? "").trim().length > 0,
+    stdoutPresent: (commandError.result?.stdout ?? "").trim().length > 0,
   };
 }
 
@@ -2207,16 +2289,28 @@ async function authorizeCaptureTarget(
     );
   }
 
+  if (isUnsafeHost(url.hostname, target.kind)) {
+    return err(
+      createSurfaceError("target_not_allowed", "Capture target host is not allowed.", {
+        details: { host: url.hostname, reason: "unsafe-host", targetKind: target.kind },
+      }),
+    );
+  }
+
   const resolvedAddresses = await resolveHostAddresses(url.hostname);
 
-  if (
-    resolvedAddresses === undefined ||
-    isUnsafeHost(url.hostname, target.kind) ||
-    resolvedAddresses.some((address) => isUnsafeHost(address, target.kind))
-  ) {
+  if (resolvedAddresses === undefined) {
     return err(
-      createSurfaceError("capture_failed", "Capture target host is not allowed.", {
-        details: { host: url.hostname, targetKind: target.kind },
+      createSurfaceError("capture_unreachable", "Capture target host could not be resolved.", {
+        details: { host: url.hostname, reason: "host-unresolved", targetKind: target.kind },
+      }),
+    );
+  }
+
+  if (resolvedAddresses.some((address) => isUnsafeHost(address, target.kind))) {
+    return err(
+      createSurfaceError("target_not_allowed", "Capture target host is not allowed.", {
+        details: { host: url.hostname, reason: "unsafe-host", targetKind: target.kind },
       }),
     );
   }
@@ -2225,13 +2319,17 @@ async function authorizeCaptureTarget(
 
   if (!isAllowlisted(url, target, allowlist)) {
     return err(
-      createSurfaceError("capture_failed", "Capture target is outside the configured allowlist.", {
-        details: {
-          allowlist,
-          targetKind: target.kind,
-          targetOrigin: url.origin,
+      createSurfaceError(
+        "target_not_allowed",
+        "Capture target is outside the configured allowlist.",
+        {
+          details: {
+            reason: "allowlist-mismatch",
+            targetKind: target.kind,
+            targetOrigin: url.origin,
+          },
         },
-      }),
+      ),
     );
   }
 

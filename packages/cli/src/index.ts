@@ -323,8 +323,12 @@ export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise
       return 0;
     }
 
-    const error = surfaceErrorForThrown(cause);
-    const command = commandNameFor(program, argv);
+    const command = commandNameFor(
+      program,
+      argv,
+      cause instanceof CommanderError ? cause : undefined,
+    );
+    const error = surfaceErrorForThrown(cause, command);
     const exitCode = exitCodeForSurfaceError(error);
 
     writeEnvelope(
@@ -3063,11 +3067,22 @@ function nextCliRunId(): string {
   return `run_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-function surfaceErrorForThrown(cause: unknown): SurfaceError {
+function surfaceErrorForThrown(cause: unknown, command: string): SurfaceError {
   if (cause instanceof CommanderError) {
-    return createSurfaceError("unknown_step", "Unknown or invalid surface command.", {
+    const code =
+      cause.code === "commander.unknownCommand"
+        ? "unknown_command"
+        : cause.code === "commander.unknownOption"
+          ? "unknown_option"
+          : "unknown_step";
+    const nextCommand =
+      code === "unknown_option" && command.length > 0 && command !== "surface"
+        ? `surface ${command} --help`
+        : "surface --help";
+
+    return createSurfaceError(code, commanderErrorMessage(code), {
       cause,
-      details: { commanderCode: cause.code, commanderMessage: cause.message },
+      details: { commanderCode: cause.code, commanderMessage: cause.message, nextCommand },
     });
   }
 
@@ -3083,6 +3098,20 @@ function surfaceErrorForThrown(cause: unknown): SurfaceError {
   });
 }
 
+function commanderErrorMessage(
+  code: "unknown_command" | "unknown_option" | "unknown_step",
+): string {
+  if (code === "unknown_command") {
+    return "Unknown surface command.";
+  }
+
+  if (code === "unknown_option") {
+    return "Unknown surface option.";
+  }
+
+  return "Unknown or invalid surface command.";
+}
+
 function isMissingConfigFileError(error: unknown): boolean {
   return (
     typeof error === "object" &&
@@ -3093,26 +3122,37 @@ function isMissingConfigFileError(error: unknown): boolean {
   );
 }
 
-function commandNameFor(program: Command | undefined, argv: readonly string[]): string {
+function commandNameFor(
+  program: Command | undefined,
+  argv: readonly string[],
+  parseError?: CommanderError,
+): string {
   const parsedCommand = program?.args[0];
 
-  if (parsedCommand !== undefined) {
+  // Commander leaves unknown option tokens in args; Surface command names are non-option tokens.
+  if (parsedCommand !== undefined && !parsedCommand.startsWith("-")) {
     return parsedCommand;
   }
 
   const commandNames = new Set(program?.commands.map((command) => command.name()) ?? []);
-  const knownCommand = commandFromArgv(argv, commandNames);
+  const stopAtOption =
+    parseError?.code === "commander.unknownOption" ? commanderUnknownOption(parseError) : undefined;
+  if (parseError?.code === "commander.unknownOption" && stopAtOption === undefined) {
+    return "surface";
+  }
+  const knownCommand = commandFromArgv(argv, commandNames, stopAtOption);
 
   if (knownCommand !== undefined) {
     return knownCommand;
   }
 
-  return attemptedCommandFromArgv(argv, booleanCliOptionsFor(program)) ?? "surface";
+  return attemptedCommandFromArgv(argv, booleanCliOptionsFor(program), stopAtOption) ?? "surface";
 }
 
 function commandFromArgv(
   argv: readonly string[],
   commandNames: ReadonlySet<string>,
+  stopAtOption?: string,
 ): string | undefined {
   if (commandNames.size === 0) {
     return undefined;
@@ -3120,6 +3160,10 @@ function commandFromArgv(
 
   for (const arg of argv.slice(2)) {
     if (arg === "--") {
+      break;
+    }
+
+    if (stopAtOption !== undefined && optionArgMatches(arg, stopAtOption)) {
       break;
     }
 
@@ -3131,14 +3175,29 @@ function commandFromArgv(
   return undefined;
 }
 
+function commanderUnknownOption(error: CommanderError): string | undefined {
+  const match = /unknown option ['`](?<option>--?[^'`\s=]+)/u.exec(error.message);
+
+  return match?.groups?.option;
+}
+
+function optionArgMatches(arg: string, option: string): boolean {
+  return arg === option || arg.startsWith(`${option}=`);
+}
+
 function attemptedCommandFromArgv(
   argv: readonly string[],
   booleanCliOptions: ReadonlySet<string>,
+  stopAtOption?: string,
 ): string | undefined {
   let skipPotentialOptionValue = false;
 
   for (const arg of argv.slice(2)) {
     if (arg === "--") {
+      break;
+    }
+
+    if (stopAtOption !== undefined && optionArgMatches(arg, stopAtOption)) {
       break;
     }
 
@@ -3197,8 +3256,56 @@ function likelyCauseFor(error: SurfaceError): string {
 }
 
 function nextCommandFor(error: SurfaceError): string {
+  const explicitNextCommand = errorDetailsString(error, "nextCommand");
+  if (explicitNextCommand !== undefined) {
+    return explicitNextCommand;
+  }
+
   if (error.code === "no_target") {
     return "surface capture --url <url> --json";
+  }
+
+  if (error.code === "state_corrupt") {
+    return "surface init --force --json";
+  }
+
+  if (error.code === "auth_injection_failed") {
+    return errorDetailsString(error, "targetKind") === "localhost"
+      ? "surface capture --localhost <url> --auth-state <path> --json"
+      : "surface capture --url <url> --auth-state <path> --json";
+  }
+
+  if (error.code === "capture_unreachable") {
+    return errorDetailsString(error, "targetKind") === "localhost"
+      ? "surface capture --localhost <url> --json"
+      : "surface capture --url <url> --json";
+  }
+
+  if (error.code === "target_not_allowed") {
+    if (errorDetailsString(error, "reason") === "unsafe-host") {
+      const targetKind = errorDetailsString(error, "targetKind");
+      const host = errorDetailsString(error, "host");
+
+      if (targetKind === "localhost" || (targetKind === "url" && isLoopbackRecoveryHost(host))) {
+        return "surface capture --localhost <url> --json";
+      }
+
+      return "surface capture --help";
+    }
+
+    if (errorDetailsString(error, "reason") === "allowlist-mismatch") {
+      const targetKind = errorDetailsString(error, "targetKind");
+
+      if (targetKind === "localhost") {
+        return "surface capture --localhost <allowlisted-url> --json";
+      }
+
+      if (targetKind === "url") {
+        return "surface capture --url <allowlisted-url> --json";
+      }
+    }
+
+    return "surface status --json";
   }
 
   if (error.kind === "UsageError") {
@@ -3206,6 +3313,130 @@ function nextCommandFor(error: SurfaceError): string {
   }
 
   return "surface status --json";
+}
+
+function errorDetailsString(error: SurfaceError, key: string): string | undefined {
+  const value = isRecord(error.details) ? error.details[key] : undefined;
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function isLoopbackRecoveryHost(host: string | undefined): boolean {
+  if (host === undefined) {
+    return false;
+  }
+
+  const normalized = normalizeRecoveryHost(host);
+  const compatibleIpv4 = ipv4CompatibleRecoveryHost(normalized);
+
+  return (
+    normalized === "localhost" ||
+    isIpv4LoopbackRecoveryHost(normalized) ||
+    normalized === "0.0.0.0" ||
+    normalized === "::" ||
+    normalized === "::1" ||
+    (compatibleIpv4 !== undefined && isIpv4LoopbackRecoveryHost(compatibleIpv4))
+  );
+}
+
+function isIpv4LoopbackRecoveryHost(host: string): boolean {
+  const octets = parseIpv4RecoveryOctets(host);
+
+  return octets !== undefined && octets[0] === 127;
+}
+
+function normalizeRecoveryHost(host: string): string {
+  const lower = host.trim().toLowerCase().replace(/\.$/, "");
+  const unbracketed = lower.startsWith("[") && lower.endsWith("]") ? lower.slice(1, -1) : lower;
+  const mappedPrefix = "::ffff:";
+
+  if (!unbracketed.startsWith(mappedPrefix)) {
+    return unbracketed;
+  }
+
+  const mapped = unbracketed.slice(mappedPrefix.length);
+  const mappedIpv4 = ipv4FromMappedRecoveryHost(mapped);
+
+  return mappedIpv4 ?? mapped;
+}
+
+function ipv4CompatibleRecoveryHost(host: string): string | undefined {
+  if (!host.startsWith("::") || host === "::" || host === "::1") {
+    return undefined;
+  }
+
+  const parts = host.split(":").filter((part) => part.length > 0);
+  const dottedTail = parts.at(-1);
+
+  if (dottedTail !== undefined && parseIpv4RecoveryOctets(dottedTail) !== undefined) {
+    if (!ipv6PrefixSegmentsAreZero(parts.slice(0, -1))) {
+      return undefined;
+    }
+
+    return dottedTail;
+  }
+
+  const low = parts.at(-1);
+  const high = parts.at(-2);
+
+  if (high === undefined || low === undefined) {
+    return undefined;
+  }
+
+  if (!ipv6PrefixSegmentsAreZero(parts.slice(0, -2))) {
+    return undefined;
+  }
+
+  return ipv4FromMappedRecoveryHost(`${high}:${low}`);
+}
+
+function ipv6PrefixSegmentsAreZero(segments: readonly string[]): boolean {
+  return segments.every((segment) => /^0+$/u.test(segment));
+}
+
+function ipv4FromMappedRecoveryHost(mapped: string): string | undefined {
+  const dotted = parseIpv4RecoveryOctets(mapped);
+
+  if (dotted !== undefined) {
+    return mapped;
+  }
+
+  const parts = mapped.split(":");
+
+  if (parts.length !== 2 || parts.some((part) => !/^[0-9a-f]{1,4}$/iu.test(part))) {
+    return undefined;
+  }
+
+  const high = Number.parseInt(parts[0]!, 16);
+  const low = Number.parseInt(parts[1]!, 16);
+  const value = high * 0x10000 + low;
+
+  return [(value >>> 24) & 0xff, (value >>> 16) & 0xff, (value >>> 8) & 0xff, value & 0xff].join(
+    ".",
+  );
+}
+
+function parseIpv4RecoveryOctets(
+  host: string,
+): readonly [number, number, number, number] | undefined {
+  const parts = host.split(".");
+
+  if (parts.length !== 4) {
+    return undefined;
+  }
+
+  const octets = parts.map((part) => {
+    if (!/^\d{1,3}$/u.test(part)) {
+      return Number.NaN;
+    }
+
+    return Number.parseInt(part, 10);
+  });
+
+  if (octets.some((part) => !Number.isInteger(part) || part < 0 || part > 255)) {
+    return undefined;
+  }
+
+  return [octets[0]!, octets[1]!, octets[2]!, octets[3]!];
 }
 
 class CliHandledError extends Error {

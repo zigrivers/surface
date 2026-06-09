@@ -567,7 +567,7 @@ describe("E1 Capture & Inputs", () => {
         "dom-snapshot",
         "screenshot",
       ]);
-      expect(commandCalls).toEqual([
+      expect(commandCalls.slice(0, 5)).toEqual([
         ["--session", "surface-contract", "open", "https://example.com", "--json"],
         ["--session", "surface-contract", "wait", "--load", "domcontentloaded", "--json"],
         [
@@ -580,7 +580,10 @@ describe("E1 Capture & Inputs", () => {
         ],
         ["--session", "surface-contract", "snapshot", "-i", "--json"],
         ["--session", "surface-contract", "get", "html", "body", "--json"],
-        ["--session", "surface-contract", "get", "styles", "body", "--json"],
+      ]);
+      expect(commandCalls[5]?.slice(0, 3)).toEqual(["--session", "surface-contract", "eval"]);
+      expect(commandCalls[5]?.at(-1)).toBe("--json");
+      expect(commandCalls.slice(6)).toEqual([
         ["--session", "surface-contract", "get", "url", "--json"],
         ["--session", "surface-contract", "close", "--json"],
       ]);
@@ -931,12 +934,16 @@ describe("E1 Capture & Inputs", () => {
       expect(isErr(result)).toBe(true);
       expect(result).toMatchObject({
         error: {
-          code: "capture_failed",
+          code: "target_not_allowed",
           details: {
+            reason: "allowlist-mismatch",
             targetOrigin: "https://example.com",
           },
         },
       });
+      if (isErr(result)) {
+        expect(result.error.details).not.toHaveProperty("targetRef");
+      }
       expect(observed).toBe(false);
     });
 

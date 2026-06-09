@@ -38,7 +38,7 @@ describe("surface CLI e2e smoke", () => {
     expect(result.exitCode).toBe(2);
     expect(result.stderr).toBe("");
     expect(JSON.parse(result.stdout)).toMatchObject({
-      error: { code: "unknown_step", exitCode: 2, kind: "UsageError" },
+      error: { code: "unknown_command", exitCode: 2, kind: "UsageError" },
       ok: false,
     });
   });
