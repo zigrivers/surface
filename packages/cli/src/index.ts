@@ -31,6 +31,7 @@ import {
   createSurfaceError,
   evaluateGateWithQaFlows,
   createModelEgressLedgerEntry,
+  redactCaptureArtifactText,
   createSarifRenderer,
   createVerdict,
   assignFindingIdentities,
@@ -427,7 +428,7 @@ export function createSurfaceCliProgram(input: {
   addTargetOptions(
     program.command("capture").description("Observe a UI target and emit capture metadata."),
   ).action(async (options: TargetCommandOptions) => {
-    const result = await captureTarget(input.composition, options);
+    const result = await captureTarget(input.composition, options, input.env ?? process.env);
 
     emitResult({
       command: "capture",
@@ -818,6 +819,7 @@ async function readNext(composition: SurfaceComposition): Promise<Result<NextOut
 async function captureTarget(
   composition: SurfaceComposition,
   options: TargetCommandOptions,
+  env: SurfaceCliEnv,
 ): Promise<Result<CaptureOutput>> {
   const target = targetFromOptions(options);
 
@@ -825,10 +827,16 @@ async function captureTarget(
     return target;
   }
 
+  const config = configFromOptions(options, env, compositionProjectRoot(composition));
+
+  if (!isResultOk(config)) {
+    return config;
+  }
+
   const capture = await observeCliTarget(
     composition,
     target.value,
-    DEFAULT_SURFACE_CONFIG.capture,
+    config.value.capture,
     options.authState,
   );
 
@@ -2469,12 +2477,23 @@ async function observeCliTarget(
 ): Promise<Result<Capture>> {
   if (target.kind === "dom") {
     const captureId = `capture_${nextCliRunId()}`;
-    const redactedDom = maskModelArtifactText({
+    const builtInRedaction = maskModelArtifactText({
       artifactType: "dom-snapshot",
       text: target.ref,
-    }).text;
+    });
+    const builtInRedacted = builtInRedaction.text !== target.ref;
+    const redactedDom = redactCaptureArtifactText({
+      contents: builtInRedaction.text,
+      redactionRules: config.redactionRules,
+      target: "dom",
+    });
+
+    if (!isResultOk(redactedDom)) {
+      return redactedDom;
+    }
+
     const artifact = await composition.stateStore.writeArtifact({
-      bytes: Buffer.from(redactedDom, "utf8"),
+      bytes: Buffer.from(redactedDom.value.contents, "utf8"),
       kind: "capture",
       relativePath: `captures/${captureId}/dom.html`,
     });
@@ -2483,12 +2502,14 @@ async function observeCliTarget(
       return artifact;
     }
 
+    const writtenArtifact = artifact.value;
+
     return resultOk({
       artifacts: [
         {
           id: "dom",
-          path: artifact.value.path,
-          redacted: redactedDom !== target.ref,
+          path: writtenArtifact.path,
+          redacted: builtInRedacted || redactedDom.value.redacted,
           type: "dom-snapshot",
         },
       ],

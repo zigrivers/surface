@@ -8,7 +8,7 @@ import { delimiter, dirname, extname, isAbsolute, join, relative, resolve } from
 
 import { execa } from "execa";
 
-import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
+import { createSurfaceError, err, isOk, ok, type Result, type SurfaceError } from "./errors.js";
 import type {
   BuiltInCaptureBackendId,
   Capture,
@@ -213,6 +213,20 @@ type RedactionTarget = "dom" | "screenshot";
 interface CompiledCaptureRedactionRule {
   readonly appliesTo: readonly RedactionTarget[];
   readonly pattern: RegExp;
+}
+
+export function redactCaptureArtifactText(input: {
+  readonly contents: string;
+  readonly redactionRules?: CaptureOptions["config"]["redactionRules"];
+  readonly target: RedactionTarget;
+}): Result<{ readonly contents: string; readonly redacted: boolean }, SurfaceError> {
+  const compiledRules = compileCaptureRedactionRules(input.redactionRules ?? []);
+
+  if (!isOk(compiledRules)) {
+    return compiledRules;
+  }
+
+  return ok(redactArtifactText(input.contents, input.target, compiledRules.value));
 }
 
 export function createCaptureService(options: CaptureServiceOptions): CaptureService {

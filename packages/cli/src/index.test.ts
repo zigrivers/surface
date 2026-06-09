@@ -15,6 +15,7 @@ import {
   type AuditRunnerResult,
   type Finding as TestFinding,
   type ModelProvider,
+  type SurfaceConfig,
   type TrackedFinding as TestTrackedFinding,
 } from "@zigrivers/surface-core";
 import type {
@@ -334,6 +335,109 @@ describe("@zigrivers/surface core verbs", () => {
       },
       ok: true,
     });
+  });
+
+  it("loads project capture config for capture runs", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-capture-project-config-"));
+    const seenRedactionRules: SurfaceConfig["capture"]["redactionRules"][] = [];
+
+    try {
+      await mkdir(join(root, ".surface"), { recursive: true });
+      await writeFile(
+        join(root, ".surface", "config.yml"),
+        [
+          "capture:",
+          "  redactionRules:",
+          "    - pattern: pk_live_[A-Za-z0-9]+",
+          "      appliesTo: [dom]",
+          "",
+        ].join("\n"),
+      );
+
+      const exitCode = await runSurfaceCli({
+        argv: ["node", "surface", "--json", "capture", "--url", "https://example.com"],
+        composition: createSurfaceComposition({
+          captureBackends: [
+            {
+              id: "test",
+              detect: () => true,
+              observe: (target: TestTarget, options) => {
+                seenRedactionRules.push(options.config.redactionRules);
+
+                return ok({
+                  artifacts: [],
+                  backend: "test",
+                  capturedAt: "2026-06-01T00:00:00.000Z",
+                  id: `capture_${target.kind}`,
+                  status: "requested",
+                  target,
+                } satisfies TestCapture);
+              },
+            },
+          ],
+          lensFactoryOptions: { projectRoot: root },
+        }),
+        env: { SURFACE_USER_CONFIG_PATH: "off" },
+        io: { stdout: () => undefined },
+      });
+
+      expect(exitCode).toBe(0);
+      expect(seenRedactionRules[0]).toEqual([
+        { appliesTo: ["dom"], pattern: "pk_live_[A-Za-z0-9]+" },
+      ]);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("applies project capture redaction rules to inline DOM capture artifacts", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-inline-dom-capture-config-"));
+    const stdout: string[] = [];
+    const stateStore = new TestMemoryStateStore();
+
+    try {
+      await mkdir(join(root, ".surface"), { recursive: true });
+      await writeFile(
+        join(root, ".surface", "config.yml"),
+        [
+          "capture:",
+          "  redactionRules:",
+          "    - pattern: pk_live_[A-Za-z0-9]+",
+          "      appliesTo: [dom]",
+          "",
+        ].join("\n"),
+      );
+
+      const exitCode = await runSurfaceCli({
+        argv: [
+          "node",
+          "surface",
+          "--json",
+          "capture",
+          "--dom",
+          "<main><p>pk_live_secret123</p></main>",
+        ],
+        composition: createSurfaceComposition({
+          lensFactoryOptions: { projectRoot: root },
+          stateStore,
+        }),
+        env: { SURFACE_USER_CONFIG_PATH: "off" },
+        io: { stdout: (chunk) => stdout.push(chunk) },
+      });
+      const persistedDom = Buffer.from(
+        stateStore.artifactWrites.at(-1)?.bytes ?? new Uint8Array(),
+      ).toString();
+
+      expect(exitCode).toBe(0);
+      expect(JSON.parse(stdout.join(""))).toMatchObject({
+        data: { artifacts: [{ redacted: true, type: "dom-snapshot" }] },
+        ok: true,
+      });
+      expect(persistedDom).toContain("[Redacted]");
+      expect(persistedDom).not.toContain("pk_live_secret123");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("rejects capture without a target as a usage error", async () => {
