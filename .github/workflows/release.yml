@@ -116,7 +116,7 @@ jobs:
             echo "GitHub release $RELEASE_TAG already exists" >&2
             exit 1
           fi
-      - name: Check npm package versions are unpublished
+      - name: Report npm package publication state
         if: github.event.inputs.publish == 'true'
         env:
           RELEASE_TAG: ${{ inputs.tag }}
@@ -134,8 +134,9 @@ jobs:
           )
           for package_name in "${packages[@]}"; do
             if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then
-              echo "$package_name@$VERSION already exists on npm" >&2
-              exit 1
+              echo "$package_name@$VERSION already exists on npm; rerun will skip it"
+            else
+              echo "$package_name@$VERSION is not yet published"
             fi
           done
       - name: Publish npm packages
@@ -155,14 +156,34 @@ jobs:
           pnpm --dir packages/adapters/svelte pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/adapters/vue pack --pack-destination "$PACK_DIR"
           pnpm --dir packages/cli pack --pack-destination "$PACK_DIR"
-          npm publish "$PACK_DIR/zigrivers-surface-core-$VERSION.tgz" --access public --provenance
-          npm publish "$PACK_DIR/zigrivers-surface-grounding-$VERSION.tgz" --access public --provenance
-          npm publish "$PACK_DIR/zigrivers-surface-mcp-$VERSION.tgz" --access public --provenance
-          npm publish "$PACK_DIR/zigrivers-surface-adapter-agnostic-$VERSION.tgz" --access public --provenance
-          npm publish "$PACK_DIR/zigrivers-surface-adapter-react-$VERSION.tgz" --access public --provenance
-          npm publish "$PACK_DIR/zigrivers-surface-adapter-svelte-$VERSION.tgz" --access public --provenance
-          npm publish "$PACK_DIR/zigrivers-surface-adapter-vue-$VERSION.tgz" --access public --provenance
-          npm publish "$PACK_DIR/zigrivers-surface-$VERSION.tgz" --access public --provenance
+          package_names=(
+            "@zigrivers/surface-core"
+            "@zigrivers/surface-grounding"
+            "@zigrivers/surface-mcp"
+            "@zigrivers/surface-adapter-agnostic"
+            "@zigrivers/surface-adapter-react"
+            "@zigrivers/surface-adapter-svelte"
+            "@zigrivers/surface-adapter-vue"
+            "@zigrivers/surface"
+          )
+          tarballs=(
+            "zigrivers-surface-core-$VERSION.tgz"
+            "zigrivers-surface-grounding-$VERSION.tgz"
+            "zigrivers-surface-mcp-$VERSION.tgz"
+            "zigrivers-surface-adapter-agnostic-$VERSION.tgz"
+            "zigrivers-surface-adapter-react-$VERSION.tgz"
+            "zigrivers-surface-adapter-svelte-$VERSION.tgz"
+            "zigrivers-surface-adapter-vue-$VERSION.tgz"
+            "zigrivers-surface-$VERSION.tgz"
+          )
+          for index in "${!package_names[@]}"; do
+            package_name="${package_names[$index]}"
+            if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then
+              echo "Skipping $package_name@$VERSION because it already exists on npm"
+              continue
+            fi
+            npm publish "$PACK_DIR/${tarballs[$index]}" --access public --provenance
+          done
       - name: Create GitHub release
         if: github.event.inputs.publish == 'true'
         env:
