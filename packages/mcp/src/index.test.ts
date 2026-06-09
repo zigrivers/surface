@@ -11,7 +11,7 @@ import {
   type LensRegistration,
   type SurfaceComposition,
 } from "@zigrivers/surface-core";
-import type { Capture } from "@zigrivers/surface-core/interfaces";
+import type { Capture, ProjectStateSnapshot, StateStore } from "@zigrivers/surface-core/interfaces";
 
 import {
   SURFACE_MCP_SERVER_NAME,
@@ -680,6 +680,30 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
   });
 });
 
+class MemoryStateStore implements StateStore {
+  readonly writes: ProjectStateSnapshot[] = [];
+
+  constructor(private state: ProjectStateSnapshot = { version: "1.0" }) {}
+
+  readState() {
+    return ok(this.state);
+  }
+
+  writeState(state: ProjectStateSnapshot) {
+    this.state = state;
+    this.writes.push(state);
+    return ok(state);
+  }
+
+  updateState(updater: (state: ProjectStateSnapshot) => ProjectStateSnapshot) {
+    return this.writeState(updater(this.state));
+  }
+
+  writeArtifact() {
+    return ok({ path: ".surface/reports/findings.json", sha256: "abc123" });
+  }
+}
+
 function captureFixture(): Capture {
   return {
     id: "cap_1",
@@ -715,6 +739,7 @@ function compositionFixture(input: {
     captureBackends: [captureBackendFixture(input.capture)],
     lensRegistry: input.lensRegistry ?? [],
     ...(input.projectRoot === undefined ? {} : { projectRoot: input.projectRoot }),
+    ...(input.projectRoot === undefined ? { stateStore: new MemoryStateStore() } : {}),
     staticFallback: captureBackendFixture(input.capture),
   });
 

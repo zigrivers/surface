@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   DEFAULT_SURFACE_CONFIG,
+  DirectSubscriptionChannelIdSchema,
   SurfaceConfigSchema,
   resolveSurfaceConfig,
   type SurfaceConfig,
@@ -142,5 +143,296 @@ describe("SurfaceConfig schemas", () => {
     });
 
     expect(resolved.evaluation.depth).toBe(5);
+  });
+
+  it("validates default model fallback and egress policy", () => {
+    const resolved = resolveSurfaceConfig();
+
+    expect(resolved.model).toMatchObject({
+      fallback: {
+        mode: "off",
+        providerOrder: ["claude", "codex", "gemini"],
+        depth: 3,
+        fallbackToMmr: true,
+        effectiveChannels: [],
+      },
+      egressPolicy: {
+        mode: "off",
+        screenshots: "blocked",
+      },
+      effectiveEgressPolicy: {
+        mode: "off",
+        screenshots: "blocked",
+      },
+    });
+  });
+
+  it("treats project model fallback and egress config as defaults without consent", () => {
+    const resolved = resolveSurfaceConfig({
+      project: {
+        model: {
+          fallback: { mode: "auto" },
+          egressPolicy: { mode: "text" },
+        },
+      },
+    });
+
+    expect(resolved.model.fallback.mode).toBe("auto");
+    expect(resolved.model.egressPolicy.mode).toBe("text");
+    expect(resolved.model.effectiveEgressPolicy.mode).toBe("off");
+    expect(resolved.model.fallback.effectiveChannels).toEqual([]);
+  });
+
+  it("requires explicit screenshot consent beyond project screenshot policy", () => {
+    const resolved = resolveSurfaceConfig({
+      project: {
+        model: {
+          fallback: { mode: "auto" },
+          egressPolicy: { screenshots: "redacted-only" },
+        },
+      },
+      cli: {
+        model: {
+          fallback: { mode: "auto" },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy.mode).toBe("text");
+    expect(resolved.model.effectiveEgressPolicy.screenshots).toBe("blocked");
+  });
+
+  it("does not treat screenshot opt-in as subscription fallback consent", () => {
+    const resolved = resolveSurfaceConfig({
+      project: {
+        model: {
+          fallback: { mode: "auto" },
+        },
+      },
+      cli: {
+        model: {
+          egressPolicy: { screenshots: "redacted-only" },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      mode: "text-and-screenshots",
+      screenshots: "redacted-only",
+    });
+    expect(resolved.model.fallback.effectiveChannels).toEqual([]);
+  });
+
+  it("lets higher-precedence screenshot blocks revoke lower screenshot consent", () => {
+    const resolved = resolveSurfaceConfig({
+      project: {
+        model: {
+          egressPolicy: { screenshots: "redacted-only" },
+        },
+      },
+      cli: {
+        model: {
+          egressPolicy: { screenshots: "blocked" },
+          fallback: { mode: "auto" },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      mode: "text",
+      screenshots: "blocked",
+    });
+  });
+
+  it("does not treat provider channels as fallback consent when fallback mode is off", () => {
+    const resolved = resolveSurfaceConfig({
+      cli: {
+        model: {
+          fallback: {
+            allowedChannels: ["codex"],
+            mode: "off",
+            providerOrder: ["codex"],
+          },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      mode: "off",
+      screenshots: "blocked",
+    });
+    expect(resolved.model.fallback.effectiveChannels).toEqual([]);
+  });
+
+  it("lets a higher-precedence fallback mode off revoke lower-layer fallback consent", () => {
+    const resolved = resolveSurfaceConfig({
+      env: {
+        model: {
+          fallback: {
+            allowedChannels: ["gemini"],
+            mode: "direct",
+            providerOrder: ["gemini"],
+          },
+        },
+      },
+      cli: {
+        model: {
+          fallback: { mode: "off" },
+        },
+      },
+    });
+
+    expect(resolved.model.fallback.mode).toBe("off");
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      mode: "off",
+      screenshots: "blocked",
+    });
+    expect(resolved.model.fallback.effectiveChannels).toEqual([]);
+  });
+
+  it("keeps project provider order and screenshot-only runtime opt-in from enabling direct channels", () => {
+    const resolved = resolveSurfaceConfig({
+      project: {
+        model: {
+          fallback: { providerOrder: ["gemini", "codex"] },
+        },
+      },
+      cli: {
+        model: {
+          egressPolicy: { deniedChannels: ["codex"], screenshots: "redacted-only" },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      mode: "text-and-screenshots",
+      screenshots: "redacted-only",
+    });
+    expect(resolved.model.fallback.effectiveChannels).toEqual([]);
+  });
+
+  it("treats runtime channel selection as consent when project fallback mode is enabled", () => {
+    const resolved = resolveSurfaceConfig({
+      project: {
+        model: {
+          fallback: { mode: "direct", providerOrder: ["gemini", "codex"] },
+        },
+      },
+      env: {
+        model: {
+          fallback: { allowedChannels: ["codex"], providerOrder: ["codex"] },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      mode: "text",
+      screenshots: "blocked",
+    });
+    expect(resolved.model.fallback.effectiveChannels).toEqual(["codex"]);
+  });
+
+  it("lets user hard egress policy block runtime expansion", () => {
+    const resolved = resolveSurfaceConfig({
+      user: {
+        model: {
+          egressPolicy: { mode: "off" },
+        },
+      },
+      cli: {
+        model: {
+          fallback: { mode: "auto" },
+          egressPolicy: { mode: "text-and-screenshots", screenshots: "redacted-only" },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      mode: "off",
+      screenshots: "blocked",
+    });
+    expect(resolved.model.fallback.effectiveChannels).toEqual([]);
+  });
+
+  it("narrows direct channels by allowlists and denylists", () => {
+    const resolved = resolveSurfaceConfig({
+      user: {
+        model: {
+          fallback: { allowedChannels: ["claude", "codex", "gemini"] },
+          egressPolicy: { mode: "text", allowedChannels: ["claude", "codex"] },
+        },
+      },
+      project: {
+        model: {
+          fallback: { providerOrder: ["gemini", "codex", "claude"] },
+          egressPolicy: { deniedChannels: ["claude"] },
+        },
+      },
+      cli: {
+        model: {
+          fallback: { mode: "direct" },
+          egressPolicy: { deniedChannels: ["gemini"] },
+        },
+      },
+    });
+
+    expect(resolved.model.fallback.effectiveChannels).toEqual(["codex"]);
+    expect(resolved.model.fallback.policyBlockedChannels).toEqual([
+      { channelId: "gemini", reason: "channel_denied_by_policy" },
+      { channelId: "claude", reason: "channel_denied_by_policy" },
+    ]);
+  });
+
+  it("narrows effective model egress channels across all configured layers", () => {
+    const resolved = resolveSurfaceConfig({
+      user: {
+        model: {
+          egressPolicy: {
+            allowedChannels: ["openai", "codex", "mmr"],
+            deniedChannels: ["mmr"],
+            mode: "text",
+          },
+        },
+      },
+      project: {
+        model: {
+          egressPolicy: {
+            allowedChannels: ["openai", "codex", "local"],
+            deniedChannels: ["local"],
+          },
+        },
+      },
+      cli: {
+        model: {
+          egressPolicy: {
+            deniedChannels: ["openai"],
+          },
+        },
+      },
+    });
+
+    expect(resolved.model.effectiveEgressPolicy).toMatchObject({
+      allowedChannels: ["openai", "codex"],
+      deniedChannels: ["mmr", "local", "openai"],
+      mode: "text",
+    });
+  });
+
+  it("rejects non-direct subscription channels in direct fallback order", () => {
+    expect(() =>
+      resolveSurfaceConfig({
+        cli: {
+          model: {
+            fallback: {
+              providerOrder: ["anthropic"],
+            },
+          },
+        },
+      } as unknown as Parameters<typeof resolveSurfaceConfig>[0]),
+    ).toThrow();
+
+    expect(() => DirectSubscriptionChannelIdSchema.parse("antigravity")).toThrow();
+    expect(() => DirectSubscriptionChannelIdSchema.parse("grok")).toThrow();
+    expect(() => DirectSubscriptionChannelIdSchema.parse("mmr")).toThrow();
   });
 });

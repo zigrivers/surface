@@ -1,4 +1,7 @@
+import { z } from "zod";
+
 import type { SurfaceConfig, AppType } from "./config.js";
+import type { ModelChannelId } from "./config.js";
 import type { Result, SurfaceError } from "./errors.js";
 import type {
   Backlog as FindingsBacklog,
@@ -8,7 +11,8 @@ import type {
   FindingDraft,
   ToolResultEvidence,
 } from "./findings.js";
-import type { ModelProvider } from "./model-provider.js";
+import type { ModelAvailability, ModelProvider, ModelSourceKind } from "./model-provider.js";
+import type { ReconciliationQuestion } from "./reconciliation.js";
 import type { Baseline, TrackedFinding } from "./tracked-findings.js";
 export type { Backlog, BacklogEntry } from "./findings.js";
 export type { ModelProvider } from "./model-provider.js";
@@ -28,6 +32,13 @@ export interface Viewport {
 // Target kind is the stable capture input contract, not a plugin extension identifier.
 export type TargetKind = "url" | "localhost" | "route" | "screenshot" | "component" | "dom";
 
+const nonEmptyStringSchema = z
+  .string()
+  .min(1)
+  .refine((value) => value.trim().length > 0, {
+    message: "must not be empty or whitespace",
+  });
+
 export interface Target {
   readonly kind: TargetKind;
   readonly ref: string;
@@ -36,17 +47,75 @@ export interface Target {
 }
 
 export type BuiltInCaptureBackendId = "playwright" | "agent-browser" | "static";
-export type CaptureArtifactType =
-  | "screenshot"
-  | "dom-snapshot"
-  | "accessibility-tree"
-  | "computed-styles";
+export const CaptureArtifactTypeSchema = z.enum([
+  "screenshot",
+  "dom-snapshot",
+  "accessibility-tree",
+  "computed-styles",
+]);
+export type CaptureArtifactType = z.infer<typeof CaptureArtifactTypeSchema>;
+
+export const ArtifactRedactionTextRangeSchema = z
+  .object({
+    start: z.number().int().nonnegative(),
+    end: z.number().int().nonnegative(),
+  })
+  .strict()
+  .superRefine((range, context) => {
+    if (range.end <= range.start) {
+      context.addIssue({
+        code: "custom",
+        message: "end must be greater than start",
+        path: ["end"],
+      });
+    }
+  });
+export type ArtifactRedactionTextRange = z.infer<typeof ArtifactRedactionTextRangeSchema>;
+
+export const ArtifactRedactionMetadataSchema = z
+  .object({
+    status: z.literal("redacted"),
+    maskedClasses: z.array(nonEmptyStringSchema),
+    safeNoSensitiveRegions: z.boolean(),
+    unsafeRegions: z.array(nonEmptyStringSchema),
+    boundingBoxesVerified: z.boolean().optional(),
+    selectorsVerified: z.boolean().optional(),
+    textRangesVerified: z.boolean().optional(),
+    sensitiveSelectors: z.array(nonEmptyStringSchema).optional(),
+    sensitiveTextRanges: z.array(ArtifactRedactionTextRangeSchema).optional(),
+  })
+  .strict()
+  .superRefine((metadata, context) => {
+    const hasPositionalEvidence = metadata.boundingBoxesVerified === true;
+    const hasStructuralEvidence =
+      metadata.selectorsVerified === true && metadata.textRangesVerified === true;
+
+    if (!hasPositionalEvidence && !hasStructuralEvidence) {
+      context.addIssue({
+        code: "custom",
+        message: "redaction metadata requires verified positional or structural evidence",
+        path: ["boundingBoxesVerified"],
+      });
+    }
+  });
+export type ArtifactRedactionMetadata = z.infer<typeof ArtifactRedactionMetadataSchema>;
+
+export const CaptureArtifactSchema = z
+  .object({
+    id: nonEmptyStringSchema,
+    type: CaptureArtifactTypeSchema,
+    path: nonEmptyStringSchema,
+    redacted: z.boolean(),
+    redaction: ArtifactRedactionMetadataSchema.optional(),
+  })
+  .strict();
 
 export interface CaptureArtifact {
   readonly id: string;
   readonly type: CaptureArtifactType;
   readonly path: string;
   readonly redacted: boolean;
+  readonly redaction?: ArtifactRedactionMetadata;
 }
 
 export interface DegradationReport {
@@ -315,6 +384,7 @@ export interface ProjectStateSnapshot {
   readonly backlog?: ProjectBacklogSnapshot;
   readonly currentStage?: string;
   readonly findings?: readonly ProjectFindingSnapshot[];
+  readonly modelEgress?: readonly ProjectModelEgressLedgerEntry[];
   readonly runRecords?: readonly ProjectRunRecord[];
   readonly discovery?: {
     readonly [key: string]: unknown;
@@ -367,6 +437,24 @@ export interface ProjectStateSnapshot {
   readonly verdicts?: readonly ProjectVerdictSnapshot[];
 }
 
+export interface ProjectModelEgressUnavailableChannel {
+  readonly channelId?: ModelChannelId | undefined;
+  readonly sourceKind?: ModelSourceKind | undefined;
+  readonly reason: Extract<ModelAvailability, { available: false }>["reason"];
+  readonly message: string;
+}
+
+export interface ProjectModelEgressLedgerEntry {
+  readonly runId: string;
+  readonly sourceKind: ModelSourceKind;
+  readonly attemptedChannels: readonly ModelChannelId[];
+  readonly completedChannels: readonly ModelChannelId[];
+  readonly unavailableChannels: readonly ProjectModelEgressUnavailableChannel[];
+  readonly blockedReasons: readonly string[];
+  readonly artifactClassesSent: readonly CaptureArtifactType[];
+  readonly redactionStatus: string;
+}
+
 export interface ProjectBacklogSnapshot {
   readonly id: string;
   readonly runId: string;
@@ -383,6 +471,7 @@ export interface ProjectRunRecord {
   readonly backlog?: FindingsBacklog;
   readonly capture?: Capture;
   readonly findings?: readonly Finding[];
+  readonly reconciliationQuestions?: readonly ReconciliationQuestion[];
   readonly skippedLenses?: readonly {
     readonly lensId: string;
     readonly message: string;

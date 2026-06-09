@@ -150,8 +150,22 @@ describe("published plugin interfaces", () => {
     };
     const model: ModelProvider = {
       id: "openai",
-      availability: () => ok({ available: true, provider: "openai", model: "quality-model" }),
-      complete: () => ok({ provider: "openai", model: "quality-model", text: "[]" }),
+      availability: () =>
+        ok({
+          available: true,
+          channelId: "openai",
+          provider: "openai",
+          model: "quality-model",
+          sourceKind: "api",
+        }),
+      complete: () =>
+        ok({
+          channelId: "openai",
+          provider: "openai",
+          model: "quality-model",
+          sourceKind: "api",
+          text: "[]",
+        }),
     };
 
     expect(backend.detect()).toBe(true);

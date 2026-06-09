@@ -24,7 +24,7 @@ export type LensRegistration = {
   readonly create?: (options?: LensFactoryOptions) => Lens;
 };
 
-export type LensSkipReason = "model_unavailable" | "live_dom_unavailable";
+export type LensSkipReason = "model_unavailable" | "live_dom_unavailable" | "not_implemented";
 
 export type LensExecutionSkip = {
   readonly lensId: string;

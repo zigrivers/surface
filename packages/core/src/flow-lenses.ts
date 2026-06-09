@@ -8,6 +8,7 @@ import { createSurfaceError, err, isOk, ok, type Result, type SurfaceError } fro
 import type { FindingDraft } from "./findings.js";
 import type { CaptureArtifact, KnowledgeEntry, Lens, LensContext } from "./interfaces.js";
 import type { LensFactoryOptions } from "./lens-registry.js";
+import { maskModelArtifactText } from "./model-egress.js";
 
 const DEFAULT_MAX_DOM_CHARS = 8_000;
 const TASK_COMPLETION_LENS_ID = "task-completion";
@@ -209,14 +210,8 @@ async function readDom(
     );
   }
 
-  if (artifact.redacted) {
-    return err(
-      createSurfaceError("capture_failed", "Flow lens cannot use redacted DOM snapshots.", {
-        details: { artifactId: artifact.id, captureId: capture.id },
-      }),
-    );
-  }
-
+  // Redacted DOM snapshots remain valid lens input: masking removes secret values while preserving
+  // selectors, hierarchy, and task-flow text for model prompts.
   const artifactPath = await resolveArtifactPath(artifact, projectRoot);
 
   if (!isOk(artifactPath)) {
@@ -224,7 +219,15 @@ async function readDom(
   }
 
   try {
-    return ok(await readDomExcerpt(artifactPath.value, maxDomChars));
+    const excerpt = await readDomExcerpt(artifactPath.value, maxDomChars);
+
+    return ok(
+      maskModelArtifactText({
+        artifactType: "dom-snapshot",
+        text: excerpt,
+        ...(artifact.redaction === undefined ? {} : { redaction: artifact.redaction }),
+      }).text,
+    );
   } catch (cause) {
     return err(
       createSurfaceError("capture_failed", "Flow lens could not read the DOM snapshot.", {

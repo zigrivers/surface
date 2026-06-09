@@ -1,37 +1,57 @@
 #!/usr/bin/env node
 import { readFileSync, realpathSync } from "node:fs";
-import { readFile } from "node:fs/promises";
+import { homedir } from "node:os";
+import path from "node:path";
+import { readFile, rm } from "node:fs/promises";
 import { pathToFileURL } from "node:url";
+import { parse as parseYaml } from "yaml";
 
 import {
   DEFAULT_COMPOSITION_STAGE_IDS,
   DEFAULT_SURFACE_CONFIG,
   BacklogSchema,
+  DirectSubscriptionChannelIdSchema,
   DepthSchema,
+  EvidenceSchema,
   FindingSchema,
   GatePolicySchema,
+  ModelFallbackModeSchema,
   PresetSchema,
+  ScreenshotEgressPolicySchema,
   SurfaceSarifLogSchema,
   browserQaFlowRunsForGate,
   browserQaFlowSeverityFromWithFlows,
   browserQaGateTargetCli,
+  SurfaceConfigLayerSchema,
+  SurfaceErrorSchema,
   createGitHubChecksExporter,
   createBoundedAlternatives,
+  createTrackedFinding,
   createSurfaceComposition,
   createSurfaceError,
   evaluateGateWithQaFlows,
+  createModelEgressLedgerEntry,
   createSarifRenderer,
+  assignFindingIdentities,
+  deriveFindingIdentity,
   diffTrackedFindings,
   exitCodeForSurfaceError,
+  maskModelArtifactText,
+  maskModelPlainText,
+  resolveSurfaceConfig,
   toCliErrorEnvelope,
+  transitionTrackedFinding,
+  type AuditRunnerResult,
   type Backlog,
   type Baseline,
   type CliExitCode,
   type Finding,
+  type Evidence,
   type GitHubChecksExport,
   type GitHubChecksExporterOptions,
   type Result,
   type SurfaceSarifLog,
+  type SurfaceConfigLayer,
   type SurfaceError,
   type TrackedFinding,
   type TrackedFindingsDiffEntry,
@@ -50,6 +70,14 @@ type SurfaceConfig = typeof DEFAULT_SURFACE_CONFIG;
 type ExecutablePipelineStageId = (typeof DEFAULT_COMPOSITION_STAGE_IDS)[number];
 type SurfaceCompositionOptions = NonNullable<Parameters<typeof createSurfaceComposition>[0]>;
 type CoreSurfaceComposition = ReturnType<typeof createSurfaceComposition>;
+type SurfaceCompositionStateDir = {
+  readonly stateDir?: unknown;
+};
+type ConfigIssueDetail = {
+  readonly code: string;
+  readonly message: string;
+  readonly path: string;
+};
 type VerdictRecord = {
   readonly decision: "accept" | "reject" | "correct" | "defer";
   readonly findingId: string;
@@ -57,6 +85,16 @@ type VerdictRecord = {
 };
 type CliProjectStateSnapshot = CoreProjectStateSnapshot;
 type SurfaceComposition = CoreSurfaceComposition;
+
+function compositionProjectRoot(composition: SurfaceComposition): string {
+  return composition.lensFactoryOptions.projectRoot ?? process.cwd();
+}
+
+function compositionStateDir(composition: SurfaceComposition): string {
+  const stateDir = (composition as SurfaceCompositionStateDir).stateDir;
+
+  return typeof stateDir === "string" && stateDir.trim().length > 0 ? stateDir : DEFAULT_STATE_DIR;
+}
 
 export type CliEnvelope<T> =
   | {
@@ -124,7 +162,20 @@ type AuditOutput = {
   readonly findingCount: number;
   readonly backlogId: string;
   readonly findings?: readonly Finding[];
+  readonly model?: ModelAuditOutput;
+  readonly reconciliationQuestions?: AuditRunnerResult["reconciliationQuestions"];
   readonly topFinding?: unknown;
+};
+type ModelAuditOutput = {
+  readonly artifactClassesSent: readonly string[];
+  readonly attemptedChannels: readonly string[];
+  readonly blockedReasons: readonly string[];
+  readonly completedChannels: readonly string[];
+  readonly unavailableChannels: readonly {
+    readonly id: string;
+    readonly message: string;
+    readonly reason: string;
+  }[];
 };
 type ExplainOutput = {
   readonly finding: Finding;
@@ -189,6 +240,11 @@ type TraceOutput = {
 type ConfigCommandOptions = {
   readonly preset?: string;
   readonly depth?: string;
+  readonly modelChannel?: readonly string[];
+  readonly modelChannels?: string;
+  readonly modelDepth?: string;
+  readonly modelFallback?: string;
+  readonly modelScreenshots?: string | boolean;
 };
 type BacklogCommandOptions = {
   readonly all?: boolean;
@@ -225,6 +281,7 @@ type TargetCommandOptions = ConfigCommandOptions & {
   readonly authState?: string;
   readonly component?: string;
   readonly dom?: string;
+  readonly evidence?: string;
   readonly localhost?: string | boolean;
   readonly persona?: string;
   readonly route?: string;
@@ -304,7 +361,7 @@ export function createSurfaceCliProgram(input: {
     .option("--depth <depth>", "evaluation depth, 1-5")
     .option("--force", "reinitialize state")
     .action(async (options: ConfigCommandOptions) => {
-      const result = await initializeProject(input.composition, options);
+      const result = await initializeProject(input.composition, options, env);
 
       emitResult({
         command: "init",
@@ -335,7 +392,7 @@ export function createSurfaceCliProgram(input: {
     .option("--preset <preset>", "evaluation preset")
     .option("--depth <depth>", "evaluation depth, 1-5")
     .action(async (step: string, options: ConfigCommandOptions) => {
-      const result = await runPipelineStep(input.composition, step, options);
+      const result = await runPipelineStep(input.composition, step, options, env);
 
       emitResult({
         command: "run",
@@ -379,8 +436,9 @@ export function createSurfaceCliProgram(input: {
       .argument("[lens]", "optional lens id"),
   )
     .option("--all", "include all findings in human output")
+    .option("--evidence <file>", "load static tool-result evidence JSON for audit")
     .action(async (lens: string | undefined, options: TargetCommandOptions) => {
-      const result = await auditTarget(input.composition, lens, options);
+      const result = await auditTarget(input.composition, lens, options, env);
 
       emitResult({
         command: "audit",
@@ -533,6 +591,21 @@ export function createSurfaceCliProgram(input: {
   });
 
   program
+    .command("cleanup")
+    .description("Purge generated Surface artifacts.")
+    .argument("[area]", "artifact area to purge: model-egress", "model-egress")
+    .action(async (area: string) => {
+      const result = await cleanupArtifacts(input.composition, area);
+
+      emitResult({
+        command: "cleanup",
+        io,
+        json: program.opts<{ json?: boolean }>().json === true,
+        result,
+      });
+    });
+
+  program
     .command("trace")
     .description("Trace a tracked finding through closed-loop state.")
     .argument("<finding-id>", "finding id or identity key")
@@ -573,14 +646,26 @@ function addTargetOptions(command: Command): Command {
     .option("--persona <persona>", "persona context for the audit")
     .option("--task <task>", "task context for the audit")
     .option("--preset <preset>", "evaluation preset")
-    .option("--depth <depth>", "evaluation depth, 1-5");
+    .option("--depth <depth>", "evaluation depth, 1-5")
+    .option("--model-fallback <mode>", "model fallback mode: off, direct, mmr, or auto")
+    .option("--model-channels <channels>", "comma-separated subscription model channels")
+    .option(
+      "--model-channel <channel>",
+      "repeatable subscription model channel",
+      (value: string, previous: string[] = []) => [...previous, value],
+      [],
+    )
+    .option("--model-depth <depth>", "model fallback depth, 1-5")
+    .option("--model-screenshots [policy]", "allow redacted screenshot metadata")
+    .option("--no-model-screenshots", "block screenshot metadata");
 }
 
 async function initializeProject(
   composition: SurfaceComposition,
   options: ConfigCommandOptions,
+  env: SurfaceCliEnv = {},
 ): Promise<Result<InitOutput>> {
-  const config = configFromOptions(options);
+  const config = configFromOptions(options, env, compositionProjectRoot(composition));
 
   if (!isResultOk(config)) {
     return config;
@@ -598,6 +683,40 @@ async function initializeProject(
   return resultOk({
     config: config.value,
     stateDir: DEFAULT_STATE_DIR,
+  });
+}
+
+async function cleanupArtifacts(
+  composition: SurfaceComposition,
+  area: string,
+): Promise<Result<{ readonly area: string; readonly path: string }>> {
+  if (area !== "model-egress") {
+    return resultErr(
+      createSurfaceError("config_invalid", `Unknown cleanup area "${area}".`, {
+        details: { area },
+      }),
+    );
+  }
+
+  const projectRoot = compositionProjectRoot(composition);
+  const modelEgressRelativePath = path.join(compositionStateDir(composition), "model-egress");
+  const modelEgressOutputPath = modelEgressRelativePath.replace(/\\/g, "/");
+  const modelEgressPath = path.join(projectRoot, modelEgressRelativePath);
+
+  try {
+    await rm(modelEgressPath, { force: true, recursive: true });
+  } catch (cause) {
+    return resultErr(
+      createSurfaceError("state_write_failed", "Failed to purge model egress artifacts.", {
+        cause,
+        details: { path: modelEgressOutputPath },
+      }),
+    );
+  }
+
+  return resultOk({
+    area,
+    path: modelEgressOutputPath,
   });
 }
 
@@ -622,6 +741,7 @@ async function runPipelineStep(
   composition: SurfaceComposition,
   step: string,
   options: ConfigCommandOptions,
+  env: SurfaceCliEnv = {},
 ): Promise<Result<RunOutput>> {
   if (step !== "all" && !isExecutableStageId(step)) {
     return resultErr(
@@ -631,10 +751,25 @@ async function runPipelineStep(
     );
   }
 
-  const config = configFromOptions(options);
+  const config = configFromOptions(options, env, compositionProjectRoot(composition));
 
   if (!isResultOk(config)) {
     return config;
+  }
+
+  if (config.value.model.effectiveEgressPolicy.mode !== "off") {
+    return resultErr(
+      createSurfaceError(
+        "config_invalid",
+        "Model-backed judgement is only supported by surface audit.",
+        {
+          details: {
+            nextCommand: "surface audit",
+            step,
+          },
+        },
+      ),
+    );
   }
 
   const runId = nextCliRunId();
@@ -700,6 +835,7 @@ async function auditTarget(
   composition: SurfaceComposition,
   lens: string | undefined,
   options: TargetCommandOptions,
+  env: SurfaceCliEnv,
 ): Promise<Result<AuditOutput>> {
   if (lens !== undefined && !inputLensExists(composition, lens)) {
     return resultErr(
@@ -715,7 +851,7 @@ async function auditTarget(
     return target;
   }
 
-  const config = configFromOptions(options);
+  const config = configFromOptions(options, env, compositionProjectRoot(composition));
 
   if (!isResultOk(config)) {
     return config;
@@ -739,17 +875,75 @@ async function auditTarget(
     return priorState;
   }
 
-  const findings = findingsForSeededFixture(target.value);
-  const backlog = backlogFromFindings(runId, findings);
-  const trackedFindings = trackedFindingsForAudit(priorState.value, runId, findings);
+  const evidence = await collectGroundingEvidence(composition, capture.value);
+
+  if (!isResultOk(evidence)) {
+    return evidence;
+  }
+
+  const staticEvidence = await readStaticEvidence(options, compositionProjectRoot(composition));
+
+  if (!isResultOk(staticEvidence)) {
+    return staticEvidence;
+  }
+
+  const audit = await composition.auditRunner({
+    capture: capture.value,
+    config: config.value,
+    evidence: [...evidence.value, ...staticEvidence.value],
+    ...(lens === undefined ? {} : { lensId: lens }),
+    runId,
+  });
+
+  if (!isResultOk(audit)) {
+    return audit;
+  }
+
+  const modelEgress = sanitizeModelEgressLedger(audit.value.modelEgress);
+
+  if (!isResultOk(modelEgress)) {
+    return modelEgress;
+  }
+
+  const auditValue: AuditRunnerResult = {
+    ...audit.value,
+    modelEgress: modelEgress.value,
+  };
+  const findings = auditValue.findings;
+  const trackedFindings = trackedFindingsForAudit(
+    priorState.value,
+    runId,
+    findings,
+    auditValue.skippedLenses,
+    auditValue.evaluatedLenses,
+    lens === undefined ? undefined : [lens],
+  );
+  const persistedFindings = persistedFindingsForTrackedState(
+    priorState.value,
+    findings,
+    trackedFindings,
+  );
+  const backlog = backlogFromFindings(runId, persistedFindings);
   const writtenState = await composition.stateStore.writeState({
     ...priorState.value,
     backlog,
     currentStage: "completed",
-    findings,
+    findings: persistedFindings,
+    modelEgress: appendModelEgressLedger(priorState.value.modelEgress, auditValue.modelEgress),
     runRecords: [
       ...(priorState.value.runRecords ?? []).filter((record) => record.runId !== runId),
-      { runId, trackedFindings },
+      {
+        backlog,
+        capture: captureForState(capture.value),
+        findings,
+        ...(auditValue.reconciliationQuestions === undefined ||
+        auditValue.reconciliationQuestions.length === 0
+          ? {}
+          : { reconciliationQuestions: auditValue.reconciliationQuestions }),
+        runId,
+        skippedLenses: auditValue.skippedLenses,
+        trackedFindings,
+      },
     ],
     trackedFindings,
   });
@@ -762,6 +956,11 @@ async function auditTarget(
     backlogId: backlog.id,
     findingCount: findings.length,
     ...(options.all === true ? { findings } : {}),
+    ...modelAuditOutput(auditValue),
+    ...(auditValue.reconciliationQuestions === undefined ||
+    auditValue.reconciliationQuestions.length === 0
+      ? {}
+      : { reconciliationQuestions: auditValue.reconciliationQuestions }),
     runId,
     ...(findings[0] === undefined ? {} : { topFinding: findings[0] }),
   });
@@ -801,6 +1000,63 @@ async function explainFinding(
     finding,
     rationale: finding.rationale,
   });
+}
+
+async function collectGroundingEvidence(
+  composition: SurfaceComposition,
+  capture: Capture,
+): Promise<Result<readonly Evidence[]>> {
+  const evidence: Evidence[] = [];
+
+  for (const tool of composition.groundingTools) {
+    const result = await tool.run(capture);
+
+    if (!isResultOk(result)) {
+      return resultErr(result.error);
+    }
+
+    for (const toolResult of result.value) {
+      evidence.push(...toolResult.evidence);
+    }
+  }
+
+  return resultOk(evidence);
+}
+
+async function readStaticEvidence(
+  options: TargetCommandOptions,
+  projectRoot: string,
+): Promise<Result<readonly Evidence[]>> {
+  if (options.evidence === undefined) {
+    return resultOk([]);
+  }
+
+  const evidencePath = path.isAbsolute(options.evidence)
+    ? options.evidence
+    : path.resolve(projectRoot, options.evidence);
+
+  try {
+    const parsedJson = JSON.parse(await readFile(evidencePath, "utf8")) as unknown;
+    const parsedEvidence = EvidenceSchema.array().safeParse(parsedJson);
+
+    if (!parsedEvidence.success) {
+      return resultErr(
+        createSurfaceError("config_invalid", "Static evidence file is invalid.", {
+          cause: parsedEvidence.error,
+          details: { path: options.evidence },
+        }),
+      );
+    }
+
+    return resultOk(parsedEvidence.data);
+  } catch (cause) {
+    return resultErr(
+      createSurfaceError("config_invalid", "Static evidence file could not be read.", {
+        cause,
+        details: { path: options.evidence },
+      }),
+    );
+  }
 }
 
 async function readBacklog(
@@ -1316,7 +1572,7 @@ async function suggestAlternatives(
     return target;
   }
 
-  const config = configFromOptions(options);
+  const config = configFromOptions(options, {}, compositionProjectRoot(composition));
 
   if (!isResultOk(config)) {
     return config;
@@ -1628,43 +1884,424 @@ function plural(count: number, singular: string, pluralValue = `${singular}s`): 
   return count === 1 ? singular : pluralValue;
 }
 
-function configFromOptions(options: ConfigCommandOptions): Result<SurfaceConfig> {
-  const preset =
-    options.preset === undefined ? DEFAULT_SURFACE_CONFIG.evaluation.preset : options.preset;
-  const parsedPreset = PresetSchema.safeParse(preset);
+function configFromOptions(
+  options: ConfigCommandOptions,
+  env: SurfaceCliEnv = {},
+  projectRoot: string,
+): Result<SurfaceConfig> {
+  const cliEvaluation: Record<string, unknown> = {};
 
-  if (!parsedPreset.success) {
+  if (options.preset !== undefined) {
+    const parsedPreset = PresetSchema.safeParse(options.preset);
+
+    if (!parsedPreset.success) {
+      return resultErr(
+        createSurfaceError("config_invalid", `Unknown evaluation preset "${options.preset}".`, {
+          cause: parsedPreset.error,
+          details: { preset: options.preset },
+        }),
+      );
+    }
+
+    cliEvaluation.preset = parsedPreset.data;
+  }
+
+  if (options.depth !== undefined) {
+    const parsedDepth = parseCliDepthOption(
+      options.depth,
+      "Evaluation depth must be an integer from 1 to 5.",
+      "depth",
+    );
+
+    if (!isResultOk(parsedDepth)) {
+      return parsedDepth;
+    }
+
+    cliEvaluation.depth = parsedDepth.value;
+  }
+
+  const envModel = modelConfigLayerFromEnv(env);
+  const cliModel = modelConfigLayerFromOptions(options);
+
+  if (!isResultOk(cliModel)) {
+    return cliModel;
+  }
+
+  const cliLayer: SurfaceConfigLayer = {
+    ...(Object.keys(cliEvaluation).length === 0 ? {} : { evaluation: cliEvaluation }),
+    ...(cliModel.value === undefined ? {} : { model: cliModel.value }),
+  };
+
+  try {
+    return resultOk(
+      resolveSurfaceConfig({
+        ...configLayersFromFiles(env, projectRoot),
+        ...(envModel === undefined ? {} : { env: { model: envModel } }),
+        ...(Object.keys(cliLayer).length === 0 ? {} : { cli: cliLayer }),
+      }),
+    );
+  } catch (cause) {
+    const parsedSurfaceError = SurfaceErrorSchema.safeParse(cause);
+
+    if (parsedSurfaceError.success) {
+      return resultErr(parsedSurfaceError.data);
+    }
+
     return resultErr(
-      createSurfaceError("config_invalid", `Unknown evaluation preset "${preset}".`, {
-        cause: parsedPreset.error,
-        details: { preset },
+      createSurfaceError("config_invalid", "Surface configuration is invalid.", {
+        cause,
+        details: configErrorDetails(cause),
       }),
     );
   }
+}
 
-  const depth =
-    options.depth === undefined
-      ? DEFAULT_SURFACE_CONFIG.evaluation.depth
-      : Number.parseInt(options.depth, 10);
-  const parsedDepth = DepthSchema.safeParse(depth);
+type ModelConfigLayer = NonNullable<SurfaceConfigLayer["model"]>;
 
-  if (!parsedDepth.success) {
+function configLayersFromFiles(
+  env: SurfaceCliEnv,
+  projectRoot: string,
+): {
+  readonly project?: SurfaceConfigLayer;
+  readonly user?: SurfaceConfigLayer;
+} {
+  const userConfigPath =
+    env.SURFACE_USER_CONFIG_PATH === "off"
+      ? undefined
+      : (env.SURFACE_USER_CONFIG_PATH ?? path.join(homedir(), ".surface", "config.yml"));
+  const projectConfigPath =
+    env.SURFACE_PROJECT_CONFIG_PATH === "off"
+      ? undefined
+      : (env.SURFACE_PROJECT_CONFIG_PATH ?? path.join(projectRoot, ".surface", "config.yml"));
+
+  return {
+    ...(userConfigPath === undefined ? {} : layerFromConfigFile(userConfigPath, "user")),
+    ...(projectConfigPath === undefined ? {} : layerFromConfigFile(projectConfigPath, "project")),
+  };
+}
+
+function layerFromConfigFile(
+  filePath: string,
+  layerName: "project" | "user",
+): { readonly project?: SurfaceConfigLayer; readonly user?: SurfaceConfigLayer } {
+  let contents: string;
+
+  try {
+    contents = readFileSync(filePath, "utf8");
+  } catch (cause) {
+    if (isMissingConfigFileError(cause)) {
+      return {};
+    }
+
+    throw cause;
+  }
+
+  const parsed = SurfaceConfigLayerSchema.safeParse(parseYaml(contents) ?? {});
+
+  if (!parsed.success) {
+    throw new ConfigFileParseError(
+      `${layerName} Surface config file is invalid.`,
+      layerName,
+      filePath,
+      zodIssueDetails(parsed.error, layerName) ?? [],
+    );
+  }
+
+  return { [layerName]: parsed.data };
+}
+
+class ConfigFileParseError extends Error {
+  constructor(
+    message: string,
+    readonly layer: "project" | "user",
+    readonly path: string,
+    readonly configIssues: readonly ConfigIssueDetail[],
+  ) {
+    super(message);
+    this.name = "ConfigFileParseError";
+  }
+}
+
+function configErrorDetails(cause: unknown): Record<string, unknown> {
+  const base =
+    cause instanceof Error
+      ? { errorMessage: cause.message, errorName: cause.name }
+      : { errorMessage: String(cause) };
+  const issues = zodIssueDetails(cause);
+
+  return {
+    ...base,
+    ...(cause instanceof ConfigFileParseError
+      ? { issues: cause.configIssues, layer: cause.layer, path: cause.path }
+      : issues === undefined
+        ? {}
+        : { issues }),
+  };
+}
+
+function zodIssueDetails(
+  cause: unknown,
+  pathPrefix?: string,
+): readonly ConfigIssueDetail[] | undefined {
+  if (!isRecord(cause) || !Array.isArray(cause.issues)) {
+    return undefined;
+  }
+
+  return cause.issues.flatMap((issue) => {
+    if (!isRecord(issue) || typeof issue.message !== "string" || typeof issue.code !== "string") {
+      return [];
+    }
+
+    const rawPath = Array.isArray(issue.path) ? issue.path.map(String) : [];
+    const prefixedPath = pathPrefix === undefined ? rawPath : [pathPrefix, ...rawPath];
+
+    return [
+      {
+        code: issue.code,
+        message: issue.message,
+        path: prefixedPath.join("."),
+      },
+    ];
+  });
+}
+
+function modelConfigLayerFromEnv(env: SurfaceCliEnv): ModelConfigLayer | undefined {
+  const fallback: Record<string, unknown> = {};
+  const egressPolicy: Record<string, unknown> = {};
+
+  if (env.SURFACE_MODEL_FALLBACK !== undefined) {
+    fallback.mode = env.SURFACE_MODEL_FALLBACK;
+
+    if (env.SURFACE_MODEL_FALLBACK !== "off") {
+      egressPolicy.mode = "text";
+    }
+  }
+
+  const channels = parseModelChannels(env.SURFACE_MODEL_CHANNELS);
+
+  if (channels.length > 0) {
+    fallback.providerOrder = channels;
+    fallback.allowedChannels = channels;
+  }
+
+  if (env.SURFACE_MODEL_DEPTH !== undefined) {
+    const depth = parseOptionalInteger(env.SURFACE_MODEL_DEPTH);
+
+    if (depth !== undefined) {
+      fallback.depth = depth;
+    }
+  }
+
+  applyScreenshotRuntimePolicy(egressPolicy, env.SURFACE_MODEL_SCREENSHOTS);
+
+  return modelLayerFromParts(fallback, egressPolicy);
+}
+
+function modelConfigLayerFromOptions(
+  options: ConfigCommandOptions,
+): Result<ModelConfigLayer | undefined> {
+  const fallback: Record<string, unknown> = {};
+  const egressPolicy: Record<string, unknown> = {};
+  let explicitFallbackMode: string | undefined;
+
+  if (options.modelFallback !== undefined) {
+    const parsedFallback = ModelFallbackModeSchema.safeParse(options.modelFallback);
+
+    if (!parsedFallback.success) {
+      return resultErr(
+        createSurfaceError(
+          "config_invalid",
+          `Unknown model fallback mode "${options.modelFallback}".`,
+          {
+            cause: parsedFallback.error,
+            details: { modelFallback: options.modelFallback },
+          },
+        ),
+      );
+    }
+
+    fallback.mode = parsedFallback.data;
+    explicitFallbackMode = parsedFallback.data;
+
+    if (parsedFallback.data !== "off") {
+      egressPolicy.mode = "text";
+    }
+  }
+
+  const channels = parseCliModelChannels([
+    options.modelChannels,
+    (options.modelChannel ?? []).join(","),
+  ]);
+
+  if (!isResultOk(channels)) {
+    return channels;
+  }
+
+  if (channels.value.length > 0) {
+    fallback.providerOrder = channels.value;
+    fallback.allowedChannels = channels.value;
+  }
+
+  if (options.modelDepth !== undefined) {
+    const parsedDepth = parseCliDepthOption(
+      options.modelDepth,
+      "Model depth must be an integer from 1 to 5.",
+      "modelDepth",
+    );
+
+    if (!isResultOk(parsedDepth)) {
+      return parsedDepth;
+    }
+
+    fallback.depth = parsedDepth.value;
+  }
+
+  const screenshotPolicy = parseCliScreenshotRuntimePolicy(options.modelScreenshots);
+
+  if (!isResultOk(screenshotPolicy)) {
+    return screenshotPolicy;
+  }
+
+  if (screenshotPolicy.value !== undefined) {
+    egressPolicy.screenshots = screenshotPolicy.value.screenshots;
+
+    if (screenshotPolicy.value.mode !== undefined) {
+      egressPolicy.mode = screenshotPolicy.value.mode;
+    }
+  }
+
+  if (explicitFallbackMode === "off") {
+    egressPolicy.mode = "off";
+  }
+
+  return resultOk(modelLayerFromParts(fallback, egressPolicy));
+}
+
+function parseCliModelChannels(values: readonly (string | undefined)[]): Result<string[]> {
+  const channels = values
+    .flatMap((value) => rawModelChannels(value))
+    .filter((channel, index, allChannels) => allChannels.indexOf(channel) === index);
+  const parsedChannels: string[] = [];
+
+  for (const channel of channels) {
+    const parsed = DirectSubscriptionChannelIdSchema.safeParse(channel);
+
+    if (!parsed.success) {
+      return resultErr(
+        createSurfaceError("config_invalid", `Unknown model channel "${channel}".`, {
+          cause: parsed.error,
+          details: { modelChannel: channel },
+        }),
+      );
+    }
+
+    parsedChannels.push(parsed.data);
+  }
+
+  return resultOk(parsedChannels);
+}
+
+function parseCliScreenshotRuntimePolicy(
+  rawValue: string | boolean | undefined,
+): Result<{ readonly mode?: "text-and-screenshots"; readonly screenshots: string } | undefined> {
+  if (rawValue === undefined) {
+    return resultOk(undefined);
+  }
+
+  if (rawValue === false || rawValue === "false" || rawValue === "blocked") {
+    return resultOk({ screenshots: "blocked" });
+  }
+
+  const value = rawValue === true || rawValue === "true" ? "redacted-only" : rawValue;
+  const parsedPolicy = ScreenshotEgressPolicySchema.safeParse(value);
+
+  if (!parsedPolicy.success) {
     return resultErr(
-      createSurfaceError("config_invalid", "Evaluation depth must be an integer from 1 to 5.", {
-        cause: parsedDepth.error,
-        details: { depth: options.depth },
+      createSurfaceError("config_invalid", `Unknown model screenshot policy "${String(value)}".`, {
+        cause: parsedPolicy.error,
+        details: { modelScreenshots: value },
       }),
     );
   }
 
   return resultOk({
-    ...DEFAULT_SURFACE_CONFIG,
-    evaluation: {
-      ...DEFAULT_SURFACE_CONFIG.evaluation,
-      depth: parsedDepth.data,
-      preset: parsedPreset.data,
-    },
+    screenshots: parsedPolicy.data,
+    ...(parsedPolicy.data === "redacted-only" ? { mode: "text-and-screenshots" as const } : {}),
   });
+}
+
+function modelLayerFromParts(
+  fallback: Record<string, unknown>,
+  egressPolicy: Record<string, unknown>,
+): ModelConfigLayer | undefined {
+  const model: Record<string, unknown> = {};
+
+  if (Object.keys(fallback).length > 0) {
+    model.fallback = fallback;
+  }
+
+  if (Object.keys(egressPolicy).length > 0) {
+    model.egressPolicy = egressPolicy;
+  }
+
+  return Object.keys(model).length === 0 ? undefined : model;
+}
+
+function parseModelChannels(value: string | undefined): string[] {
+  return rawModelChannels(value).map((channel) => {
+    const parsed = DirectSubscriptionChannelIdSchema.safeParse(channel);
+    return parsed.success ? parsed.data : channel;
+  });
+}
+
+function rawModelChannels(value: string | undefined): string[] {
+  if (value === undefined) {
+    return [];
+  }
+
+  return value
+    .split(",")
+    .map((channel) => channel.trim())
+    .filter((channel) => channel.length > 0)
+    .filter((channel, index, channels) => channels.indexOf(channel) === index);
+}
+
+function applyScreenshotRuntimePolicy(
+  egressPolicy: Record<string, unknown>,
+  rawValue: string | boolean | undefined,
+): void {
+  if (rawValue === undefined) {
+    return;
+  }
+
+  if (rawValue === false || rawValue === "false" || rawValue === "blocked") {
+    egressPolicy.screenshots = "blocked";
+    return;
+  }
+
+  const value = rawValue === true || rawValue === "true" ? "redacted-only" : rawValue;
+  const parsedPolicy = ScreenshotEgressPolicySchema.safeParse(value);
+
+  if (parsedPolicy.success) {
+    egressPolicy.screenshots = parsedPolicy.data;
+
+    if (parsedPolicy.data === "redacted-only") {
+      egressPolicy.mode = "text-and-screenshots";
+    }
+  } else {
+    egressPolicy.screenshots = value;
+  }
+}
+
+function parseOptionalInteger(value: string): number | undefined {
+  const trimmed = value.trim();
+
+  if (!/^[+-]?\d+$/u.test(trimmed)) {
+    return undefined;
+  }
+
+  const parsed = Number.parseInt(trimmed, 10);
+  return Number.isNaN(parsed) ? undefined : parsed;
 }
 
 function targetFromOptions(options: TargetCommandOptions): Result<Target> {
@@ -1719,13 +2356,35 @@ async function observeCliTarget(
   authStateRef: string | undefined,
 ): Promise<Result<Capture>> {
   if (target.kind === "dom") {
+    const captureId = `capture_${nextCliRunId()}`;
+    const redactedDom = maskModelArtifactText({
+      artifactType: "dom-snapshot",
+      text: target.ref,
+    }).text;
+    const artifact = await composition.stateStore.writeArtifact({
+      bytes: Buffer.from(redactedDom, "utf8"),
+      kind: "capture",
+      relativePath: `captures/${captureId}/dom.html`,
+    });
+
+    if (!isResultOk(artifact)) {
+      return artifact;
+    }
+
     return resultOk({
-      artifacts: [],
+      artifacts: [
+        {
+          id: "dom",
+          path: artifact.value.path,
+          redacted: redactedDom !== target.ref,
+          type: "dom-snapshot",
+        },
+      ],
       backend: "static",
       capturedAt: new Date(0).toISOString(),
-      id: `capture_${nextCliRunId()}`,
+      id: captureId,
       status: "completed",
-      target,
+      target: { ...target, ref: "[redacted-inline-dom]" },
     });
   }
 
@@ -1733,6 +2392,27 @@ async function observeCliTarget(
     config,
     ...(authStateRef === undefined ? {} : { authStateRef }),
   });
+}
+
+function captureForState(capture: Capture): Capture {
+  return {
+    ...capture,
+    target: {
+      ...capture.target,
+      ref: redactedTargetRef(capture.target),
+    },
+  };
+}
+
+function redactedTargetRef(target: Target): string {
+  if (target.kind === "dom") {
+    return "[redacted-inline-dom]";
+  }
+
+  return target.ref.replace(
+    /([?&](?:token|secret|session|api[_-]?key)=)[^"'&\s]+/gi,
+    "$1[redacted]",
+  );
 }
 
 function isExecutableStageId(step: string): step is ExecutablePipelineStageId {
@@ -1823,15 +2503,10 @@ function identityKeysForBaseline(state: CliProjectStateSnapshot): readonly strin
   }
 
   return [
-    ...new Set(fullFindingsForState(state).map((finding) => identityKeyForFinding(state, finding))),
+    ...new Set(
+      fullFindingsForState(state).map((finding) => deriveFindingIdentity(finding).identityKey),
+    ),
   ];
-}
-
-function identityKeyForFinding(state: CliProjectStateSnapshot, finding: Finding): string {
-  return (
-    state.trackedFindings?.find((trackedFinding) => trackedFinding.currentFindingId === finding.id)
-      ?.identityKey ?? finding.id
-  );
 }
 
 function backlogForState(
@@ -1864,6 +2539,63 @@ function fullFindingsForState(state: CliProjectStateSnapshot): readonly Finding[
     .map((result) => result.data);
 }
 
+function persistedFindingsForTrackedState(
+  previousState: CliProjectStateSnapshot,
+  currentFindings: readonly Finding[],
+  trackedFindings: readonly TrackedFinding[],
+): readonly Finding[] {
+  const findingsById = new Map(
+    [...fullFindingsForState(previousState), ...currentFindings].map((finding) => [
+      finding.id,
+      finding,
+    ]),
+  );
+  const seenFindingIds = new Set<string>();
+  const persistedFindings: Finding[] = [];
+
+  for (const trackedFinding of trackedFindings) {
+    const findingId = trackedFinding.currentFindingId;
+
+    if (findingId === undefined || seenFindingIds.has(findingId)) {
+      continue;
+    }
+
+    const finding = findingsById.get(findingId);
+
+    if (finding === undefined) {
+      continue;
+    }
+
+    seenFindingIds.add(findingId);
+    persistedFindings.push(finding);
+  }
+
+  for (const finding of currentFindings) {
+    if (seenFindingIds.has(finding.id)) {
+      continue;
+    }
+
+    seenFindingIds.add(finding.id);
+    persistedFindings.push(finding);
+  }
+
+  return persistedFindings;
+}
+
+function sanitizeModelEgressLedger(
+  entries: AuditRunnerResult["modelEgress"],
+): Result<AuditRunnerResult["modelEgress"], SurfaceError> {
+  try {
+    return resultOk(entries.map((entry) => createModelEgressLedgerEntry(entry)));
+  } catch (error) {
+    return resultErr(
+      createSurfaceError("state_write_failed", "Model egress ledger is invalid.", {
+        cause: error,
+      }),
+    );
+  }
+}
+
 function backlogFromFindings(runId: string, findings: readonly Finding[]): Backlog {
   return {
     entries: findings.map((finding, index) => ({
@@ -1878,108 +2610,287 @@ function backlogFromFindings(runId: string, findings: readonly Finding[]): Backl
   };
 }
 
-function findingsForSeededFixture(target: Target): readonly Finding[] {
-  if (target.kind !== "dom") {
-    return [];
+// Keep enough model-egress history for recent audits without letting state files grow unbounded.
+const MAX_MODEL_EGRESS_LEDGER_ENTRIES = 100;
+
+function appendModelEgressLedger<T>(
+  previous: readonly T[] | undefined,
+  current: readonly T[],
+): readonly T[] {
+  return [...(previous ?? []), ...current].slice(-MAX_MODEL_EGRESS_LEDGER_ENTRIES);
+}
+
+function parseCliDepthOption(
+  value: string,
+  message: string,
+  detailKey: "depth" | "modelDepth",
+): Result<number, SurfaceError> {
+  if (!/^[1-5]$/u.test(value)) {
+    return resultErr(
+      createSurfaceError("config_invalid", message, {
+        details: { [detailKey]: value },
+      }),
+    );
   }
 
-  const hasSeededLowContrast =
-    target.ref.includes("low-contrast") ||
-    target.ref.includes("#b7bdd1") ||
-    target.ref.includes("intentionally fails contrast");
+  const parsedDepth = DepthSchema.safeParse(Number(value));
 
-  if (!hasSeededLowContrast) {
-    return [];
+  if (!parsedDepth.success) {
+    return resultErr(
+      createSurfaceError("config_invalid", message, {
+        cause: parsedDepth.error,
+        details: { [detailKey]: value },
+      }),
+    );
   }
 
-  return [
-    {
-      citedHeuristics: ["wcag-1.4.3"],
-      evidence: [
-        {
-          kind: "tool-result",
-          measuredValue: ".low-contrast: foreground #b7bdd1 on #f8fafc",
-          rule: "color-contrast",
-          threshold: "4.5:1",
-          tool: "backend",
-        },
-      ],
-      confidenceBand: "assert",
-      dimensions: {
-        a11yLegalRisk: 0.8,
-        agentImplementability: 0.9,
-        businessImpact: 0.4,
-        confidence: 1,
-        effort: 0.2,
-        evidenceQuality: 1,
-        severity: 0.8,
-        userImpact: 0.7,
-      },
-      gatedForHuman: false,
-      id: "seeded_low_contrast",
-      issueType: "contrast-insufficient",
-      lens: "accessibility",
-      location: { selector: ".low-contrast" },
-      method: "measured",
-      rationale: "The seeded low-contrast paragraph does not meet the AA contrast threshold.",
-      severityBand: "P1",
-      title: "Seeded paragraph contrast is below AA",
-    },
+  return resultOk(parsedDepth.data);
+}
+
+function modelAuditOutput(audit: AuditRunnerResult): { readonly model?: ModelAuditOutput } {
+  const attemptedChannels = [
+    ...new Set(audit.modelEgress.flatMap((entry) => entry.attemptedChannels)),
   ];
+  const completedChannels = [
+    ...new Set(audit.modelEgress.flatMap((entry) => entry.completedChannels)),
+  ];
+  const artifactClassesSent = [
+    ...new Set(audit.modelEgress.flatMap((entry) => entry.artifactClassesSent)),
+  ];
+  const blockedReasons = [
+    ...new Set([
+      ...audit.blockedReasons,
+      ...audit.modelEgress.flatMap((entry) => entry.blockedReasons),
+    ]),
+  ];
+  const unavailableChannels = [
+    ...audit.unavailableChannels.map((channel) => ({
+      id: channel.id,
+      message: sanitizeModelAuditMessage(channel.message),
+      reason: channel.reason,
+    })),
+    ...audit.modelEgress.flatMap((entry) =>
+      entry.unavailableChannels.map((channel) => ({
+        id: channel.channelId ?? "unknown",
+        message: sanitizeModelAuditMessage(channel.message),
+        reason: channel.reason,
+      })),
+    ),
+  ];
+
+  if (
+    attemptedChannels.length === 0 &&
+    completedChannels.length === 0 &&
+    artifactClassesSent.length === 0 &&
+    blockedReasons.length === 0 &&
+    unavailableChannels.length === 0
+  ) {
+    return {};
+  }
+
+  return {
+    model: {
+      artifactClassesSent,
+      attemptedChannels,
+      blockedReasons,
+      completedChannels,
+      unavailableChannels: dedupeUnavailableChannels(unavailableChannels),
+    },
+  };
+}
+
+function dedupeUnavailableChannels(
+  channels: readonly { readonly id: string; readonly message: string; readonly reason: string }[],
+): ModelAuditOutput["unavailableChannels"] {
+  const seen = new Set<string>();
+  const deduped: { readonly id: string; readonly message: string; readonly reason: string }[] = [];
+
+  for (const channel of channels) {
+    const key = [channel.id, channel.reason, channel.message].join("\0");
+
+    if (seen.has(key)) {
+      continue;
+    }
+
+    seen.add(key);
+    deduped.push(channel);
+  }
+
+  return deduped;
+}
+
+function sanitizeModelAuditMessage(message: string): string {
+  return maskModelPlainText(message);
 }
 
 function trackedFindingsForAudit(
   state: CliProjectStateSnapshot,
   runId: string,
   findings: readonly Finding[],
+  skippedLenses: readonly { readonly lensId: string }[] = [],
+  evaluatedLenses: readonly string[] | undefined = undefined,
+  auditScopeLenses: readonly string[] | undefined = undefined,
 ): readonly TrackedFinding[] {
-  const previous = state.trackedFindings?.find(
-    (trackedFinding) => trackedFinding.identityKey === "seeded_low_contrast_identity",
+  const previousByKey = new Map(
+    (state.trackedFindings ?? []).map((trackedFinding) => [
+      trackedFinding.identityKey,
+      trackedFinding,
+    ]),
   );
-  const finding = findings.find((candidate) => candidate.id === "seeded_low_contrast");
+  const previousByFindingId = new Map(
+    (state.trackedFindings ?? [])
+      .filter((trackedFinding) => trackedFinding.currentFindingId !== undefined)
+      .map((trackedFinding) => [trackedFinding.currentFindingId as string, trackedFinding]),
+  );
+  const currentTracked: TrackedFinding[] = [];
+  const currentIdentityKeys = new Set<string>();
+  const skippedLensIds = new Set(skippedLenses.map((skip) => skip.lensId));
+  const evaluatedLensIds = new Set(evaluatedLenses ?? []);
+  const auditScopeWasRequested = auditScopeLenses !== undefined;
+  const auditScopeLensIds = new Set(
+    (auditScopeLenses ?? []).filter(
+      (lensId) => evaluatedLensIds.has(lensId) || skippedLensIds.has(lensId),
+    ),
+  );
+  const identityAssignmentsByFindingId = new Map(
+    assignFindingIdentities(findings).map((assignment) => [assignment.findingId, assignment]),
+  );
 
-  if (finding !== undefined) {
-    return [
-      {
-        ...(previous ?? {}),
-        currentFindingId: finding.id,
-        firstSeenRunId: previous?.firstSeenRunId ?? runId,
-        gateDisposition: previous?.gateDisposition ?? "active",
-        history: [
-          ...(previous?.history ?? []),
-          { runId, status: previous === undefined ? "new" : "still-failing" },
-        ],
-        identity: previous?.identity ?? {
-          anchorKind: "selector",
-          identityKey: "seeded_low_contrast_identity",
-          issueType: "contrast-insufficient",
-          lens: "accessibility",
-          locationAnchor: ".low-contrast",
-        },
-        identityKey: "seeded_low_contrast_identity",
-        lastSeenRunId: runId,
-        status: previous === undefined ? "new" : "still-failing",
-        validation: {
-          expectation: "seeded low-contrast marker is absent from the DOM",
-          kind: "measured-rule",
-        },
-      },
-    ];
+  for (const finding of findings) {
+    const identityAssignment = identityAssignmentsByFindingId.get(finding.id);
+    const previousWithSameFindingId = previousByFindingId.get(finding.id);
+
+    if (identityAssignment?.status !== "stable") {
+      if (
+        previousWithSameFindingId !== undefined &&
+        !currentIdentityKeys.has(previousWithSameFindingId.identityKey)
+      ) {
+        currentTracked.push(
+          transitionTrackedFinding(previousWithSameFindingId, {
+            currentFindingId: finding.id,
+            kind: "identity-broken",
+            runId,
+          }),
+        );
+        currentIdentityKeys.add(previousWithSameFindingId.identityKey);
+      }
+
+      continue;
+    }
+
+    const identity = identityAssignment.identity;
+    const identityKey = identity.identityKey;
+    const previous = previousByKey.get(identityKey);
+
+    if (
+      previous === undefined &&
+      previousWithSameFindingId !== undefined &&
+      previousWithSameFindingId.identityKey !== identityKey &&
+      !currentIdentityKeys.has(previousWithSameFindingId.identityKey)
+    ) {
+      currentTracked.push(
+        transitionTrackedFinding(previousWithSameFindingId, {
+          currentFindingId: finding.id,
+          kind: "identity-broken",
+          runId,
+        }),
+      );
+      currentIdentityKeys.add(previousWithSameFindingId.identityKey);
+    }
+
+    currentIdentityKeys.add(identityKey);
+    currentTracked.push(trackedFindingForCurrentFinding(finding, identity, previous, runId));
   }
 
+  for (const previous of state.trackedFindings ?? []) {
+    if (currentIdentityKeys.has(previous.identityKey)) {
+      continue;
+    }
+
+    if (
+      shouldPreservePreviousTrackedFinding(
+        previous,
+        skippedLensIds,
+        evaluatedLensIds,
+        auditScopeLensIds,
+        auditScopeWasRequested,
+      )
+    ) {
+      currentTracked.push(previous);
+      continue;
+    }
+
+    currentTracked.push(
+      transitionTrackedFinding(previous, {
+        kind: "missing",
+        runId,
+        validationPassed: true,
+      }),
+    );
+  }
+
+  return currentTracked;
+}
+
+function shouldPreservePreviousTrackedFinding(
+  previous: TrackedFinding,
+  skippedLensIds: ReadonlySet<string>,
+  evaluatedLensIds: ReadonlySet<string>,
+  auditScopeLensIds: ReadonlySet<string>,
+  auditScopeWasRequested: boolean,
+): boolean {
+  const lensId = previous.identity.lens;
+
+  if (auditScopeWasRequested) {
+    return !auditScopeLensIds.has(lensId) || skippedLensIds.has(lensId);
+  }
+
+  if (evaluatedLensIds.size === 0 && skippedLensIds.size === 0) {
+    return true;
+  }
+
+  return skippedLensIds.has(lensId) || (evaluatedLensIds.size > 0 && !evaluatedLensIds.has(lensId));
+}
+
+function trackedFindingForCurrentFinding(
+  finding: Finding,
+  identity: TrackedFinding["identity"],
+  previous: TrackedFinding | undefined,
+  runId: string,
+): TrackedFinding {
   if (previous === undefined) {
-    return [];
+    return createTrackedFinding({
+      finding,
+      identity,
+      runId,
+      validation: validationForFinding(finding),
+    });
   }
 
-  return [
-    {
-      ...previous,
-      currentFindingId: undefined,
-      history: [...(previous.history ?? []), { runId, status: "resolved" }],
-      lastSeenRunId: runId,
-      status: "resolved",
-    },
-  ];
+  return transitionTrackedFinding(previous, {
+    finding,
+    identity,
+    kind: "detected",
+    runId,
+  });
+}
+
+function validationForFinding(finding: Finding): TrackedFinding["validation"] {
+  const measuredRule = finding.evidence.find(
+    (entry) => entry.kind === "tool-result" && typeof entry.rule === "string",
+  );
+
+  if (measuredRule?.kind === "tool-result" && typeof measuredRule.rule === "string") {
+    return {
+      expectation: `${measuredRule.tool} ${measuredRule.rule} passes`,
+      kind: "measured-rule",
+    };
+  }
+
+  return {
+    expectation: `${finding.lens} lens no longer reports ${finding.issueType}`,
+    kind: "re-evaluate-lens",
+  };
 }
 
 function nextCliRunId(): string {
@@ -1994,7 +2905,26 @@ function surfaceErrorForThrown(cause: unknown): SurfaceError {
     });
   }
 
-  return createSurfaceError("unknown_step", "Surface command failed before execution.", { cause });
+  if (cause instanceof Error) {
+    return createSurfaceError("unknown_step", "Surface command failed before execution.", {
+      cause,
+      details: { errorMessage: cause.message, errorName: cause.name },
+    });
+  }
+
+  return createSurfaceError("unknown_step", "Surface command failed before execution.", {
+    details: { errorMessage: String(cause) },
+  });
+}
+
+function isMissingConfigFileError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    ((error as { readonly code?: unknown }).code === "ENOENT" ||
+      (error as { readonly code?: unknown }).code === "EISDIR")
+  );
 }
 
 function commandNameFor(program: Command, argv: readonly string[]): string {

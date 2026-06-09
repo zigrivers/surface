@@ -11,6 +11,9 @@ coverage/
 .claude/
 pnpm-lock.yaml
 
+# Prettier cannot infer a parser for this checked-in env template extension.
+.env.example
+
 # Prose & authored content — preserve hand-formatting (tables, HTML comments, YAML overlays)
 docs/
 content/

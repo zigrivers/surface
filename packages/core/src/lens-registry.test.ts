@@ -27,6 +27,14 @@ const completedCapture = {
   status: "completed",
 } satisfies Capture;
 
+const availableLocalModel = {
+  available: true,
+  channelId: "local",
+  model: "reviewer",
+  provider: "local",
+  sourceKind: "local",
+} as const;
+
 describe("lens registry", () => {
   it("selects the overlay and preset intersection in registry order", () => {
     const config = resolveSurfaceConfig({
@@ -41,11 +49,7 @@ describe("lens registry", () => {
     const plan = selectLensExecutionPlan({
       capture: completedCapture,
       config,
-      modelAvailability: {
-        available: true,
-        model: "reviewer",
-        provider: "local",
-      },
+      modelAvailability: availableLocalModel,
     });
 
     expect(plan.overlay.appType).toBe("e-commerce");
@@ -229,11 +233,7 @@ describe("lens registry", () => {
     const plan = selectLensExecutionPlan({
       capture: screenshotOnlyCapture,
       config,
-      modelAvailability: {
-        available: true,
-        model: "reviewer",
-        provider: "local",
-      },
+      modelAvailability: availableLocalModel,
     });
 
     expect(plan.skipped).toContainEqual({
@@ -261,11 +261,7 @@ describe("lens registry", () => {
     const plan = selectLensExecutionPlan({
       capture: emptyCapture,
       config,
-      modelAvailability: {
-        available: true,
-        model: "reviewer",
-        provider: "local",
-      },
+      modelAvailability: availableLocalModel,
     });
 
     expect(plan.skipped).toContainEqual({
@@ -289,11 +285,7 @@ describe("lens registry", () => {
     const plan = selectLensExecutionPlan({
       capture: completedCapture,
       config,
-      modelAvailability: {
-        available: true,
-        model: "reviewer",
-        provider: "local",
-      },
+      modelAvailability: availableLocalModel,
     });
     const usability = plan.selected.find((lens) => lens.id === "usability");
 

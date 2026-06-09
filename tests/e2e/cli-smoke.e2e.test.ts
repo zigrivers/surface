@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -42,70 +42,105 @@ describe("surface CLI e2e smoke", () => {
     });
   });
 
-  it("audits the seeded fixture and persists a measured finding", async () => {
+  it("audits the seeded fixture without synthesizing findings", async () => {
     const cwd = await tempProjectRoot();
     const html = await readFile(fixturePath, "utf8");
     const result = await runSurface(["--json", "audit", "--dom", html], cwd);
 
     expect(result.exitCode).toBe(0);
-    expect(JSON.parse(result.stdout)).toMatchObject({
+    const parsed = JSON.parse(result.stdout);
+
+    expect(parsed).toMatchObject({
       command: "audit",
       data: {
-        findingCount: 1,
-        topFinding: {
-          id: "seeded_low_contrast",
-          method: "measured",
-          severityBand: "P1",
+        model: {
+          attemptedChannels: [],
+          blockedReasons: ["model_egress_blocked_by_policy"],
+          completedChannels: [],
         },
       },
       ok: true,
+    });
+    expect(parsed.data.findingCount).toBe(1);
+    expect(parsed.data.topFinding).toMatchObject({
+      issueType: "readability",
+      lens: "content",
+      method: "judged",
     });
 
     const state = JSON.parse(await readFile(path.join(cwd, ".surface", "state.json"), "utf8"));
 
-    expect(state).toMatchObject({
-      findings: [{ id: "seeded_low_contrast" }],
-      trackedFindings: [{ identityKey: "seeded_low_contrast_identity", status: "new" }],
+    expect(state.modelEgress).toMatchObject([
+      {
+        artifactClassesSent: [],
+        attemptedChannels: [],
+        blockedReasons: ["model_egress_blocked_by_policy"],
+        completedChannels: [],
+        redactionStatus: "none",
+        unavailableChannels: [],
+      },
+    ]);
+    expect(state.findings.some(isSyntheticSeededFinding)).toBe(false);
+    expect(state.runRecords.at(-1)).toMatchObject({
+      capture: {
+        artifacts: expect.arrayContaining([expect.objectContaining({ type: "dom-snapshot" })]),
+        target: { kind: "dom", ref: "[redacted-inline-dom]" },
+      },
+      skippedLenses: expect.arrayContaining([
+        expect.objectContaining({
+          lensId: "usability",
+          reason: "model_unavailable",
+        }),
+      ]),
     });
+    expect(JSON.stringify(state)).not.toContain("seeded_low_contrast");
+    expect(JSON.stringify(state)).not.toContain(html);
   });
 
-  it("closed loop: fix and re-audit resolves the seeded finding", async () => {
+  it("closed loop: measured findings fail the gate and a fixed re-audit resolves them", async () => {
     const cwd = await tempProjectRoot();
     const html = await readFile(fixturePath, "utf8");
-    const firstAudit = await runSurface(["--json", "audit", "--dom", html], cwd);
+    const evidencePath = await writeStaticEvidence(cwd, [contrastEvidence()]);
+    const gatePolicyPath = await writeGatePolicy(cwd);
+    const firstAudit = await runSurface(
+      ["--json", "audit", "--dom", html, "--evidence", evidencePath],
+      cwd,
+    );
 
     expect(firstAudit.exitCode).toBe(0);
-
-    const failingGate = await runSurface(["--json", "gate", "--ci"], cwd);
-
-    expect(failingGate.exitCode).toBe(1);
-    expect(JSON.parse(failingGate.stdout)).toMatchObject({
-      data: { gateResult: { failingFindingIds: ["seeded_low_contrast"], passed: false } },
-      ok: true,
-    });
-
-    const fixedAudit = await runSurface(["--json", "audit", "--dom", fixedFixtureHtml(html)], cwd);
-
-    expect(fixedAudit.exitCode).toBe(0);
-    expect(JSON.parse(fixedAudit.stdout)).toMatchObject({
-      data: { findingCount: 0 },
-      ok: true,
-    });
-
-    const trace = await runSurface(["--json", "trace", "seeded_low_contrast_identity"], cwd);
-
-    expect(trace.exitCode).toBe(0);
-    expect(JSON.parse(trace.stdout)).toMatchObject({
+    expect(JSON.parse(firstAudit.stdout)).toMatchObject({
       data: {
-        trackedFinding: {
-          identityKey: "seeded_low_contrast_identity",
-          status: "resolved",
-        },
+        findingCount: 2,
+        topFinding: { issueType: "contrast-insufficient", method: "measured" },
       },
       ok: true,
     });
 
-    const cleanGate = await runSurface(["--json", "gate", "--ci"], cwd);
+    const failingGate = await runSurface(
+      ["--json", "gate", "--ci", "--policy", gatePolicyPath],
+      cwd,
+    );
+    const parsedFailingGate = JSON.parse(failingGate.stdout);
+
+    expect(failingGate.exitCode).toBe(1);
+    expect(parsedFailingGate).toMatchObject({
+      data: { gateResult: { passed: false } },
+      ok: true,
+    });
+    expect(parsedFailingGate.data.gateResult.failingFindingIds).toHaveLength(1);
+
+    const fixedAudit = await runSurface(["--json", "audit", "--dom", html], cwd);
+
+    expect(fixedAudit.exitCode).toBe(0);
+    expect(JSON.parse(fixedAudit.stdout)).toMatchObject({
+      data: {
+        findingCount: 1,
+        topFinding: { issueType: "readability", lens: "content", method: "judged" },
+      },
+      ok: true,
+    });
+
+    const cleanGate = await runSurface(["--json", "gate", "--ci", "--policy", gatePolicyPath], cwd);
 
     expect(cleanGate.exitCode).toBe(0);
     expect(JSON.parse(cleanGate.stdout)).toMatchObject({
@@ -159,6 +194,37 @@ describe("surface CLI e2e smoke", () => {
   });
 });
 
+function contrastEvidence() {
+  return {
+    kind: "tool-result",
+    measuredValue: ".low-contrast: 3.1:1",
+    rule: "color-contrast",
+    threshold: "4.5:1",
+    tool: "axe",
+  };
+}
+
+async function writeStaticEvidence(root: string, evidence: readonly unknown[]): Promise<string> {
+  const evidencePath = path.join(root, "evidence.json");
+  await writeFile(evidencePath, JSON.stringify(evidence));
+
+  return evidencePath;
+}
+
+async function writeGatePolicy(root: string): Promise<string> {
+  const policyPath = path.join(root, "gate-policy.json");
+  await writeFile(
+    policyPath,
+    JSON.stringify({
+      failOnNewMeasuredAtOrAbove: "P2",
+      neverFailOn: ["judged", "gatedForHuman"],
+      thresholds: {},
+    }),
+  );
+
+  return policyPath;
+}
+
 async function tempProjectRoot(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), "surface-cli-smoke-"));
   tempRoots.push(root);
@@ -191,9 +257,16 @@ async function runSurface(args: readonly string[], cwd: string): Promise<CliProc
   });
 }
 
-function fixedFixtureHtml(html: string): string {
-  return html
-    .replaceAll("low-contrast", "fixed-contrast")
-    .replaceAll("#b7bdd1", "#334155")
-    .replaceAll("intentionally fails contrast", "passes contrast");
+function isSyntheticSeededFinding(finding: {
+  readonly id?: unknown;
+  readonly issueType?: unknown;
+}) {
+  const id = typeof finding.id === "string" ? finding.id : "";
+  const issueType = typeof finding.issueType === "string" ? finding.issueType : "";
+
+  return (
+    id === "finding_button_contrast" ||
+    id.includes("seeded_low_contrast") ||
+    issueType === "seeded-low-contrast"
+  );
 }

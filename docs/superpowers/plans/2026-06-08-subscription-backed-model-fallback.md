@@ -46,10 +46,6 @@ Result/SurfaceError conventions, Beads issue `surface-669`.
   preserve detailed unavailable reasons.
 - Modify `packages/core/src/reconciliation.test.ts`: zero-finding channel and detailed unavailable
   reason coverage.
-- Create `packages/core/src/judged-runner.ts`: depth-based direct provider orchestration and MMR
-  fallback gating.
-- Create `packages/core/src/judged-runner.test.ts`: depth 3 retry, depth 5 reconciliation, no MMR
-  probe on direct success, unsupported MMR handling.
 - Create `packages/core/src/audit-runner.ts`: real audit orchestration.
 - Create `packages/core/src/audit-runner.test.ts`: no consent, local judged lenses, BYO precedence,
   hard policy blocks, channel policy blocks, subscription fallback, and no fixture findings.
@@ -60,8 +56,9 @@ Result/SurfaceError conventions, Beads issue `surface-669`.
 - Modify `packages/core/src/composition-factory.test.ts`: dependency injection, process runner
   propagation, audit runner closure, and BYO precedence.
 - Modify `packages/core/src/index.ts`: export new modules.
-- Modify `packages/cli/src/index.ts`: flags/env mapping, BYO resolver, direct provider discovery,
-  MMR fallback injection, real audit runner call, state persistence, and output disclosure.
+- Modify `packages/cli/src/index.ts`: flags/env mapping, direct provider discovery,
+  MMR fallback injection, real audit runner call, state persistence, and output disclosure. BYO/local
+  execution remains injectable core behavior unless the CLI grows a real adapter.
 - Modify `packages/cli/src/index.test.ts`: CLI config mapping, injected env/runner, discovery
   degradation, output redaction, and no seeded fixture path.
 - Modify `.env.example`, `docs/dev-setup.md`, `package.json`.
@@ -75,7 +72,7 @@ Result/SurfaceError conventions, Beads issue `surface-669`.
 
 Cover these exact cases:
 
-- Defaults: `model.fallback.mode = "off"`, `providerOrder = ["claude","codex","gemini","grok","antigravity"]`, `depth = 3`, `fallbackToMmr = true`, `egressPolicy.mode = "off"`, `screenshots = "blocked"`, `effectiveChannels = []`.
+- Defaults: `model.fallback.mode = "off"`, `providerOrder = ["claude","codex","gemini"]`, `depth = 3`, `fallbackToMmr = true`, `egressPolicy.mode = "off"`, `screenshots = "blocked"`, `effectiveChannels = []`.
 - Partial project layer `{ model: { fallback: { mode: "direct" }, egressPolicy: { mode: "text" } } }` fills required arrays and defaults.
 - User hard `mode: "off"` plus CLI `mode: "text-and-screenshots"` yields effective mode `off`.
   Project-only `screenshots: "redacted-only"` does not supply screenshot consent; effective
@@ -88,9 +85,8 @@ Cover these exact cases:
 - Project-only fallback defaults plus `--model-screenshots=redacted-only` or
   `SURFACE_MODEL_SCREENSHOTS=redacted-only` keep subscription fallback disabled; screenshot consent
   is not fallback/model-provider consent.
-- Default `model.fallback.mode = "off"` plus explicit env or user/global BYO/local model config
-  permits that BYO/local provider's own text egress, while keeping direct subscription channels
-  empty and suppressing MMR/subscription fallback.
+- Default `model.fallback.mode = "off"` plus injected BYO/local provider config permits that
+  provider's own text egress, while keeping direct subscription channels empty.
 - User/project hard allowlists intersect; `undefined` allowlists mean all channels for that layer.
 - Env/CLI denied channels narrow effective channels.
 - `providerOrder` rejects `anthropic`, `openai`, `local`, and `mmr`.
@@ -99,7 +95,8 @@ Cover these exact cases:
 - [ ] **Step 2: Implement schemas**
 
 Add `ModelChannelIdSchema` for all channels and `DirectSubscriptionChannelIdSchema` only for
-`claude`, `codex`, `gemini`, `grok`, and `antigravity`. `ModelFallbackConfigSchema.providerOrder`,
+configured direct CLI ids: `claude`, `codex`, and `gemini`; Codex currently resolves unavailable
+until a no-shell mode exists. `ModelFallbackConfigSchema.providerOrder`,
 `ModelFallbackConfigSchema.allowedChannels`, and `effectiveChannels` must use
 `DirectSubscriptionChannelIdSchema`; egress allow/deny policy may use `ModelChannelIdSchema`.
 
@@ -259,15 +256,14 @@ Expected: tests pass.
 Cover:
 
 - Discovery accepts only `DirectSubscriptionChannelId`.
-- Grok and Antigravity return `unsupported-capability` without completion invocation or artifact
-  egress until vetted no-artifact/no-tools/no-shell/no-persistent-writes probes exist.
-- Codex discovery uses `codex login status --json` then `codex --version`; it maps only explicit
-  supported semver ranges to canonical capabilities. `codex exec --help` is diagnostic-only and
-  never used as a safety decision. Unknown versions return `unsupported-capability`.
+- Grok and Antigravity are not built-in direct fallback channels until vetted
+  no-artifact/no-tools/no-shell/no-persistent-writes probes exist.
+- Codex built-in direct discovery returns `unsupported-capability` until Codex exposes a no-shell
+  completion mode; `codex exec --help` is diagnostic-only and never used as a safety decision.
 - Empty/malformed capability evidence returns `unsupported-capability`.
 - Missing binary returns `not-installed`; auth failure returns `auth-unavailable`.
-- Completion command uses no-tools, no-shell, no host/workspace writes, no persistent session writes,
-  and read-only/ephemeral controls.
+- Completion command uses supported read-only/no-tools controls from the CLI contract,
+  no host/workspace writes, no persistent session writes, and structured output parsing.
 - Injected runner is used for discovery and completion.
 - Timeout yields `model_request_failed` with `details.reason = "timeout"`.
 - Non-zero exit yields `model_request_failed` with `details.reason = "command-failed"`.
@@ -355,9 +351,9 @@ canonical capability JSON internally and fails closed unless it can prove:
 
 Successful `SubscriptionChannelAvailability` carries parsed capability. Unavailable records carry
 only sanitized reason/message, never raw stdout/stderr. Per-channel env allowlists are constants:
-`claude` may use isolated home vars plus `PATH`; `codex` may use isolated home vars plus `PATH`;
-`gemini` may use isolated home vars plus `PATH` and `NO_BROWSER`; `grok` and `antigravity` use no
-provider-specific env until their probes are vetted.
+`claude` may use isolated home vars plus `PATH`; `gemini` may use isolated home vars plus `PATH`
+and `NO_BROWSER`; `codex`, `grok`, and `antigravity` remain host-injected or MMR-review channels
+until sandboxed no-shell direct probes are vetted.
 
 Concrete initial probes are no-artifact and non-interactive:
 
@@ -366,17 +362,20 @@ Concrete initial probes are no-artifact and non-interactive:
   Then, only inside the enforced filesystem sandbox, run a fixed schema probe through
   `claude --print --output-format json --input-format text --disallowedTools "*" <fixed-prompt>`
   with a short timeout. Parse only the JSON response schema. Help output is diagnostic-only.
-- Codex: run `codex login status --json`, then `codex --version`, and map only explicit supported
-  semver ranges to a capability record. `codex exec --help` is diagnostic-only.
+- Codex: mark built-in direct fallback unsupported until Codex exposes a no-shell/no-tools
+  completion mode. Keep Codex available through host-injected/MMR review channels.
 - Gemini: run `NO_BROWSER=true gemini --version`, map only explicit supported semver ranges to a
-  capability record that includes `--prompt`, `--output-format json`, `--approval-mode plan`, and
-  `--sandbox`. Then, only inside the enforced filesystem sandbox, run a fixed schema probe through
-  `NO_BROWSER=true gemini --prompt <fixed-prompt> --output-format json --approval-mode plan --sandbox`
-  with a short timeout. Parse only the JSON response schema. Help output is diagnostic-only.
+  capability record that includes a fixed bridge prompt through `--prompt`, `--output-format json`,
+  `--approval-mode plan`, and `--sandbox`. Then, only inside the enforced filesystem sandbox, run a
+  fixed schema probe through
+  `NO_BROWSER=true gemini --prompt "Read the JSON request appended on stdin and answer according to that request." --output-format json --approval-mode plan --sandbox`
+  with the fixed probe JSON request on stdin and a short timeout. Parse only the JSON response
+  schema. Help output is diagnostic-only.
 
-Add tests that unknown Claude/Codex/Gemini versions fail closed, supported versions pass only through
-the explicit capability mapping, interactive/browser prompts time out as `auth-unavailable`, and
-help text is never parsed for safety decisions.
+Add tests that unknown Claude/Gemini versions fail closed, supported Claude/Gemini versions pass
+only through the explicit capability mapping, Codex direct discovery returns
+`unsupported-capability`, interactive/browser prompts time out as `auth-unavailable`, and help text
+is never parsed for safety decisions.
 
 - [ ] **Step 4: Implement completion**
 
@@ -392,6 +391,7 @@ failures mark prompt-file capability unsupported for that channel. Add a fake-fi
 unlink fails but chmod succeeds and the run still fails closed. Cleanup failure on thrown invocation
 still attempts wipe/unlink and reports a combined sanitized error with
 `details.cleanupFailed = true`, without prompt path or prompt content.
+Document that zero-filling is best-effort only on copy-on-write filesystems and SSDs.
 
 Raw or redacted binary screenshots are not sent in this revision. Screenshot support means
 redaction metadata can be included in text prompts and ledger entries can record
@@ -418,19 +418,19 @@ git commit -m "[surface-669] feat(core): add safe subscription cli provider"
 
 Expected: tests pass.
 
-## Task 5: MMR, Reconciliation, And Judged Runner
+## Task 5: MMR, Reconciliation, And Audit Runner
 
 **Files:** `packages/core/src/mmr-audit-fallback.ts`,
 `packages/core/src/mmr-audit-fallback.test.ts`, `packages/core/src/reconciliation.ts`,
-`packages/core/src/reconciliation.test.ts`, `packages/core/src/judged-runner.ts`,
-`packages/core/src/judged-runner.test.ts`, `packages/core/src/index.ts`
+`packages/core/src/reconciliation.test.ts`, `packages/core/src/audit-runner.ts`,
+`packages/core/src/audit-runner.test.ts`, `packages/core/src/index.ts`
 
 - [ ] **Step 1: Add failing tests**
 
 MMR probe tests verify no DOM/accessibility/screenshot artifacts are sent and `run()` returns
-`model_unavailable` with `details.reason = "unsupported-capability"`. Judged-runner tests cover
-depth 3 retry, depth 5 reconciliation, direct success skipping MMR probe, unsupported MMR without
-run, and preserving detailed unavailable reasons.
+`model_unavailable` with `details.reason = "unsupported-capability"`. Audit-runner tests cover
+depth 3 first-success behavior, depth 4 reconciliation, direct success skipping MMR probe,
+unsupported MMR without run, and preserving detailed unavailable reasons.
 
 Reconciliation tests cover an available channel with `findings: []` and detailed unavailable
 reasons.
@@ -440,18 +440,18 @@ reasons.
 Probe may inspect no-artifact MMR capability metadata, but this revision always reports
 unsupported and never calls `mmr review` or sends captured artifacts.
 
-- [ ] **Step 3: Update reconciliation and judged runner**
+- [ ] **Step 3: Update reconciliation and audit runner**
 
 Remove `.min(1)` from successful reconciliation channel findings. Preserve detailed unavailable
-reasons in judged-runner output and ledger even if reconciliation uses coarser internal reasons.
+reasons in audit-runner output and ledger even if reconciliation uses coarser internal reasons.
 
 - [ ] **Step 4: Verify and commit**
 
 Run:
 
 ```bash
-pnpm --filter @zigrivers/surface-core test -- src/mmr-audit-fallback.test.ts src/reconciliation.test.ts src/judged-runner.test.ts
-git add packages/core/src/mmr-audit-fallback.ts packages/core/src/mmr-audit-fallback.test.ts packages/core/src/reconciliation.ts packages/core/src/reconciliation.test.ts packages/core/src/judged-runner.ts packages/core/src/judged-runner.test.ts packages/core/src/index.ts
+pnpm --filter @zigrivers/surface-core test -- src/mmr-audit-fallback.test.ts src/reconciliation.test.ts src/audit-runner.test.ts
+git add packages/core/src/mmr-audit-fallback.ts packages/core/src/mmr-audit-fallback.test.ts packages/core/src/reconciliation.ts packages/core/src/reconciliation.test.ts packages/core/src/audit-runner.ts packages/core/src/audit-runner.test.ts packages/core/src/index.ts
 git commit -m "[surface-669] feat(core): orchestrate judged model channels"
 ```
 
@@ -532,8 +532,8 @@ program creation into `auditTarget()` as `cliRuntime`.
 
 `--model-screenshots=blocked|redacted-only` maps to runtime screenshot policy. Bare
 `--model-screenshots` is accepted as shorthand for `redacted-only`; `--model-screenshots=blocked`
-or `--no-model-screenshots` explicitly blocks screenshot metadata for the run. The `redacted-only`
-value maps to runtime `model.egressPolicy.screenshots = "redacted-only"` and
+explicitly blocks screenshot metadata for the run. The `redacted-only` value maps to runtime
+`model.egressPolicy.screenshots = "redacted-only"` and
 `model.egressPolicy.mode = "text-and-screenshots"` unless a harder policy blocks it.
 `SURFACE_MODEL_SCREENSHOTS=redacted-only` mirrors the same one-run opt-in by setting runtime
 `screenshots = "redacted-only"` and `mode = "text-and-screenshots"` unless a harder policy blocks
@@ -541,18 +541,14 @@ it. Add config and CLI tests for both flag and env mappings.
 
 - [ ] **Step 3: Resolve providers**
 
-Use `resolveModelProviderConfig({ provider, model, baseUrl, env })`. Explicit BYO/local provider
-configuration from CLI, env, or user/global config is text egress consent for that specific channel
-unless user/project hard policy blocks it. Project-only BYO/local config is not consent. If BYO/local
-is configured from an allowed source, subscription fallback is suppressed for this run whether the
-BYO channel is permitted or blocked. If BYO is permitted, create it through injected
-`modelProviderFactory` or injected `modelProvider`. If BYO is blocked, pass no provider and record a
-channel-policy blocked reason. Add tests for BYO env/user config working without subscription
-fallback and project-only BYO config staying measured-only.
+Do not auto-create a stock CLI BYO provider from raw API-key env vars unless a real completion
+adapter exists. Explicit BYO/local execution is supported through injected `modelProviderFactory` or
+injected `modelProvider`, and those injected providers are checked against effective egress policy
+before artifact egress. Project-only BYO/local config is not consent.
 
 Create a lazy `resolveSubscriptionProviders` thunk only when an explicit fallback consent source is
-present, effective egress is not off, fallback mode is `direct` or `auto`, and no BYO/local primary
-is configured. Explicit fallback consent may come from CLI/env fallback controls, CLI/env channel
+present, effective egress is not off, and fallback mode is `direct` or `auto`. Explicit fallback
+consent may come from CLI/env fallback controls, CLI/env channel
 selection, or explicit user/global fallback config; project-only fallback config,
 `--model-screenshots=redacted-only`, bare `--model-screenshots`, and
 `SURFACE_MODEL_SCREENSHOTS=redacted-only` are not fallback consent. Do not invoke the thunk in CLI
@@ -594,7 +590,7 @@ Expected: tests pass.
 - [ ] **Step 1: Add docs**
 
 Document `SURFACE_MODEL_FALLBACK=off|direct|mmr|auto`,
-`SURFACE_MODEL_CHANNELS=claude,codex,gemini,grok,antigravity`,
+`SURFACE_MODEL_CHANNELS=claude,codex,gemini`,
 `SURFACE_MODEL_DEPTH=3`, and `SURFACE_MODEL_SCREENSHOTS=blocked|redacted-only`. State that normal
 tests use fake runners and real subscription CLIs are never invoked in CI. Document that
 `SURFACE_MODEL_SCREENSHOTS=redacted-only` also raises runtime model egress mode to
@@ -663,7 +659,6 @@ git add packages/core/src/model-egress.ts packages/core/src/model-egress.test.ts
 git add packages/core/src/subscription-cli-provider.ts packages/core/src/subscription-cli-provider.test.ts
 git add packages/core/src/mmr-audit-fallback.ts packages/core/src/mmr-audit-fallback.test.ts
 git add packages/core/src/reconciliation.ts packages/core/src/reconciliation.test.ts
-git add packages/core/src/judged-runner.ts packages/core/src/judged-runner.test.ts
 git add packages/core/src/audit-runner.ts packages/core/src/audit-runner.test.ts
 git add packages/core/src/interfaces.ts packages/core/src/composition-factory.ts packages/core/src/composition-factory.test.ts
 git add packages/core/src/index.ts packages/cli/src/index.ts packages/cli/src/index.test.ts

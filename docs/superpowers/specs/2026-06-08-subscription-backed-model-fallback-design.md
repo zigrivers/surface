@@ -75,7 +75,8 @@ Subscription fallback then plugs into the same model-provider boundary.
 Provider selection order:
 
 1. BYO API key or local endpoint, when configured.
-2. Direct subscription CLIs: Claude, Codex, Gemini, Grok, Antigravity.
+2. Direct subscription CLIs: Claude and Gemini initially; Codex, Grok, and Antigravity remain
+   host-injected/MMR channels until vetted no-shell direct contracts exist.
 3. Compatible MMR audit fallback when direct providers are unavailable or cannot handle the
    requested audit.
 4. Measured-only degradation.
@@ -167,8 +168,8 @@ channel list is:
 Extends Surface config with subscription fallback defaults:
 
 - `mode`: `off`, `direct`, `mmr`, or `auto`.
-- `providerOrder`: ordered direct subscription CLI channel ids: `claude`, `codex`, `gemini`,
-  `grok`, and `antigravity`. It does not accept BYO/local ids or `mmr`.
+- `providerOrder`: ordered built-in direct subscription CLI channel ids: `claude`, `codex`, and
+  `gemini`. It does not accept BYO/local ids, `grok`, `antigravity`, or `mmr`.
 - `allowedChannels`: optional allowlist.
 - `timeoutMs`: per-channel timeout.
 - `depth`: judged model depth from 1 to 5. Depth 1-3 uses first-success direct channel retry;
@@ -199,7 +200,9 @@ existing `anthropic`, `openai`, and `local` enum. Use a canonical channel type a
 responses, availability records, ledger entries, and reconciliation channels:
 
 - API/local providers: `anthropic`, `openai`, `local`.
-- Subscription channels: `claude`, `codex`, `gemini`, `grok`, `antigravity`.
+- Subscription/model channels: `claude`, `codex`, `gemini`, `grok`, `antigravity`; built-in direct
+  fallback initially implements `claude` and `gemini`, while `codex` resolves unavailable until a
+  no-shell completion mode exists.
 - Fallback coordinator: `mmr`.
 
 The public `ModelProvider` interface can remain the lens boundary, but any provider that can receive
@@ -218,10 +221,10 @@ Initial channel support is capability-declared, not assumed:
 | Channel | Discovery/Auth Probe | Invocation Requirement | Unsupported When |
 | --- | --- | --- | --- |
 | `claude` | `claude --version` plus sandboxed fixed schema probe using `claude --print --output-format json --input-format text --disallowedTools "*"`; help is diagnostic-only | Must match an explicit supported semver capability mapping for JSON output, no tools, no shell, no host/workspace or persistent session writes, no memory, neutral cwd, safe prompt transport | unknown version or probe cannot prove every required control |
-| `codex` | `codex login status --json` plus `codex --version` through injected runner; `exec --help` is diagnostic-only | Must match an explicit supported semver capability mapping for read-only/ephemeral/no-tools/no-shell/no-memory execution with no workspace write access | unknown version or probe cannot prove read-only/ephemeral/no-tools/no-shell/no-memory controls |
-| `gemini` | `NO_BROWSER=true gemini --version` plus sandboxed fixed schema probe using `gemini --prompt <fixed> --output-format json --approval-mode plan --sandbox`; help is diagnostic-only | Must match an explicit supported semver capability mapping for non-interactive JSON output, no tools, no shell, no host/workspace or persistent session writes, no memory, and bounded timeout | unknown version, browser/interactive auth, or probe cannot prove every required control |
-| `grok` | Internal no-artifact auth/help probe once safe contract is confirmed | Must support prompt-file or stdin, JSON output, no memory, no tools, no shell, no host/workspace or persistent session writes | probe cannot prove every required control |
-| `antigravity` | Internal no-artifact auth/help probe once safe contract is confirmed | Must support print/non-interactive execution with no tools, no shell, no host/workspace or persistent session writes, no memory, and no unsafe permission bypass | probe cannot prove every required control |
+| `codex` | Host-injected or MMR-review channel until Codex exposes a no-shell/no-tools direct completion mode | Not a built-in direct fallback channel | current `codex exec` remains an agent surface with model-generated shell capability |
+| `gemini` | `NO_BROWSER=true gemini --version` plus sandboxed fixed schema probe using `gemini --prompt "Read the JSON request appended on stdin and answer according to that request." --output-format json --approval-mode plan --sandbox` with the fixed probe JSON request on stdin; help is diagnostic-only | Must match an explicit supported semver capability mapping for non-interactive JSON output, no tools, no shell, no host/workspace or persistent session writes, no memory, and bounded timeout. Runtime audit prompts use the same fixed bridge prompt with the sanitized JSON request on stdin. | unknown version, browser/interactive auth, or probe cannot prove every required control |
+| `grok` | Host-injected or MMR-review channel until a sandboxed direct contract exists | Not a built-in direct fallback channel | direct CLI contract unavailable |
+| `antigravity` | Host-injected or MMR-review channel until a sandboxed direct contract exists | Not a built-in direct fallback channel | direct CLI contract unavailable |
 | `mmr` | `mmr config test` plus audit capability probe | Must support UI-audit artifact input and normalized finding JSON | only `mmr review` diff input is available |
 
 A channel listed in `providerOrder` but missing a compatible capability is recorded as unavailable
@@ -281,6 +284,8 @@ Large prompts and artifacts must not be placed directly in argv. The delivery co
 - When wiping prompt files, overwrite the full original byte range with zero bytes and call `fsync`
   or `fdatasync` on the file descriptor before unlinking. Expected unsupported sync errors such as
   `EINVAL` or `ENOTSUP` may be tolerated only when overwrite and unlink succeed.
+- Treat prompt-file wiping as best-effort damage control only: copy-on-write filesystems and SSD
+  wear-leveling can retain previous blocks even after overwrite, sync, and unlink succeed.
 - If prompt-file cleanup cannot be verified, return `model_request_failed` with
   `details.reason = "prompt-cleanup-failed"`, suppress the normal success ledger entry, and
   preserve only sanitized cleanup diagnostics.
@@ -350,6 +355,11 @@ subscription credentials, auth probe output, or unredacted artifact excerpts.
 
 ## Data Flow
 
+The subscription-backed model path is supported by `surface audit`. The legacy `surface run`
+pipeline does not execute the audit-runner model egress, redaction, direct-provider, or MMR fallback
+path; if model egress would be enabled for `surface run`, the CLI fails closed and points users to
+`surface audit`.
+
 For `surface audit`:
 
 1. Resolve default config and hard egress policy.
@@ -404,7 +414,7 @@ Suggested run flags:
 Suggested env vars:
 
 - `SURFACE_MODEL_FALLBACK=off|direct|mmr|auto`
-- `SURFACE_MODEL_CHANNELS=claude,codex,gemini,grok,antigravity`
+- `SURFACE_MODEL_CHANNELS=claude,codex,gemini`
 - `SURFACE_MODEL_DEPTH=3`
 - `SURFACE_MODEL_SCREENSHOTS=redacted-only`
 
