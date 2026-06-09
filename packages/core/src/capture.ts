@@ -580,10 +580,11 @@ export function createAgentBrowserCaptureBackend(
 
         const snapshot = await runAgentBrowserJson(runCommand, sessionName, "snapshot", ["-i"]);
         const dom = await runAgentBrowserJson(runCommand, sessionName, "get", ["html", "body"]);
-        const styles = await runAgentBrowserJson(runCommand, sessionName, "get", [
-          "styles",
-          "body",
-        ]);
+        const styles = await agentBrowserComputedStyleSnapshot(
+          runCommand,
+          sessionName,
+          captureOptions.computedStyleLimit ?? 2_000,
+        );
         const landedUrl = await runAgentBrowserJson(runCommand, sessionName, "get", ["url"]);
         const verification = targetVerificationForAgentBrowser(
           targetUrl,
@@ -1795,165 +1796,181 @@ interface BrowserQueryableRoot {
   querySelectorAll(selector: string): ArrayLike<BrowserElement>;
 }
 
+async function agentBrowserComputedStyleSnapshot(
+  runCommand: AgentBrowserCommandRunner,
+  sessionName: string,
+  limit: number,
+): Promise<unknown> {
+  const result = await runAgentBrowserJson(runCommand, sessionName, "eval", [
+    `(${computedStyleSnapshotInPage.toString()})(${JSON.stringify(limit)})`,
+  ]);
+
+  if (result !== null && typeof result === "object" && "result" in result) {
+    return (result as { readonly result?: unknown }).result;
+  }
+
+  return result;
+}
+
 async function computedStyleSnapshot(page: PlaywrightPage, limit: number): Promise<unknown> {
-  return page.evaluate((snapshotLimit) => {
-    const browser = globalThis as unknown as BrowserEvaluateGlobal;
-    const siblingIndexCache = new WeakMap<object, Map<BrowserElement, number>>();
-    const parentFor = (element: BrowserElement): BrowserElement | BrowserQueryableRoot | null => {
-      if (element.parentElement !== null) {
-        return element.parentElement;
-      }
+  return page.evaluate(computedStyleSnapshotInPage, limit);
+}
 
-      const parentNode = element.parentNode;
+function computedStyleSnapshotInPage(snapshotLimit: number): unknown {
+  const browser = globalThis as unknown as BrowserEvaluateGlobal;
+  const siblingIndexCache = new WeakMap<object, Map<BrowserElement, number>>();
+  const parentFor = (element: BrowserElement): BrowserElement | BrowserQueryableRoot | null => {
+    if (element.parentElement !== null) {
+      return element.parentElement;
+    }
 
-      if (parentNode?.host !== undefined) {
-        return parentNode;
-      }
+    const parentNode = element.parentNode;
 
-      const root = element.getRootNode?.();
+    if (parentNode?.host !== undefined) {
+      return parentNode;
+    }
 
-      return root?.host !== undefined ? root : null;
-    };
-    const nthOfType = (element: BrowserElement): number => {
-      const parent = parentFor(element);
+    const root = element.getRootNode?.();
 
-      if (parent === null) {
-        return 1;
-      }
+    return root?.host !== undefined ? root : null;
+  };
+  const nthOfType = (element: BrowserElement): number => {
+    const parent = parentFor(element);
 
-      const cached = siblingIndexCache.get(parent)?.get(element);
+    if (parent === null) {
+      return 1;
+    }
 
-      if (cached !== undefined) {
-        return cached;
-      }
+    const cached = siblingIndexCache.get(parent)?.get(element);
 
-      const indices = new Map<BrowserElement, number>();
-      const counts = new Map<string, number>();
+    if (cached !== undefined) {
+      return cached;
+    }
 
-      for (const sibling of Array.from(parent.children ?? [])) {
-        const tagName = sibling.tagName;
-        const next = (counts.get(tagName) ?? 0) + 1;
+    const indices = new Map<BrowserElement, number>();
+    const counts = new Map<string, number>();
 
-        counts.set(tagName, next);
-        indices.set(sibling, next);
-      }
+    for (const sibling of Array.from(parent.children ?? [])) {
+      const tagName = sibling.tagName;
+      const next = (counts.get(tagName) ?? 0) + 1;
 
-      siblingIndexCache.set(parent, indices);
+      counts.set(tagName, next);
+      indices.set(sibling, next);
+    }
 
-      return indices.get(element) ?? 1;
-    };
-    const shadowHostFor = (element: BrowserElement): BrowserElement | undefined => {
-      if (element.parentElement !== null) {
-        return undefined;
-      }
+    siblingIndexCache.set(parent, indices);
 
-      const root = element.getRootNode?.();
+    return indices.get(element) ?? 1;
+  };
+  const shadowHostFor = (element: BrowserElement): BrowserElement | undefined => {
+    if (element.parentElement !== null) {
+      return undefined;
+    }
 
-      return root?.host;
-    };
-    const segmentFor = (element: BrowserElement): string => {
-      const tagName = element.tagName.toLowerCase();
-      if (element.parentElement === null && shadowHostFor(element) === undefined) {
-        return tagName;
-      }
-      return tagName + ":nth-of-type(" + nthOfType(element) + ")";
-    };
-    const selectorCache = new WeakMap<BrowserElement, string>();
-    const selectorFor = (element: BrowserElement): string => {
-      const cached = selectorCache.get(element);
+    const root = element.getRootNode?.();
 
-      if (cached !== undefined) {
-        return cached;
-      }
+    return root?.host;
+  };
+  const segmentFor = (element: BrowserElement): string => {
+    const tagName = element.tagName.toLowerCase();
+    if (element.parentElement === null && shadowHostFor(element) === undefined) {
+      return tagName;
+    }
+    return tagName + ":nth-of-type(" + nthOfType(element) + ")";
+  };
+  const selectorCache = new WeakMap<BrowserElement, string>();
+  const selectorFor = (element: BrowserElement): string => {
+    const cached = selectorCache.get(element);
 
-      const segment = segmentFor(element);
-      const parent = element.parentElement;
-      const shadowHost = shadowHostFor(element);
-      const selector =
-        parent !== null
-          ? `${selectorFor(parent)} > ${segment}`
-          : shadowHost !== undefined
-            ? `${selectorFor(shadowHost)} >>> ${segment}`
-            : segment;
+    if (cached !== undefined) {
+      return cached;
+    }
 
-      selectorCache.set(element, selector);
+    const segment = segmentFor(element);
+    const parent = element.parentElement;
+    const shadowHost = shadowHostFor(element);
+    const selector =
+      parent !== null
+        ? `${selectorFor(parent)} > ${segment}`
+        : shadowHost !== undefined
+          ? `${selectorFor(shadowHost)} >>> ${segment}`
+          : segment;
 
-      return selector;
-    };
-    const checkElementVisibility = (element: BrowserElement): boolean | undefined => {
-      if (typeof element.checkVisibility !== "function") {
-        return undefined;
-      }
+    selectorCache.set(element, selector);
 
-      return element.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true });
-    };
-    const isVisible = (
-      element: BrowserElement,
-      styles: BrowserStyle,
-      precomputedVisibility: boolean | undefined,
-    ): boolean => {
-      if (precomputedVisibility === false) {
-        return false;
-      }
-      if (
-        styles.display === "none" ||
-        styles.visibility === "hidden" ||
-        styles.visibility === "collapse"
-      ) {
-        return false;
-      }
-      if (precomputedVisibility !== undefined) {
-        return precomputedVisibility;
-      }
-      return Boolean(
-        element.offsetWidth || element.offsetHeight || element.getClientRects().length,
-      );
-    };
-    function* walkElements(root: BrowserQueryableRoot): Generator<BrowserElement> {
-      for (const element of Array.from(root.querySelectorAll("*"))) {
-        yield element;
+    return selector;
+  };
+  const checkElementVisibility = (element: BrowserElement): boolean | undefined => {
+    if (typeof element.checkVisibility !== "function") {
+      return undefined;
+    }
 
-        if (element.shadowRoot !== undefined && element.shadowRoot !== null) {
-          yield* walkElements(element.shadowRoot);
-        }
+    return element.checkVisibility({ checkOpacity: false, checkVisibilityCSS: true });
+  };
+  const isVisible = (
+    element: BrowserElement,
+    styles: BrowserStyle,
+    precomputedVisibility: boolean | undefined,
+  ): boolean => {
+    if (precomputedVisibility === false) {
+      return false;
+    }
+    if (
+      styles.display === "none" ||
+      styles.visibility === "hidden" ||
+      styles.visibility === "collapse"
+    ) {
+      return false;
+    }
+    if (precomputedVisibility !== undefined) {
+      return precomputedVisibility;
+    }
+    return Boolean(element.offsetWidth || element.offsetHeight || element.getClientRects().length);
+  };
+  function* walkElements(root: BrowserQueryableRoot): Generator<BrowserElement> {
+    for (const element of Array.from(root.querySelectorAll("*"))) {
+      yield element;
+
+      if (element.shadowRoot !== undefined && element.shadowRoot !== null) {
+        yield* walkElements(element.shadowRoot);
       }
     }
-    const visible: { readonly element: BrowserElement; readonly styles: BrowserStyle }[] = [];
-    for (const element of walkElements(browser.document)) {
-      const precomputedVisibility = checkElementVisibility(element);
-      if (precomputedVisibility === false) {
-        continue;
-      }
-
-      const styles = browser.getComputedStyle(element);
-      if (!isVisible(element, styles, precomputedVisibility)) {
-        continue;
-      }
-      visible.push({ element, styles });
-      if (visible.length >= snapshotLimit) {
-        break;
-      }
+  }
+  const visible: { readonly element: BrowserElement; readonly styles: BrowserStyle }[] = [];
+  for (const element of walkElements(browser.document)) {
+    const precomputedVisibility = checkElementVisibility(element);
+    if (precomputedVisibility === false) {
+      continue;
     }
-    return visible.map(({ element, styles }, index) => {
-      return {
-        backgroundColor: styles.backgroundColor,
-        clientWidth: element.clientWidth,
-        color: styles.color,
-        display: styles.display,
-        fontFamily: styles.fontFamily,
-        fontSize: styles.fontSize,
-        id: element.id,
-        index,
-        minWidth: styles.minWidth,
-        overflowX: styles.overflowX,
-        scrollWidth: element.scrollWidth,
-        selector: selectorFor(element),
-        tagName: element.tagName.toLowerCase(),
-        visibility: styles.visibility,
-        width: styles.width,
-      };
-    });
-  }, limit);
+
+    const styles = browser.getComputedStyle(element);
+    if (!isVisible(element, styles, precomputedVisibility)) {
+      continue;
+    }
+    visible.push({ element, styles });
+    if (visible.length >= snapshotLimit) {
+      break;
+    }
+  }
+  return visible.map(({ element, styles }, index) => {
+    return {
+      backgroundColor: styles.backgroundColor,
+      clientWidth: element.clientWidth,
+      color: styles.color,
+      display: styles.display,
+      fontFamily: styles.fontFamily,
+      fontSize: styles.fontSize,
+      id: element.id,
+      index,
+      minWidth: styles.minWidth,
+      overflowX: styles.overflowX,
+      scrollWidth: element.scrollWidth,
+      selector: selectorFor(element),
+      tagName: element.tagName.toLowerCase(),
+      visibility: styles.visibility,
+      width: styles.width,
+    };
+  });
 }
 
 async function connectWebSocketRoute(route: PlaywrightWebSocketRoute): Promise<void> {
