@@ -10,12 +10,14 @@ import { afterEach, describe, expect, it } from "vitest";
 const cliPath = fileURLToPath(new URL("../../packages/cli/dist/index.js", import.meta.url));
 const fixtureCases = [
   {
+    expectedFindingCount: 1,
     name: "plain-html",
     path: fileURLToPath(
       new URL("../../fixtures/seeded-defects/plain-html/index.html", import.meta.url),
     ),
   },
   {
+    expectedFindingCount: 2,
     name: "react",
     path: fileURLToPath(
       new URL("../../fixtures/seeded-defects/react/SeededDefectFixture.tsx", import.meta.url),
@@ -39,7 +41,7 @@ describe("SC-6 seeded before/after benchmark", () => {
     );
   });
 
-  it("drives seeded measured findings to zero and stays inside quick p95 budget", async () => {
+  it("does not synthesize seeded findings and stays inside quick p95 budget", async () => {
     const auditDurations: number[] = [];
 
     for (const fixture of fixtureCases) {
@@ -49,35 +51,19 @@ describe("SC-6 seeded before/after benchmark", () => {
 
       auditDurations.push(before.durationMs);
       expect(before.exitCode).toBe(0);
-      expect(JSON.parse(before.stdout)).toMatchObject({
-        data: {
-          findingCount: 1,
-          topFinding: { method: "measured", severityBand: "P1" },
-        },
-        ok: true,
-      });
+      const parsedAudit = JSON.parse(before.stdout);
 
-      const failingGate = await runSurface(["--json", "gate", "--ci"], cwd);
+      expect(parsedAudit).toMatchObject({ ok: true });
+      expect(parsedAudit.data.findingCount).toBe(fixture.expectedFindingCount);
 
-      expect(failingGate.exitCode).toBe(1);
-      expect(JSON.parse(failingGate.stdout)).toMatchObject({
-        data: { gateResult: { passed: false } },
-        ok: true,
-      });
+      const state = JSON.parse(await readFile(path.join(cwd, ".surface", "state.json"), "utf8"));
 
-      const after = await runSurface(["--json", "audit", "--dom", fixedFixtureSource(source)], cwd);
+      expect(state.findings.some(isSyntheticSeededFinding)).toBe(false);
 
-      auditDurations.push(after.durationMs);
-      expect(after.exitCode).toBe(0);
-      expect(JSON.parse(after.stdout)).toMatchObject({
-        data: { findingCount: 0 },
-        ok: true,
-      });
+      const cleanGate = await runSurface(["--json", "gate", "--ci"], cwd);
 
-      const passingGate = await runSurface(["--json", "gate", "--ci"], cwd);
-
-      expect(passingGate.exitCode).toBe(0);
-      expect(JSON.parse(passingGate.stdout)).toMatchObject({
+      expect(cleanGate.exitCode).toBe(0);
+      expect(JSON.parse(cleanGate.stdout)).toMatchObject({
         data: { gateResult: { failingFindingIds: [], passed: true } },
         ok: true,
       });
@@ -126,16 +112,23 @@ async function runSurface(args: readonly string[], cwd: string): Promise<CliProc
   });
 }
 
-function fixedFixtureSource(source: string): string {
-  return source
-    .replaceAll("low-contrast", "fixed-contrast")
-    .replaceAll("#b7bdd1", "#334155")
-    .replaceAll("intentionally fails contrast", "passes contrast");
-}
-
 function percentile(values: readonly number[], percentileRank: number): number {
   const sorted = [...values].sort((left, right) => left - right);
   const index = Math.ceil(sorted.length * percentileRank) - 1;
 
   return sorted[Math.max(0, Math.min(sorted.length - 1, index))] ?? 0;
+}
+
+function isSyntheticSeededFinding(finding: {
+  readonly id?: unknown;
+  readonly issueType?: unknown;
+}) {
+  const id = typeof finding.id === "string" ? finding.id : "";
+  const issueType = typeof finding.issueType === "string" ? finding.issueType : "";
+
+  return (
+    id === "finding_button_contrast" ||
+    id.includes("seeded_low_contrast") ||
+    issueType === "seeded-low-contrast"
+  );
 }

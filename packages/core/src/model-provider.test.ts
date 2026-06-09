@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import { isErr, isOk, ok } from "./errors.js";
 import {
   JUDGED_COVERAGE_UNAVAILABLE_MESSAGE,
+  ModelAvailabilitySchema,
+  ModelResponseSchema,
   createConfiguredModelProvider,
   createUnavailableModelProvider,
   modelSkipForLens,
@@ -96,14 +98,100 @@ describe("model provider abstraction", () => {
 
     expect(isOk(availability)).toBe(true);
     expect(availability).toMatchObject({
-      value: { available: true, provider: "openai", model: "quality-model" },
+      value: {
+        available: true,
+        provider: "openai",
+        model: "quality-model",
+        channelId: "openai",
+        sourceKind: "api",
+      },
     });
     expect(isOk(completion)).toBe(true);
     expect(completion).toMatchObject({
       value: {
+        channelId: "openai",
         model: "quality-model",
         provider: "openai",
+        sourceKind: "api",
         text: "accepted:Find visual hierarchy issues.",
+      },
+    });
+  });
+
+  it("accepts subscription provider metadata and unavailable channel metadata", () => {
+    expect(
+      ModelResponseSchema.parse({
+        provider: "codex",
+        channelId: "codex",
+        sourceKind: "subscription-cli",
+        model: "codex-subscription",
+        text: "[]",
+      }),
+    ).toMatchObject({
+      provider: "codex",
+      channelId: "codex",
+      sourceKind: "subscription-cli",
+    });
+
+    expect(
+      ModelAvailabilitySchema.parse({
+        available: true,
+        provider: "codex",
+        channelId: "codex",
+        sourceKind: "subscription-cli",
+        model: "codex-subscription",
+      }),
+    ).toMatchObject({
+      available: true,
+      provider: "codex",
+      channelId: "codex",
+      sourceKind: "subscription-cli",
+    });
+
+    expect(
+      ModelAvailabilitySchema.parse({
+        available: false,
+        reason: "auth-unavailable",
+        message: "codex login is unavailable",
+        channelId: "codex",
+        sourceKind: "subscription-cli",
+      }),
+    ).toMatchObject({
+      available: false,
+      reason: "auth-unavailable",
+      channelId: "codex",
+      sourceKind: "subscription-cli",
+    });
+  });
+
+  it("normalizes legacy BYO adapter responses with channel metadata", async () => {
+    const provider = createConfiguredModelProvider(
+      {
+        credentialRef: "env:ANTHROPIC_API_KEY",
+        model: "claude-sonnet",
+        provider: "anthropic",
+      },
+      (request) => {
+        expect(request.responseFormat).toEqual({ type: "json" });
+        return ok({ provider: "anthropic", model: "claude-sonnet", text: "[]" });
+      },
+    );
+
+    const completion = await provider.complete({
+      prompt: {
+        instructions: "Return JSON findings.",
+        input: {},
+      },
+      responseFormat: { type: "json" },
+    });
+
+    expect(completion).toMatchObject({
+      value: {
+        provider: "anthropic",
+        channelId: "anthropic",
+        sourceKind: "api",
+        model: "claude-sonnet",
+        text: "[]",
       },
     });
   });

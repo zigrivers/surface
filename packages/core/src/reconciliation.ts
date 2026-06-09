@@ -22,7 +22,7 @@ export const ReconciliationChannelSchema = z.discriminatedUnion("status", [
     .object({
       id: nonEmptyStringSchema,
       status: z.literal("available"),
-      findings: z.array(FindingSchema).min(1),
+      findings: z.array(FindingSchema),
     })
     .strict(),
   z

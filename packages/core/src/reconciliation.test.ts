@@ -168,6 +168,27 @@ describe("ReconciliationService", () => {
       ReconciliationInputSchema.safeParse({
         channels: [{ id: "codex", status: "available", findings: [] }],
       }).success,
-    ).toBe(false);
+    ).toBe(true);
+  });
+
+  it("accepts successful channels with zero findings", () => {
+    const service = createReconciliationService();
+
+    const result = service.reconcile({
+      channels: [{ id: "codex", status: "available", findings: [] }],
+    });
+
+    expect(isOk(result)).toBe(true);
+
+    if (!isOk(result)) {
+      return;
+    }
+
+    expect(result.value).toMatchObject({
+      participatedChannels: ["codex"],
+      findings: [],
+      questions: [],
+      unavailableChannels: [],
+    });
   });
 });

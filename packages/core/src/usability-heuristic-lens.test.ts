@@ -52,6 +52,7 @@ describe("usability heuristic lens", () => {
       });
 
       expect(isOk(result)).toBe(true);
+      expect(requests[0]?.responseFormat).toEqual({ type: "json" });
       expect(requests[0]?.prompt.instructions).toContain("usability");
       const modelInput = requests[0]?.prompt.input as
         | { readonly heuristic?: { readonly guidance?: unknown; readonly id?: unknown } }
@@ -248,24 +249,43 @@ describe("usability heuristic lens", () => {
     expect(unreadable).toMatchObject({ error: { code: "capture_failed" } });
   });
 
-  it("returns a capture error for redacted DOM snapshot artifacts", async () => {
+  it("uses redacted DOM snapshot artifacts as sanitized model input", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "surface-usability-redacted-"));
+    const requests: ModelRequest[] = [];
 
     try {
       const domPath = path.join(root, "dom.html");
-      await writeFile(domPath, `<main id="checkout"><button>Pay now</button></main>`);
+      await writeFile(
+        domPath,
+        `<main id="checkout" data-token="sk-live-secret"><button>Pay now</button></main>`,
+      );
       const result = await createUsabilityHeuristicLens().evaluate({
         capture: {
           ...captureWithDom(domPath),
-          artifacts: [{ id: "dom", type: "dom-snapshot", path: domPath, redacted: true }],
+          artifacts: [
+            {
+              id: "dom",
+              path: domPath,
+              redacted: true,
+              redaction: {
+                boundingBoxesVerified: true,
+                maskedClasses: ["token"],
+                safeNoSensitiveRegions: false,
+                status: "redacted",
+                unsafeRegions: [],
+              },
+              type: "dom-snapshot",
+            },
+          ],
         },
         config: resolveSurfaceConfig(),
         evidence: [],
         knowledge,
-        model: modelWithText(JSON.stringify([])),
+        model: modelWithText(JSON.stringify([]), requests),
       });
 
-      expect(result).toMatchObject({ error: { code: "capture_failed" } });
+      expect(result).toEqual(ok([]));
+      expect(JSON.stringify(requests[0]?.prompt.input)).not.toContain("sk-live-secret");
     } finally {
       await rm(root, { force: true, recursive: true });
     }
@@ -283,7 +303,14 @@ describe("usability heuristic lens", () => {
         evidence: [],
         knowledge,
         model: {
-          availability: () => ok({ available: true, provider: "local", model: "reviewer" }),
+          availability: () =>
+            ok({
+              available: true,
+              channelId: "local",
+              provider: "local",
+              model: "reviewer",
+              sourceKind: "local",
+            }),
           complete: () => err(createSurfaceError("model_request_failed", "model request failed")),
         },
       });
@@ -406,12 +433,21 @@ async function evaluateWithModelText(
 
 function modelWithText(text: string, requests: ModelRequest[] = []): ModelProvider {
   return {
-    availability: () => ok({ available: true, provider: "local", model: "reviewer" }),
+    availability: () =>
+      ok({
+        available: true,
+        channelId: "local",
+        provider: "local",
+        model: "reviewer",
+        sourceKind: "local",
+      }),
     complete: (request) => {
       requests.push(request);
       return ok({
+        channelId: "local",
         provider: "local",
         model: "reviewer",
+        sourceKind: "local",
         text,
       });
     },

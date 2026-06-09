@@ -1,5 +1,7 @@
+import { existsSync } from "node:fs";
 import path from "node:path";
 import { readdir, stat } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 
 import {
   createAgentBrowserCliDriver,
@@ -37,6 +39,12 @@ import {
   type CaptureService,
 } from "./capture.js";
 import {
+  createAuditRunner,
+  type AuditRunner,
+  type ModelProviderFactory,
+  type ResolveSubscriptionProviders,
+} from "./audit-runner.js";
+import {
   DEFAULT_PIPELINE_STAGE_DEFINITIONS,
   createNoopPipelineHandlers,
   createPipelineOrchestrator,
@@ -60,8 +68,14 @@ import {
   createFindingsMarkdownRenderer,
   createValidationReportMarkdownRenderer,
 } from "./report-renderers.js";
-import { createFileStateStore } from "./state-store.js";
+import { SURFACE_STATE_DIR, createFileStateStore } from "./state-store.js";
 import type { TrackedFinding } from "./tracked-findings.js";
+import { createMmrAuditFallback, type MmrAuditFallback } from "./mmr-audit-fallback.js";
+import {
+  defaultProcessRunner,
+  resolveDirectProviders,
+  type ProcessRunner,
+} from "./subscription-cli-provider.js";
 import type {
   CaptureBackend,
   FrameworkAdapter,
@@ -69,11 +83,16 @@ import type {
   GroundingTool,
   IssueExporter,
   KnowledgeSource,
+  ModelProvider,
   ReportRenderer,
   StateStore,
 } from "./interfaces.js";
 
 const DEFAULT_KNOWLEDGE_ROOT_DIR = "content/knowledge";
+const BUNDLED_KNOWLEDGE_ROOT_DIR = fileURLToPath(new URL("./content/knowledge/", import.meta.url));
+const MONOREPO_KNOWLEDGE_ROOT_DIR = fileURLToPath(
+  new URL("../../../content/knowledge/", import.meta.url),
+);
 
 export type SurfaceCompositionGeneratedAt = string | (() => string);
 
@@ -89,12 +108,18 @@ export type SurfaceCompositionOptions = {
   readonly knowledgeSource?: KnowledgeSource;
   readonly lensFactoryOptions?: LensFactoryOptions;
   readonly lensRegistry?: readonly LensRegistration[];
+  readonly mmrFallback?: MmrAuditFallback;
+  readonly modelProvider?: ModelProvider;
+  readonly modelProviderFactory?: ModelProviderFactory;
   readonly pipelineHandlers?: Partial<Record<ExecutablePipelineStageId, PipelineStageHandler>>;
+  readonly processRunner?: ProcessRunner;
   readonly projectRoot?: string;
   readonly reportRenderers?: readonly ReportRenderer[];
+  readonly resolveSubscriptionProviders?: ResolveSubscriptionProviders;
   readonly stateDir?: string;
   readonly stateStore?: StateStore;
   readonly staticFallback?: CaptureBackend;
+  readonly subscriptionProviders?: readonly ModelProvider[];
 };
 
 export type BrowserQaComposition = {
@@ -108,6 +133,7 @@ export type BrowserQaComposition = {
 
 export type SurfaceComposition = {
   readonly browserQa: BrowserQaComposition;
+  readonly auditRunner: AuditRunner;
   readonly captureBackends: readonly CaptureBackend[];
   readonly captureService: CaptureService;
   readonly frameworkAdapters: readonly FrameworkAdapter[];
@@ -119,6 +145,7 @@ export type SurfaceComposition = {
   readonly lensRegistry: readonly LensRegistration[];
   readonly pipelineOrchestrator: PipelineOrchestrator;
   readonly reportRenderers: readonly ReportRenderer[];
+  readonly stateDir: string;
   readonly stateStore: StateStore;
 };
 
@@ -133,6 +160,7 @@ export function createSurfaceComposition(
   options: SurfaceCompositionOptions = {},
 ): SurfaceComposition {
   const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
+  const stateDir = options.stateDir ?? SURFACE_STATE_DIR;
   const staticFallback = options.staticFallback ?? createStaticCaptureBackend();
   const browserBackends = options.captureBackends ?? [
     createAgentBrowserCaptureBackend(),
@@ -143,12 +171,12 @@ export function createSurfaceComposition(
     options.stateStore ??
     createFileStateStore({
       projectRoot,
-      ...(options.stateDir === undefined ? {} : { stateDir: options.stateDir }),
+      stateDir,
     });
   const knowledgeSource =
     options.knowledgeSource ??
     createFileSystemKnowledgeSource({
-      rootDir: path.resolve(projectRoot, options.knowledgeRootDir ?? DEFAULT_KNOWLEDGE_ROOT_DIR),
+      rootDir: resolveKnowledgeRootDir(projectRoot, options.knowledgeRootDir),
     });
   const lensFactoryOptions = {
     projectRoot,
@@ -337,8 +365,28 @@ export function createSurfaceComposition(
       },
       writeRun: (run) => qaStore.writeRun(run),
     });
+  const processRunner = options.processRunner ?? defaultProcessRunner;
+  const resolveSubscriptionProviders =
+    options.resolveSubscriptionProviders ??
+    ((config) => resolveDirectProviders(config, processRunner));
+  const mmrFallback = options.mmrFallback ?? createMmrAuditFallback();
 
   return {
+    auditRunner: createAuditRunner({
+      artifactWriter: stateStore,
+      knowledgeSource,
+      lensFactoryOptions,
+      lensRegistry: options.lensRegistry ?? BUILT_IN_LENS_REGISTRY,
+      mmrFallback,
+      resolveSubscriptionProviders,
+      ...(options.modelProvider === undefined ? {} : { modelProvider: options.modelProvider }),
+      ...(options.modelProviderFactory === undefined
+        ? {}
+        : { modelProviderFactory: options.modelProviderFactory }),
+      ...(options.subscriptionProviders === undefined
+        ? {}
+        : { subscriptionProviders: options.subscriptionProviders }),
+    }),
     browserQa: {
       driver: browserQaDriver,
       evidenceStore,
@@ -365,6 +413,7 @@ export function createSurfaceComposition(
       stateStore,
     }),
     reportRenderers,
+    stateDir,
     stateStore,
   };
 }
@@ -906,3 +955,23 @@ async function writePromotedFindingToProjectState(input: {
 export const DEFAULT_COMPOSITION_STAGE_IDS = DEFAULT_PIPELINE_STAGE_DEFINITIONS.map(
   (stage) => stage.id,
 );
+
+function resolveKnowledgeRootDir(
+  projectRoot: string,
+  knowledgeRootDir: string | undefined,
+): string {
+  const projectKnowledgeRoot = path.resolve(
+    projectRoot,
+    knowledgeRootDir ?? DEFAULT_KNOWLEDGE_ROOT_DIR,
+  );
+
+  if (knowledgeRootDir !== undefined || existsSync(projectKnowledgeRoot)) {
+    return projectKnowledgeRoot;
+  }
+
+  return (
+    [BUNDLED_KNOWLEDGE_ROOT_DIR, MONOREPO_KNOWLEDGE_ROOT_DIR].find((candidate) =>
+      existsSync(candidate),
+    ) ?? projectKnowledgeRoot
+  );
+}

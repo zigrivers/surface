@@ -179,12 +179,12 @@ importers:
 
   packages/adapters/vue:
     dependencies:
-      '@zigrivers/surface-core':
-        specifier: workspace:*
-        version: link:../../core
       '@vue/compiler-sfc':
         specifier: ^3.5.0
         version: 3.5.35
+      '@zigrivers/surface-core':
+        specifier: workspace:*
+        version: link:../../core
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -210,6 +210,9 @@ importers:
       commander:
         specifier: 'catalog:'
         version: 15.0.0
+      yaml:
+        specifier: 'catalog:'
+        version: 2.9.0
     devDependencies:
       '@types/node':
         specifier: 'catalog:'
@@ -241,6 +244,9 @@ importers:
       gray-matter:
         specifier: ^4.0.3
         version: 4.0.3
+      parse5:
+        specifier: ^8.0.1
+        version: 8.0.1
       pino:
         specifier: 'catalog:'
         version: 10.3.1

@@ -16,14 +16,14 @@ placeholders so it cannot be copied with stale release metadata.
 
 ## Release Flow
 
-1. Create and push the GitHub release tag, for example `v0.2.0`.
+1. Create and push the GitHub release tag, for example `v0.2.1`.
 2. Run the manual release workflow with `publish=true` and wait for npm publication to complete.
 3. Compute the published npm tarball checksum:
 
    ```bash
-   TARBALL_URL=$(npm view @zigrivers/surface@0.2.0 dist.tarball)
-   curl -L "$TARBALL_URL" -o /tmp/surface-0.2.0.tgz
-   shasum -a 256 /tmp/surface-0.2.0.tgz
+   TARBALL_URL=$(npm view @zigrivers/surface@0.2.1 dist.tarball)
+   curl -L "$TARBALL_URL" -o /tmp/surface-0.2.1.tgz
+   shasum -a 256 /tmp/surface-0.2.1.tgz
    ```
 
 4. Update the tap formula URL and checksum.

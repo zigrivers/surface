@@ -97,6 +97,46 @@ For deeper implementation details, see
 and
 [`docs/superpowers/plans/2026-06-08-browser-qa-orchestrator-implementation.md`](docs/superpowers/plans/2026-06-08-browser-qa-orchestrator-implementation.md).
 
+## Model Fallback
+
+Surface audits stay measured-only by default. When you explicitly opt in, `surface audit` can reuse
+authenticated subscription CLIs for judged synthesis without requiring project API keys.
+
+Run a one-off audit through direct subscription providers:
+
+```bash
+surface audit --url http://localhost:5173 \
+  --model-fallback direct \
+  --model-channels claude,gemini \
+  --model-depth 3
+```
+
+Let Surface try direct providers first and report compatible MMR fallback availability if direct
+providers cannot run:
+
+```bash
+surface audit --url http://localhost:5173 --model-fallback auto
+```
+
+Screenshot egress is separate from model fallback consent. Binary screenshots are blocked for
+subscription-backed providers in this release; use `--model-screenshots redacted-only` only when
+you want redacted screenshot metadata considered alongside text artifacts.
+
+Primary model fallback controls:
+
+| Control | Purpose |
+| --- | --- |
+| `--model-fallback off\|direct\|mmr\|auto` | Select measured-only, direct CLI, MMR-only, or direct-then-MMR behavior |
+| `--model-channel <id>` | Add a direct subscription channel; repeatable |
+| `--model-channels <ids>` | Set comma-separated direct subscription channel order |
+| `--model-depth <1-5>` | Control judged synthesis depth and reconciliation |
+| `--model-screenshots blocked\|redacted-only` | Keep screenshots blocked or permit redacted screenshot metadata |
+| `surface cleanup model-egress` | Remove persisted model egress artifacts from the Surface state directory |
+
+BYO-key and local model providers still take precedence over subscription fallback when configured.
+MMR is a fallback boundary only when a compatible Surface audit capability is available; the current
+diff-shaped MMR review flow is reported as unavailable instead of receiving captured UI artifacts.
+
 ## Packages
 
 | Package | Purpose |

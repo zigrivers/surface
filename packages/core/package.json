@@ -1,6 +1,6 @@
 {
   "name": "@zigrivers/surface-core",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -23,6 +23,7 @@
     "@octokit/rest": "catalog:",
     "execa": "^9.6.1",
     "gray-matter": "^4.0.3",
+    "parse5": "^8.0.1",
     "pino": "catalog:",
     "proper-lockfile": "catalog:",
     "retext": "^9.0.0",
@@ -34,7 +35,7 @@
     "zod": "catalog:"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node ../../scripts/copy-knowledge.mjs dist/content/knowledge",
     "build:smoke": "node scripts/build-smoke.mjs",
     "clean": "rm -rf dist coverage .turbo",
     "lint": "eslint .",

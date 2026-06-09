@@ -82,6 +82,46 @@ describe("cognitive walkthrough and conversion lenses", () => {
     });
   });
 
+  it("masks redacted DOM before direct flow-lens model prompts", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "surface-task-lens-redacted-"));
+    tempRoots.push(root);
+    const domPath = path.join(root, "dom.html");
+    await writeFile(
+      domPath,
+      `<main id="checkout" data-session="sess_1234567890abcdef"><button>Pay now</button></main>`,
+    );
+    const requests: ModelRequest[] = [];
+    const lens = createTaskCompletionLens();
+
+    const result = await lens.evaluate({
+      capture: {
+        ...captureWithDom(domPath),
+        artifacts: [
+          {
+            id: "dom",
+            path: domPath,
+            redacted: true,
+            redaction: {
+              boundingBoxesVerified: true,
+              maskedClasses: ["session"],
+              safeNoSensitiveRegions: false,
+              status: "redacted",
+              unsafeRegions: [],
+            },
+            type: "dom-snapshot",
+          },
+        ],
+      },
+      config: resolveSurfaceConfig(),
+      evidence: [],
+      knowledge: knowledgeWith(taskKnowledge()),
+      model: modelWithText(JSON.stringify([]), requests),
+    });
+
+    expect(isOk(result)).toBe(true);
+    expect(JSON.stringify(requests[0]?.prompt.input)).not.toContain("sess_1234567890abcdef");
+  });
+
   it("emits conversion-path friction tagged to the evaluated path", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "surface-conversion-lens-"));
     tempRoots.push(root);
@@ -178,10 +218,23 @@ function conversionKnowledge(): KnowledgeEntry {
 
 function modelWithText(text: string, requests: ModelRequest[]): ModelProvider {
   return {
-    availability: () => ok({ available: true, model: "reviewer", provider: "local" }),
+    availability: () =>
+      ok({
+        available: true,
+        channelId: "local",
+        model: "reviewer",
+        provider: "local",
+        sourceKind: "local",
+      }),
     complete: (request) => {
       requests.push(request);
-      return ok({ model: "reviewer", provider: "local", text });
+      return ok({
+        channelId: "local",
+        model: "reviewer",
+        provider: "local",
+        sourceKind: "local",
+        text,
+      });
     },
   };
 }

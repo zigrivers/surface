@@ -1,4 +1,6 @@
 import { z } from "zod";
+
+import { ModelChannelIdSchema, type ModelChannelId } from "./config.js";
 import { createSurfaceError, err, isOk, ok, type Result, type SurfaceError } from "./errors.js";
 
 /**
@@ -18,6 +20,25 @@ const nonEmptyStringSchema = z
 /** Built-in provider ids that core can resolve from environment configuration. */
 const ModelProviderIdSchema = z.enum(["anthropic", "openai", "local"]);
 export type ModelProviderId = z.infer<typeof ModelProviderIdSchema>;
+
+export const ModelSourceKindSchema = z.enum(["api", "local", "subscription-cli", "mmr"]);
+export type ModelSourceKind = z.infer<typeof ModelSourceKindSchema>;
+
+export const ModelUnavailableReasonSchema = z.enum([
+  "no-model-configured",
+  "missing-credential",
+  "missing-base-url",
+  "invalid-provider",
+  "invalid-config",
+  "not-installed",
+  "auth-unavailable",
+  "unsupported-capability",
+  "timeout",
+  "command-failed",
+  "parse-failed",
+  "prompt-cleanup-failed",
+]);
+export type ModelUnavailableReason = z.infer<typeof ModelUnavailableReasonSchema>;
 
 /** Runtime-safe provider configuration; credentialRef names an env var and never stores secrets. */
 export const ModelProviderConfigSchema = z
@@ -67,6 +88,10 @@ export const ModelRequestSchema = z
     prompt: ModelPromptSchema,
     maxOutputTokens: z.number().int().positive().optional(),
     temperature: z.number().min(0).max(2).optional(),
+    responseFormat: z
+      .object({ type: z.enum(["text", "json"]) })
+      .strict()
+      .optional(),
   })
   .strict();
 export type ModelRequest = z.infer<typeof ModelRequestSchema>;
@@ -74,38 +99,49 @@ export type ModelRequest = z.infer<typeof ModelRequestSchema>;
 /** Normalized text response returned by a provider adapter. */
 export const ModelResponseSchema = z
   .object({
-    provider: ModelProviderIdSchema,
+    provider: ModelChannelIdSchema,
+    channelId: ModelChannelIdSchema,
+    sourceKind: ModelSourceKindSchema,
     model: nonEmptyStringSchema,
     text: z.string(),
   })
   .passthrough();
 export type ModelResponse = z.infer<typeof ModelResponseSchema>;
 
+const ModelAdapterResponseSchema = z
+  .object({
+    provider: ModelChannelIdSchema,
+    channelId: ModelChannelIdSchema.optional(),
+    sourceKind: ModelSourceKindSchema.optional(),
+    model: nonEmptyStringSchema,
+    text: z.string(),
+  })
+  .passthrough();
+type ModelAdapterResponse = z.infer<typeof ModelAdapterResponseSchema>;
+
 /** Availability result used to skip judged lenses without failing measured coverage. */
 export const ModelAvailabilitySchema = z.discriminatedUnion("available", [
   z
     .object({
       available: z.literal(true),
-      provider: ModelProviderIdSchema,
+      provider: ModelChannelIdSchema,
+      channelId: ModelChannelIdSchema,
+      sourceKind: ModelSourceKindSchema,
       model: nonEmptyStringSchema,
     })
     .strict(),
   z
     .object({
       available: z.literal(false),
-      reason: z.enum([
-        "no-model-configured",
-        "missing-credential",
-        "missing-base-url",
-        "invalid-provider",
-        "invalid-config",
-      ]),
+      reason: ModelUnavailableReasonSchema,
       message: nonEmptyStringSchema,
+      channelId: ModelChannelIdSchema.optional(),
+      sourceKind: ModelSourceKindSchema.optional(),
     })
     .strict(),
 ]);
 export type ModelAvailability = z.infer<typeof ModelAvailabilitySchema>;
-type UnavailableReason = Extract<ModelAvailability, { available: false }>["reason"];
+type UnavailableReason = ModelUnavailableReason;
 
 /** Per-lens skip metadata reported when judged coverage is unavailable. */
 export const ModelLensSkipSchema = z
@@ -121,7 +157,7 @@ type MaybePromise<T> = T | Promise<T>;
 
 /** Interface judged lenses call; implementations must return Result values instead of throwing. */
 export interface ModelProvider {
-  readonly id?: ModelProviderId;
+  readonly id?: ModelChannelId;
   availability(): MaybePromise<Result<ModelAvailability, SurfaceError>>;
   complete(request: ModelRequest): MaybePromise<Result<ModelResponse, SurfaceError>>;
 }
@@ -149,7 +185,7 @@ export type ModelProviderResolution =
 export type ModelCompletionAdapter = (
   request: ModelRequest,
   config: ModelProviderConfig,
-) => MaybePromise<Result<ModelResponse, SurfaceError>>;
+) => MaybePromise<Result<ModelAdapterResponse, SurfaceError>>;
 
 const DEFAULT_MODEL_BY_PROVIDER = {
   anthropic: "surface-byo-anthropic",
@@ -250,6 +286,8 @@ export function createConfiguredModelProvider(
       ok({
         available: true,
         provider: parsedConfig.provider,
+        channelId: parsedConfig.provider,
+        sourceKind: sourceKindForConfiguredProvider(parsedConfig.provider),
         model: parsedConfig.model,
       }),
     complete: async (request) => {
@@ -270,7 +308,24 @@ export function createConfiguredModelProvider(
           return adapterResult;
         }
 
-        const parsedResponse = ModelResponseSchema.safeParse(adapterResult.value);
+        const parsedAdapterResponse = ModelAdapterResponseSchema.safeParse(adapterResult.value);
+
+        if (!parsedAdapterResponse.success) {
+          return err(
+            createSurfaceError("model_request_failed", "Model adapter returned invalid response.", {
+              cause: parsedAdapterResponse.error,
+            }),
+          );
+        }
+
+        const normalizedResponse = {
+          ...parsedAdapterResponse.data,
+          channelId: parsedAdapterResponse.data.channelId ?? parsedAdapterResponse.data.provider,
+          sourceKind:
+            parsedAdapterResponse.data.sourceKind ??
+            sourceKindForConfiguredProvider(parsedConfig.provider),
+        };
+        const parsedResponse = ModelResponseSchema.safeParse(normalizedResponse);
 
         if (!parsedResponse.success) {
           return err(
@@ -435,4 +490,8 @@ function unavailable(reason: UnavailableReason, message: string): ModelAvailabil
     reason,
     message,
   });
+}
+
+function sourceKindForConfiguredProvider(provider: ModelProviderId): ModelSourceKind {
+  return provider === "local" ? "local" : "api";
 }

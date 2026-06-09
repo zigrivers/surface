@@ -1,6 +1,6 @@
 {
   "name": "@zigrivers/surface",
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "bin": {
     "surface": "./dist/index.js"
@@ -20,7 +20,8 @@
   ],
   "dependencies": {
     "commander": "catalog:",
-    "@zigrivers/surface-core": "workspace:*"
+    "@zigrivers/surface-core": "workspace:*",
+    "yaml": "catalog:"
   },
   "scripts": {
     "build": "tsup",

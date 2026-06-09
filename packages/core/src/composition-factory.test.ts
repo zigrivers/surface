@@ -13,6 +13,7 @@ import type {
 } from "./interfaces.js";
 import type { LensRegistration } from "./lens-registry.js";
 import { createSurfaceComposition } from "./composition-factory.js";
+import type { ProcessRunner } from "./subscription-cli-provider.js";
 
 class MemoryStateStore implements StateStore {
   readonly writes: ProjectStateSnapshot[] = [];
@@ -78,6 +79,7 @@ describe("createSurfaceComposition", () => {
     ]);
     expect(composition.issueExporters).toEqual([]);
     expect(composition.stateStore).toBe(stateStore);
+    expect(composition.auditRunner).toBeDefined();
     expect(composition.pipelineOrchestrator).toBeDefined();
 
     const run = await composition.pipelineOrchestrator.run({
@@ -87,6 +89,17 @@ describe("createSurfaceComposition", () => {
 
     expect(run.ok).toBe(true);
     expect(stateStore.writes.at(-1)?.currentStage).toBe("completed");
+  });
+
+  it("falls back to bundled knowledge when the project has no default catalog", async () => {
+    const composition = createSurfaceComposition({
+      projectRoot: "/tmp/surface-project-without-knowledge",
+      stateStore: new MemoryStateStore(),
+    });
+
+    const entry = await composition.knowledgeSource.resolve("kb_usability_nielsen_heuristics");
+
+    expect(entry.ok).toBe(true);
   });
 
   it("accepts sibling package plugins without making CLI or MCP own composition", () => {
@@ -146,5 +159,82 @@ describe("createSurfaceComposition", () => {
     expect(composition.lensRegistry).toEqual([lens]);
     expect(composition.reportRenderers).toEqual([reportRenderer]);
     expect(composition.issueExporters).toEqual([issueExporter]);
+  });
+
+  it("wires audit runner dependencies and injected process runner", async () => {
+    const requests: string[] = [];
+    const processRunner: ProcessRunner = {
+      enforcedFilesystemIsolation: true,
+      run: (request) => {
+        requests.push([request.command, ...request.args].join(" "));
+
+        if (request.args.join(" ") === "login status") {
+          return { exitCode: 0, stderr: "", stdout: "Logged in using ChatGPT" };
+        }
+
+        if (request.args.join(" ") === "--version") {
+          return { exitCode: 0, stderr: "", stdout: "codex 0.20.0" };
+        }
+
+        return { exitCode: 0, stderr: "", stdout: '{"type":"agent_message","message":"[]"}\n' };
+      },
+    };
+    const lens: LensRegistration = {
+      id: "usability",
+      method: "judged",
+      presets: ["standard"],
+      requiresLiveDom: false,
+      requiresModel: true,
+      create: () => ({
+        id: "usability",
+        method: "judged",
+        requiresLiveDom: false,
+        requiresModel: true,
+        evaluate: async (context) => {
+          await context.model?.complete({
+            prompt: { instructions: "Return JSON findings.", input: {} },
+            responseFormat: { type: "json" },
+          });
+          return ok([]);
+        },
+      }),
+    };
+    const composition = createSurfaceComposition({
+      lensRegistry: [lens],
+      processRunner,
+      stateStore: new MemoryStateStore(),
+    });
+
+    const result = await composition.auditRunner({
+      capture: {
+        id: "cap_composition",
+        target: { kind: "url", ref: "https://example.test" },
+        backend: "static",
+        artifacts: [],
+        capturedAt: "2026-06-08T00:00:00.000Z",
+        status: "completed",
+      },
+      config: {
+        ...DEFAULT_SURFACE_CONFIG,
+        model: {
+          ...DEFAULT_SURFACE_CONFIG.model,
+          effectiveEgressPolicy: { mode: "text", screenshots: "blocked" },
+          fallback: {
+            ...DEFAULT_SURFACE_CONFIG.model.fallback,
+            effectiveChannels: ["codex"],
+            mode: "direct",
+          },
+        },
+      },
+      runId: "run_composition_audit",
+    });
+
+    expect(result.ok).toBe(true);
+    expect(requests).toEqual([]);
+    expect(result).toMatchObject({
+      value: {
+        unavailableChannels: [{ id: "codex", reason: "unsupported-capability" }],
+      },
+    });
   });
 });
