@@ -2425,7 +2425,20 @@ describe("@zigrivers/surface core verbs", () => {
     });
     expect(backlogExitCode).toBe(0);
     expect(JSON.parse(backlogStdout.join(""))).toMatchObject({
-      data: { backlog: [{ findingId: "finding_button_contrast" }] },
+      data: {
+        backlog: [
+          {
+            demotedAsDuplicateOf: null,
+            executable: true,
+            findingId: "finding_button_contrast",
+            gateDisposition: "active",
+            gatedForHuman: false,
+            identityKey: buttonIdentityKey(),
+            method: "measured",
+            status: "still-failing",
+          },
+        ],
+      },
       ok: true,
     });
   });
@@ -2698,6 +2711,8 @@ describe("@zigrivers/surface findings and loop verbs", () => {
             id: "backlog_run_eval",
             runId: "run_eval",
           },
+          findings: [{ ...testFinding(), gatedForHuman: true }],
+          trackedFindings: [testTrackedFinding()],
           version: "1.0",
         }),
       }),
@@ -2708,9 +2723,156 @@ describe("@zigrivers/surface findings and loop verbs", () => {
     expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "backlog",
       data: {
-        backlog: [{ findingId: "finding_button_contrast", rank: 1 }],
+        backlog: [
+          {
+            demotedAsDuplicateOf: null,
+            executable: false,
+            findingId: "finding_button_contrast",
+            gateDisposition: "active",
+            gatedForHuman: true,
+            identityKey: buttonIdentityKey(),
+            method: "measured",
+            rank: 1,
+            severityBand: "P1",
+            status: "still-failing",
+          },
+        ],
         backlogId: "backlog_run_eval",
         runId: "run_eval",
+      },
+      ok: true,
+    });
+  });
+
+  it("applies active baseline waivers to backlog JSON gate disposition", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "backlog"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore({
+          backlog: {
+            entries: [{ findingId: "finding_button_contrast", priority: 1, rank: 1 }],
+            id: "backlog_run_eval",
+            runId: "run_eval",
+          },
+          baselines: [
+            {
+              baselineId: "baseline_eval",
+              identityKeys: [buttonIdentityKey()],
+              waivers: [
+                {
+                  expiry: "2999-01-01T00:00:00.000Z",
+                  findingIdentityKey: buttonIdentityKey(),
+                  owner: "QA",
+                  reason: "Temporarily accepted.",
+                },
+              ],
+            },
+          ],
+          findings: [testFinding()],
+          trackedFindings: [testTrackedFinding()],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      data: {
+        backlog: [
+          {
+            gateDisposition: "ignored-by-waiver",
+            identityKey: buttonIdentityKey(),
+          },
+        ],
+      },
+      ok: true,
+    });
+  });
+
+  it("expires baseline waivers before emitting backlog JSON gate disposition", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "backlog"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore({
+          backlog: {
+            entries: [{ findingId: "finding_button_contrast", priority: 1, rank: 1 }],
+            id: "backlog_run_eval",
+            runId: "run_eval",
+          },
+          baselines: [
+            {
+              baselineId: "baseline_eval",
+              identityKeys: [buttonIdentityKey()],
+              waivers: [
+                {
+                  expiry: "2000-01-01T00:00:00.000Z",
+                  findingIdentityKey: buttonIdentityKey(),
+                  owner: "QA",
+                  reason: "Expired.",
+                },
+              ],
+            },
+          ],
+          findings: [testFinding()],
+          trackedFindings: [testTrackedFinding({ gateDisposition: "ignored-by-waiver" })],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      data: {
+        backlog: [
+          {
+            gateDisposition: "active",
+            identityKey: buttonIdentityKey(),
+          },
+        ],
+      },
+      ok: true,
+    });
+  });
+
+  it("handles legacy backlog baselines that omit waivers", async () => {
+    const stdout: string[] = [];
+    const legacyState = {
+      backlog: {
+        entries: [{ findingId: "finding_button_contrast", priority: 1, rank: 1 }],
+        id: "backlog_run_eval",
+        runId: "run_eval",
+      },
+      baselines: [
+        {
+          baselineId: "baseline_eval",
+          identityKeys: [buttonIdentityKey()],
+        },
+      ],
+      findings: [testFinding()],
+      trackedFindings: [testTrackedFinding({ gateDisposition: "ignored-by-waiver" })],
+      version: "1.0",
+    } as unknown as TestProjectStateSnapshot;
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "backlog"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore(legacyState),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      data: {
+        backlog: [
+          {
+            gateDisposition: "active",
+            identityKey: buttonIdentityKey(),
+          },
+        ],
       },
       ok: true,
     });
