@@ -137,6 +137,16 @@ BYO-key and local model providers still take precedence over subscription fallba
 MMR is a fallback boundary only when a compatible Surface audit capability is available; the current
 diff-shaped MMR review flow is reported as unavailable instead of receiving captured UI artifacts.
 
+## Reliability and State Safety
+
+Surface persists audit, gate, browser QA, and verdict records through a durable local state store.
+The `0.2.2` release tightens those paths so state transitions are atomic, canonical durable fields
+are validated before persistence, and CLI/MCP verdict writes produce the same canonical records.
+
+Capture and browser automation failures are also sanitized before they reach machine-readable error
+envelopes. Unsafe `agent-browser` command details are replaced with redacted context, keeping raw
+capture output and command failure payloads out of logs and artifacts.
+
 ## Packages
 
 | Package | Purpose |

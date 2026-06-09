@@ -43,7 +43,7 @@ const RELEASE_PACKAGES = [
     dependencies: ["@zigrivers/surface-core"],
   },
 ] as const;
-const RELEASE_VERSION = "0.2.1";
+const RELEASE_VERSION = "0.2.2";
 
 type PackageJson = {
   name: string;
