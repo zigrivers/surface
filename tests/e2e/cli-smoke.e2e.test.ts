@@ -36,7 +36,8 @@ describe("surface CLI e2e smoke", () => {
     const result = await runSurface(["--json", "bogus"], await tempProjectRoot());
 
     expect(result.exitCode).toBe(2);
-    expect(JSON.parse(result.stderr)).toMatchObject({
+    expect(result.stderr).toBe("");
+    expect(JSON.parse(result.stdout)).toMatchObject({
       error: { code: "unknown_step", exitCode: 2, kind: "UsageError" },
       ok: false,
     });

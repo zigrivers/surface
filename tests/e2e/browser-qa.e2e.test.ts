@@ -124,7 +124,8 @@ describe("browser QA CLI e2e", () => {
     );
 
     expect(replay.exitCode).toBe(1);
-    expect(JSON.parse(replay.stderr)).toMatchObject({
+    expect(replay.stderr).toBe("");
+    expect(JSON.parse(replay.stdout)).toMatchObject({
       command: "replay",
       error: { code: "replay_failed" },
       ok: false,

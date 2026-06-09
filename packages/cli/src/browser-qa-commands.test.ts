@@ -27,6 +27,7 @@ type TestFlowRun = {
 
 describe("surface flow CLI", () => {
   it("rejects --localhost values for browser QA commands", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runSurfaceCli({
       argv: [
@@ -38,11 +39,12 @@ describe("surface flow CLI", () => {
         "surface-flows/checkout.yml",
         "--localhost=5173",
       ],
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(2);
-    expect(stderr.join("")).toContain("--localhost");
+    expect(stderr.join("")).toBe("");
+    expect(stdout.join("")).toContain("--localhost");
   });
 
   it("prints a JSON envelope for flow run", async () => {
@@ -144,15 +146,17 @@ describe("surface qa CLI", () => {
   });
 
   it("rejects multiple target flags with usage exit code", async () => {
+    const stdout: string[] = [];
     const stderr: string[] = [];
     const exitCode = await runSurfaceCli({
       argv: ["node", "surface", "--json", "qa", "--url", "http://localhost:3000", "--localhost"],
       composition: createCompositionWithBrowserQa({ orchestrator: makeOrchestrator() }),
-      io: { stderr: (chunk) => stderr.push(chunk) },
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
     });
 
     expect(exitCode).toBe(2);
-    expect(stderr.join("")).toContain("mutually exclusive");
+    expect(stderr.join("")).toBe("");
+    expect(stdout.join("")).toContain("mutually exclusive");
   });
 
   it("prints QA reports by requested format", async () => {
