@@ -5,9 +5,11 @@ import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { isErr, isOk } from "./errors.js";
-import { type Finding } from "./findings.js";
+import { synthesizeBacklog, type Finding } from "./findings.js";
+import type { ProjectStateSnapshot } from "./interfaces.js";
 import { createFileStateStore, SURFACE_STATE_VERSION } from "./state-store.js";
 import { createTrackedFinding } from "./tracked-findings.js";
+import { createVerdict } from "./verdicts.js";
 
 const stateStoreFinding = {
   id: "f_state_1",
@@ -222,6 +224,142 @@ describe("FileStateStore", () => {
       ],
       version: SURFACE_STATE_VERSION,
     });
+  });
+
+  it("round-trips canonical durable audit fields", async () => {
+    const root = await makeTempRoot();
+    const store = createFileStateStore({ projectRoot: root });
+    const tracked = createTrackedFinding({
+      finding: stateStoreFinding,
+      runId: "run_001",
+      validation: stateStoreValidation,
+    });
+    const backlog = synthesizeBacklog("run_001", [stateStoreFinding]);
+    const verdict = createVerdict({
+      decision: "accept",
+      finding: stateStoreFinding,
+      rationale: "Measured finding is correct.",
+      recordedAt: "2026-06-01T00:00:00.000Z",
+    });
+
+    if (!backlog.ok || !verdict.ok) {
+      throw new Error("Expected fixture state to be valid.");
+    }
+
+    const written = await store.writeState({
+      backlog: backlog.value,
+      findings: [stateStoreFinding],
+      runRecords: [{ runId: "run_001", trackedFindings: [tracked] }],
+      verdicts: [verdict.value],
+      version: "legacy",
+    });
+    const roundTripped = await store.readState();
+
+    expect(isOk(written)).toBe(true);
+    expect(isOk(roundTripped)).toBe(true);
+    expect(roundTripped).toMatchObject({
+      value: {
+        backlog: { id: "backlog_run_001", runId: "run_001" },
+        findings: [{ id: "f_state_1", method: "measured" }],
+        runRecords: [{ runId: "run_001", trackedFindings: [{ identityKey: tracked.identityKey }] }],
+        verdicts: [{ decision: "accept", findingId: "f_state_1" }],
+        version: SURFACE_STATE_VERSION,
+      },
+    });
+  });
+
+  it.each([
+    {
+      field: "findings",
+      state: { findings: [{ ...stateStoreFinding, evidence: [] }] },
+    },
+    {
+      field: "backlog",
+      state: {
+        backlog: {
+          id: "backlog_run_001",
+          runId: "run_001",
+          entries: [{ findingId: "f_state_1", priority: -1, rank: 1 }],
+        },
+      },
+    },
+    {
+      field: "runRecords",
+      state: { runRecords: [{ runId: "", trackedFindings: [] }] },
+    },
+    {
+      field: "verdicts",
+      state: {
+        verdicts: [
+          {
+            decision: "maybe",
+            findingId: "f_state_1",
+            findingIdentityKey: "identity_1",
+            rationale: "invalid decision",
+            recordedAt: "2026-06-01T00:00:00.000Z",
+            reusePolicy: "this-run",
+          },
+        ],
+      },
+    },
+    {
+      field: "baselines",
+      state: {
+        baselines: [
+          {
+            baselineId: "baseline_001",
+            identityKeys: ["identity_1", "identity_1"],
+            waivers: [],
+          },
+        ],
+      },
+    },
+    {
+      field: "trackedFindings",
+      state: {
+        trackedFindings: [
+          {
+            currentFindingId: "f_state_1",
+            firstSeenRunId: "run_001",
+            gateDisposition: "active",
+            history: [{ runId: "run_001", status: "resolved" }],
+            identity: {
+              anchorKind: "selector",
+              identityKey: "identity_1",
+              issueType: "contrast-insufficient",
+              lens: "accessibility",
+              locationAnchor: ".btn-primary",
+            },
+            identityKey: "identity_1",
+            lastSeenRunId: "run_001",
+            status: "new",
+            validation: {
+              expectation: "axe color-contrast passes on .btn-primary",
+              kind: "measured-rule",
+            },
+          },
+        ],
+      },
+    },
+  ])("rejects invalid durable state field $field on read and write", async ({ state }) => {
+    const root = await makeTempRoot();
+    const stateDir = path.join(root, ".surface");
+    const stateFile = path.join(stateDir, "state.json");
+    const store = createFileStateStore({ projectRoot: root });
+
+    await mkdir(stateDir, { recursive: true });
+    await writeFile(stateFile, `${JSON.stringify({ version: SURFACE_STATE_VERSION, ...state })}\n`);
+
+    const read = await store.readState();
+    const written = await store.writeState({
+      version: SURFACE_STATE_VERSION,
+      ...state,
+    } as ProjectStateSnapshot);
+
+    expect(isErr(read)).toBe(true);
+    expect(read).toMatchObject({ error: { code: "state_corrupt" } });
+    expect(isErr(written)).toBe(true);
+    expect(written).toMatchObject({ error: { code: "state_write_failed" } });
   });
 
   it("reports corrupt state without throwing", async () => {

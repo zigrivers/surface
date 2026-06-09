@@ -35,6 +35,35 @@ class MemoryStateStore implements StateStore {
   }
 }
 
+class StaleReadStateStore implements StateStore {
+  readonly writes: ProjectStateSnapshot[] = [];
+  current: ProjectStateSnapshot;
+
+  constructor(private readonly staleState: ProjectStateSnapshot = { version: "1.0" }) {
+    this.current = staleState;
+  }
+
+  readState() {
+    return ok(this.staleState);
+  }
+
+  writeState(state: ProjectStateSnapshot) {
+    this.current = state;
+    this.writes.push(state);
+    return ok(state);
+  }
+
+  updateState(updater: (state: ProjectStateSnapshot) => ProjectStateSnapshot) {
+    this.current = updater(this.current);
+    this.writes.push(this.current);
+    return ok(this.current);
+  }
+
+  writeArtifact() {
+    return ok({ path: ".surface/reports/findings.json", sha256: "abc123" });
+  }
+}
+
 class FailingWriteStateStore extends MemoryStateStore {
   override writeState() {
     return err(createSurfaceError("state_write_failed", "State write failed."));
@@ -758,6 +787,38 @@ describe("PipelineOrchestrator", () => {
 
     expect(result).toMatchObject({ value: { runId: "run_preserve_handler_state" } });
     expect(stateStore.writes.at(-1)?.pipeline?.handlerMarker).toBe("preserved");
+  });
+
+  it("applies stage transitions through updateState so stale reads do not discard handler writes", async () => {
+    const stateStore = new StaleReadStateStore();
+    const orchestrator = createPipelineOrchestrator({
+      handlers: createNoopPipelineHandlers({
+        capture: () => {
+          const updated = stateStore.updateState((state) => ({
+            ...state,
+            pipeline: {
+              ...state.pipeline,
+              runId: state.pipeline?.runId ?? "run_atomic_preserve_handler_state",
+              stageIds:
+                state.pipeline?.stageIds ??
+                selectPipelineStages(DEFAULT_SURFACE_CONFIG).map((stage) => stage.id),
+              handlerMarker: "preserved",
+            },
+          }));
+
+          return updated.ok ? ok(null) : err(updated.error);
+        },
+      }),
+      stateStore,
+    });
+
+    const result = await orchestrator.run({
+      config: DEFAULT_SURFACE_CONFIG,
+      runId: "run_atomic_preserve_handler_state",
+    });
+
+    expect(result).toMatchObject({ value: { runId: "run_atomic_preserve_handler_state" } });
+    expect(stateStore.current.pipeline?.handlerMarker).toBe("preserved");
   });
 
   it("restarts when stored plan metadata differs from the active plan", async () => {

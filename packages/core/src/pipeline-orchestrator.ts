@@ -341,24 +341,9 @@ async function runPipeline(
   const newlyCompletedStages: ExecutablePipelineStageId[] = [];
 
   for (const stage of stagesToRun) {
-    const latestState = await stateStore.readState();
-
-    if (!isOk(latestState)) {
-      return failWithAuditEvent({
-        cause: latestState.error,
-        code: "step_failed",
-        errorMessage: `Pipeline stage ${stage.id} failed.`,
-        events,
-        message: latestState.error.message,
-        runId: parsedRunId.data,
-        sequence: sequence.current,
-        stage: stage.id,
-      });
-    }
-
-    const stateWrite = await stateStore.writeState(
+    const stateWrite = await updatePipelineState(stateStore, (state) =>
       stateWithPipelineMetadata(
-        latestState.value,
+        state,
         stage.id,
         parsedRunId.data,
         plan.stages,
@@ -424,24 +409,9 @@ async function runPipeline(
       });
     }
 
-    const stageCompletionState = await stateStore.readState();
-
-    if (!isOk(stageCompletionState)) {
-      return failWithAuditEvent({
-        cause: stageCompletionState.error,
-        code: "step_failed",
-        errorMessage: `Pipeline stage ${stage.id} failed.`,
-        events,
-        message: stageCompletionState.error.message,
-        runId: parsedRunId.data,
-        sequence: sequence.current,
-        stage: stage.id,
-      });
-    }
-
-    const stageCompletionWrite = await stateStore.writeState(
+    const stageCompletionWrite = await updatePipelineState(stateStore, (state) =>
       stateWithCompletedStageMetadata(
-        stageCompletionState.value,
+        state,
         stage.id,
         parsedRunId.data,
         plan.stages,
@@ -466,27 +436,10 @@ async function runPipeline(
     newlyCompletedStages.push(stage.id);
   }
 
-  const pendingState = await stateStore.readState();
-
-  if (!isOk(pendingState)) {
-    return failWithAuditEvent({
-      cause: pendingState.error,
-      code: "pipeline_completion_failed",
-      errorMessage: "Pipeline completion failed.",
-      events,
-      message: pendingState.error.message,
-      runId: parsedRunId.data,
-      sequence: sequence.current,
-      stage: "finalization",
-    });
-  }
-
-  let completionBaseState = pendingState.value;
-
   if (resumeIndex.value !== "pending-completion") {
-    const pendingWrite = await stateStore.writeState(
+    const pendingWrite = await updatePipelineState(stateStore, (state) =>
       stateWithPipelineMetadata(
-        pendingState.value,
+        state,
         "pending-completion",
         parsedRunId.data,
         plan.stages,
@@ -507,13 +460,11 @@ async function runPipeline(
         stage: "finalization",
       });
     }
-
-    completionBaseState = pendingWrite.value;
   }
 
-  const completedWrite = await stateStore.writeState(
+  const completedWrite = await updatePipelineState(stateStore, (state) =>
     stateWithPipelineMetadata(
-      completionBaseState,
+      state,
       "completed",
       parsedRunId.data,
       plan.stages,
@@ -549,6 +500,23 @@ async function runPipeline(
     skippedStages: plan.skippedStages,
     events,
   });
+}
+
+async function updatePipelineState(
+  stateStore: StateStore,
+  updater: (state: ProjectStateSnapshot) => ProjectStateSnapshot,
+): Promise<Result<ProjectStateSnapshot, SurfaceError>> {
+  if (stateStore.updateState !== undefined) {
+    return await stateStore.updateState(updater);
+  }
+
+  const current = await stateStore.readState();
+
+  if (!isOk(current)) {
+    return current;
+  }
+
+  return await stateStore.writeState(updater(current.value));
 }
 
 function selectPipelinePlan(config: SurfaceConfig): PipelinePlan {

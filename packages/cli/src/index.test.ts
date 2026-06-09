@@ -2539,13 +2539,16 @@ describe("@zigrivers/surface findings and loop verbs", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stateStore.state.verdicts).toEqual([
-      {
-        decision: "reject",
-        findingId: "finding_button_contrast",
-        rationale: "False positive in reviewed theme",
-      },
-    ]);
+    const [storedVerdict] = stateStore.state.verdicts ?? [];
+
+    expect(storedVerdict).toMatchObject({
+      decision: "reject",
+      findingId: "finding_button_contrast",
+      findingIdentityKey: buttonIdentityKey(),
+      rationale: "False positive in reviewed theme",
+      reusePolicy: "this-run",
+    });
+    expect(typeof storedVerdict?.recordedAt).toBe("string");
     expect(JSON.parse(stdout.join(""))).toMatchObject({
       command: "verdict",
       data: {

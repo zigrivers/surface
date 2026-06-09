@@ -1,9 +1,14 @@
 // Acceptance skeletons — Epic E5: Closed Loop, State & Baselines (US-040..042).
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
   applyWaiversToTrackedFindings,
   assignFindingIdentities,
+  createFileStateStore,
   createSurfaceComposition,
   createNoopPipelineHandlers,
   createGateEvaluator,
@@ -270,7 +275,55 @@ describe("E5 Closed Loop, State & Baselines", () => {
     it.skip("[US-040][AC1] unchanged defect → same id, still-failing; fixed → resolved; reappeared → regressed; unmatchable anchor → identity-broken (never silent resolved) (integration)", () => {});
   });
   describe("US-041 concurrency-safe, resumable state [gate]", () => {
-    it.skip("[US-041][AC1] two overlapping runs → state access locked; neither corrupts the store (integration)", () => {});
+    it("[US-041][AC1] two overlapping runs → state access locked; neither corrupts the store (integration)", async () => {
+      const root = await mkdtemp(path.join(tmpdir(), "surface-overlap-"));
+      const stateStore = createFileStateStore({ projectRoot: root });
+      const captureBarrier = createBarrier(2);
+      const orchestrator = createPipelineOrchestrator({
+        handlers: createNoopPipelineHandlers({
+          capture: async ({ runId }) => {
+            const marked = await stateStore.updateState?.((state) => ({
+              ...state,
+              pipeline: {
+                ...state.pipeline,
+                [`handlerMarker:${runId}`]: "capture",
+              },
+            }));
+
+            if (marked !== undefined && !isOk(marked)) {
+              return marked;
+            }
+
+            await captureBarrier.wait();
+
+            return ok({ captureId: `cap_${runId}` });
+          },
+        }),
+        stateStore,
+      });
+
+      try {
+        const [first, second] = await Promise.all([
+          orchestrator.run({ config: DEFAULT_SURFACE_CONFIG, runId: "run_overlap_first" }),
+          orchestrator.run({ config: DEFAULT_SURFACE_CONFIG, runId: "run_overlap_second" }),
+        ]);
+        const state = await stateStore.readState();
+
+        expect(first).toMatchObject({ value: { runId: "run_overlap_first" } });
+        expect(second).toMatchObject({ value: { runId: "run_overlap_second" } });
+        expect(isOk(state)).toBe(true);
+        if (isOk(state)) {
+          expect(state.value.currentStage).toBe("completed");
+          expect(state.value.pipeline).toMatchObject({
+            "handlerMarker:run_overlap_first": "capture",
+            "handlerMarker:run_overlap_second": "capture",
+          });
+        }
+      } finally {
+        await rm(root, { force: true, recursive: true });
+      }
+    });
+
     it("[US-041][AC2] interrupted run → re-invoke resumes from currentStage, not half-written (integration)", async () => {
       const visited: string[] = [];
       const orchestrator = createPipelineOrchestrator({
@@ -438,3 +491,23 @@ describe("E5 Closed Loop, State & Baselines", () => {
     });
   });
 });
+
+function createBarrier(participants: number): { wait(): Promise<void> } {
+  let arrived = 0;
+  let release: (() => void) | undefined;
+  const released = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+
+  return {
+    async wait() {
+      arrived += 1;
+
+      if (arrived >= participants) {
+        release?.();
+      }
+
+      await released;
+    },
+  };
+}

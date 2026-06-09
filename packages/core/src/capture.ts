@@ -2001,12 +2001,25 @@ function agentBrowserCaptureError(cause: unknown, target: Target): SurfaceError 
     cause,
     details: {
       backendId: "agent-browser",
-      commandArgs: commandError?.args,
+      ...safeAgentBrowserCommandErrorDetails(commandError),
       reason: isCommandError ? "agent-browser-command-failed" : errorMessage(cause),
-      stderr: commandError?.result.stderr,
       targetKind: target.kind,
     },
   });
+}
+
+function safeAgentBrowserCommandErrorDetails(
+  commandError: AgentBrowserCommandError | undefined,
+): Record<string, unknown> {
+  if (commandError === undefined) {
+    return {};
+  }
+
+  return {
+    exitCode: commandError.result.exitCode,
+    stderrPresent: commandError.result.stderr.trim().length > 0,
+    stdoutPresent: commandError.result.stdout.trim().length > 0,
+  };
 }
 
 function classifyPlaywrightCaptureError(cause: unknown): {
