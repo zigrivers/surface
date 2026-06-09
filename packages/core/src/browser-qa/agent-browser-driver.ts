@@ -544,7 +544,12 @@ class AgentBrowserCliDriver implements BrowserQaDriver {
       return result;
     }
 
-    if (!commandOutputContainsExpectedText(result.value.stdout, expected)) {
+    const textFound =
+      selector === undefined
+        ? commandOutputHasTrueResult(result.value.stdout)
+        : commandOutputContainsExpectedText(result.value.stdout, expected);
+
+    if (!textFound) {
       return err(
         createSurfaceError("flow_step_failed", "Expected text was not found in the browser state."),
       );
@@ -973,12 +978,39 @@ function commandOutputContainsExpectedText(stdout: string, expected: string): bo
   return JSON.stringify(parsed).includes(expected) || JSON.stringify(parsed) === "true";
 }
 
+function commandOutputHasTrueResult(stdout: string): boolean {
+  const parsed = parseJsonOrText(stdout);
+
+  if (typeof parsed === "string") {
+    return parsed.trim() === "true";
+  }
+
+  if (parsed === true) {
+    return true;
+  }
+
+  if (!isRecord(parsed)) {
+    return false;
+  }
+
+  if (parsed.result === true) {
+    return true;
+  }
+
+  const data = parsed.data;
+  return isRecord(data) && data.result === true;
+}
+
 function parseJsonOrText(value: string): unknown {
   try {
     return JSON.parse(value) as unknown;
   } catch {
     return value;
   }
+}
+
+function isRecord(value: unknown): value is Readonly<Record<string, unknown>> {
+  return typeof value === "object" && value !== null;
 }
 
 function parseScalarCommandOutput(value: string): string {

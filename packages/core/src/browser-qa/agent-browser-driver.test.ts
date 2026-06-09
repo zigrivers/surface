@@ -227,6 +227,24 @@ describe("agent-browser driver", () => {
     ]);
   });
 
+  it("passes locatorless text assertions when agent-browser eval returns true JSON", async () => {
+    const invocations: BrowserQaAgentBrowserCommandInput[] = [];
+    const run: BrowserQaAgentBrowserCommandRunner = (input) => {
+      invocations.push(input);
+      return Promise.resolve(makeCommandResult({ stdout: JSON.stringify({ result: true }) }));
+    };
+    const driver = createAgentBrowserCliDriver({ runCommand: run });
+
+    const result = await driver.assertText({ expect: { text: "Checkout" } });
+
+    expect(result).toMatchObject({ ok: true });
+    expect(invocations[0]?.args).toEqual([
+      "eval",
+      'Boolean(document.body && document.body.innerText && document.body.innerText.includes("Checkout"))',
+      "--json",
+    ]);
+  });
+
   it("recognizes the real agent-browser command surface when the binary is installed", async () => {
     const binary = process.env.SURFACE_AGENT_BROWSER_BINARY ?? "agent-browser";
     const help = await runHelpIfAvailable(binary, ["--help"]);
