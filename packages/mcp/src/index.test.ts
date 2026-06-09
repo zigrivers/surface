@@ -5,8 +5,11 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  createSurfaceError,
   createSurfaceComposition,
+  err,
   ok,
+  type Finding,
   type FindingDraft,
   type LensRegistration,
   type SurfaceComposition,
@@ -421,6 +424,357 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
     }
   });
 
+  it("does not clear persisted audit findings when persisting a pipeline run", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-mcp-pipeline-state-"));
+    const capture = captureFixture();
+    const findingDraft = findingDraftFixture();
+
+    try {
+      const composition = compositionFixture({
+        capture,
+        lensRegistry: [lensRegistrationFixture(findingDraft)],
+        projectRoot: root,
+      });
+      const server = createSurfaceMcpServer({ composition });
+      const audit = await server.callTool("surface_audit", { target: capture.target });
+
+      expect(audit).toMatchObject({ ok: true });
+
+      const run = await server.callTool("surface_run", { step: "all" });
+
+      expect(run).toMatchObject({ ok: true });
+
+      const state = await composition.stateStore.readState();
+
+      expect(state).toMatchObject({
+        ok: true,
+        value: {
+          findings: [{ id: findingDraft.draftId }],
+          runRecords: [
+            { findings: [{ id: findingDraft.draftId }] },
+            { stage: "all", status: "completed" },
+          ],
+        },
+      });
+      if (!state.ok) {
+        throw new Error(state.error.message);
+      }
+      expect(state.value.runRecords?.at(-1)).not.toHaveProperty("findings");
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("preserves run records written during pipeline execution when persisting history", async () => {
+    const capture = captureFixture();
+    const stateStore = new MemoryStateStore();
+    const base = compositionFixture({ capture });
+    const composition: SurfaceComposition = {
+      ...base,
+      pipelineOrchestrator: {
+        run: ({ runId }) => {
+          const handlerWrite = stateStore.updateState((state) => ({
+            ...state,
+            runRecords: [
+              ...(state.runRecords ?? []),
+              {
+                runId: "run_handler_side_effect",
+                status: "completed",
+                trackedFindings: [],
+              },
+            ],
+          }));
+
+          if (!handlerWrite.ok) {
+            throw new Error(handlerWrite.error.message);
+          }
+
+          return Promise.resolve(
+            ok({
+              events: [],
+              newlyCompletedStages: ["discovery"],
+              runId,
+              skippedStages: [],
+            }),
+          );
+        },
+      },
+      stateStore,
+    };
+    const server = createSurfaceMcpServer({ composition });
+    const run = await server.callTool("surface_run", { step: "all" });
+
+    expect(run).toMatchObject({ ok: true });
+    if (!run.ok) {
+      throw new Error(run.error.message);
+    }
+    const state = stateStore.readState();
+
+    expect(state).toMatchObject({ ok: true });
+    if (!state.ok) {
+      throw new Error(state.error.message);
+    }
+    expect(state.value.runRecords?.map((record) => record.runId)).toEqual([
+      "run_handler_side_effect",
+      run.value.runId,
+    ]);
+  });
+
+  it("merges pipeline metadata into same-run MCP records written by handlers", async () => {
+    const capture = captureFixture();
+    const finding = findingFixture();
+    const stateStore = new MemoryStateStore();
+    const base = compositionFixture({ capture });
+    const composition: SurfaceComposition = {
+      ...base,
+      pipelineOrchestrator: {
+        run: ({ runId }) => {
+          const handlerWrite = stateStore.updateState((state) => ({
+            ...state,
+            runRecords: [
+              ...(state.runRecords ?? []),
+              {
+                findings: [finding],
+                runId,
+                status: "completed",
+                trackedFindings: [],
+              },
+            ],
+          }));
+
+          if (!handlerWrite.ok) {
+            throw new Error(handlerWrite.error.message);
+          }
+
+          return Promise.resolve(
+            ok({
+              events: [],
+              newlyCompletedStages: ["discovery"],
+              runId,
+              skippedStages: [],
+            }),
+          );
+        },
+      },
+      stateStore,
+    };
+    const server = createSurfaceMcpServer({ composition });
+    const run = await server.callTool("surface_run", { step: "all" });
+
+    expect(run).toMatchObject({ ok: true });
+    if (!run.ok) {
+      throw new Error(run.error.message);
+    }
+    const state = stateStore.readState();
+
+    expect(state).toMatchObject({ ok: true });
+    if (!state.ok) {
+      throw new Error(state.error.message);
+    }
+    expect(state.value.runRecords).toHaveLength(1);
+    expect(state.value.runRecords?.[0]).toMatchObject({
+      completedStages: ["discovery"],
+      findings: [{ id: finding.id }],
+      runId: run.value.runId,
+      stage: "all",
+      status: "completed",
+    });
+  });
+
+  it("persists failed MCP pipeline runs in status history", async () => {
+    const capture = captureFixture();
+    const stateStore = new MemoryStateStore();
+    const base = compositionFixture({ capture });
+    const composition: SurfaceComposition = {
+      ...base,
+      pipelineOrchestrator: {
+        run: ({ runId }) =>
+          Promise.resolve(
+            err(
+              createSurfaceError("step_failed", "MCP pipeline failed in test.", {
+                details: { runId },
+              }),
+            ),
+          ),
+      },
+      stateStore,
+    };
+    const server = createSurfaceMcpServer({ composition });
+    const run = await server.callTool("surface_run", { step: "all" });
+
+    expect(run).toMatchObject({ ok: false, error: { code: "step_failed" } });
+    const status = await server.callTool("surface_status", {});
+
+    expect(status).toMatchObject({
+      ok: true,
+      value: {
+        progress: { failedRuns: 1 },
+        runHistory: [{ stage: "all", status: "failed" }],
+      },
+    });
+  });
+
+  it("reports MCP progress totals from full history while capping visible run history", async () => {
+    const stateStore = new MemoryStateStore({
+      runRecords: Array.from({ length: 25 }, (_, index) => ({
+        runId: `run_old_${index}`,
+        status: "completed" as const,
+        trackedFindings: [],
+      })),
+      version: "1.0",
+    });
+    const composition = { ...compositionFixture({ capture: captureFixture() }), stateStore };
+    const server = createSurfaceMcpServer({ composition });
+
+    const status = await server.callTool("surface_status", {});
+
+    expect(status).toMatchObject({ ok: true });
+    if (!status.ok) {
+      throw new Error(status.error.message);
+    }
+    expect(status.value.progress.completedRuns).toBe(25);
+    expect(status.value.runHistory).toHaveLength(20);
+    expect(status.value.runHistory.slice(0, 3).map((record) => record.runId)).toEqual([
+      "run_old_24",
+      "run_old_23",
+      "run_old_22",
+    ]);
+  });
+
+  it("merges duplicate persisted run ids during MCP hydration", async () => {
+    const capture = captureFixture();
+    const finding = findingFixture();
+    const stateStore = new MemoryStateStore({
+      runRecords: [
+        {
+          completedStages: ["discovery"],
+          findings: [finding],
+          runId: "run_duplicate",
+          status: "completed" as const,
+          trackedFindings: [],
+        },
+        {
+          completedStages: ["capture"],
+          runId: "run_duplicate",
+          stage: "capture",
+          status: "completed" as const,
+          trackedFindings: [],
+        },
+      ],
+      version: "1.0",
+    });
+    const composition = { ...compositionFixture({ capture }), stateStore };
+    const server = createSurfaceMcpServer({ composition });
+
+    await expect(server.callTool("surface_status", {})).resolves.toMatchObject({
+      ok: true,
+      value: {
+        progress: { completedRuns: 1, findings: 1 },
+        runHistory: [
+          {
+            completedStages: ["discovery", "capture"],
+            findings: 1,
+            runId: "run_duplicate",
+            stage: "capture",
+          },
+        ],
+      },
+    });
+  });
+
+  it("hydrates status-omitted audit records with capture artifacts", async () => {
+    const capture = captureFixture();
+    const stateStore = new MemoryStateStore({
+      runRecords: [
+        {
+          capture,
+          runId: "run_capture_only",
+          trackedFindings: [],
+        },
+      ],
+      version: "1.0",
+    });
+    const composition = { ...compositionFixture({ capture }), stateStore };
+    const server = createSurfaceMcpServer({ composition });
+
+    await expect(server.callTool("surface_status", {})).resolves.toMatchObject({
+      ok: true,
+      value: {
+        progress: { completedRuns: 1 },
+        runHistory: [{ runId: "run_capture_only", status: "completed", target: capture.target }],
+      },
+    });
+  });
+
+  it("uses aggregate same-run stage coverage for MCP completed step-by-step runs", async () => {
+    const stateStore = new MemoryStateStore({
+      currentStage: "completed",
+      pipeline: {
+        runId: "run_pipeline",
+        stageIds: ["discovery", "capture", "heuristic"],
+      },
+      runRecords: [
+        {
+          completedStages: ["discovery", "capture"],
+          runId: "run_pipeline",
+          stage: "capture",
+          status: "completed" as const,
+          trackedFindings: [],
+        },
+        {
+          completedStages: ["heuristic"],
+          runId: "run_pipeline",
+          stage: "heuristic",
+          status: "completed" as const,
+          trackedFindings: [],
+        },
+      ],
+      version: "1.0",
+    });
+    const composition = { ...compositionFixture({ capture: captureFixture() }), stateStore };
+    const server = createSurfaceMcpServer({ composition });
+
+    await expect(server.callTool("surface_next", {})).resolves.toMatchObject({
+      ok: true,
+      value: { eligible: [] },
+    });
+  });
+
+  it("reports MCP currentStage from project state instead of latest partial run status", async () => {
+    const stateStore = new MemoryStateStore({
+      currentStage: "capture",
+      pipeline: {
+        lastCompletedStage: "capture",
+        runId: "run_pipeline",
+        stageIds: ["discovery", "capture", "heuristic"],
+      },
+      runRecords: [
+        {
+          completedStages: ["discovery", "capture"],
+          runId: "run_pipeline",
+          stage: "capture",
+          status: "completed" as const,
+          trackedFindings: [],
+        },
+      ],
+      version: "1.0",
+    });
+    const composition = { ...compositionFixture({ capture: captureFixture() }), stateStore };
+    const server = createSurfaceMcpServer({ composition });
+
+    await expect(server.callTool("surface_status", {})).resolves.toMatchObject({
+      ok: true,
+      value: { currentStage: "capture", runHistory: [{ status: "completed" }] },
+    });
+    const next = await server.callTool("surface_next", {});
+
+    expect(next).toMatchObject({ ok: true });
+    if (!next.ok) {
+      throw new Error(next.error.message);
+    }
+    expect(next.value.eligible).toContain("run heuristic");
+  });
+
   it("returns structured domain errors for missing analytical state", async () => {
     const server = createSurfaceMcpServer({
       composition: createSurfaceComposition({
@@ -554,12 +908,41 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
       ok: true,
       value: { eligible: ["run discovery", "run all"] },
     });
-    await expect(server.callTool("surface_run", { step: "all" })).resolves.toMatchObject({
+    const run = await server.callTool("surface_run", { step: "all" });
+
+    expect(run).toMatchObject({
       ok: true,
       value: {
         stage: "all",
         status: "completed",
       },
+    });
+    if (!run.ok) {
+      throw new Error(run.error.message);
+    }
+    await expect(server.callTool("surface_next", {})).resolves.toMatchObject({
+      ok: true,
+      value: { eligible: [] },
+    });
+    await expect(server.callTool("surface_status", {})).resolves.toMatchObject({
+      ok: true,
+      value: {
+        currentStage: "completed",
+        progress: { completedRuns: 1, failedRuns: 0, findings: 0 },
+        runHistory: [{ runId: run.value.runId, stage: "all", status: "completed" }],
+      },
+    });
+    await expect(
+      server.callTool("surface_gate", { runId: run.value.runId }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "run_not_found" },
+    });
+    await expect(
+      server.callTool("surface_validate", { runId: run.value.runId }),
+    ).resolves.toMatchObject({
+      ok: false,
+      error: { code: "run_not_found" },
     });
     await expect(server.callTool("surface_run", { step: "missing" })).resolves.toMatchObject({
       ok: false,
@@ -727,6 +1110,33 @@ function captureBackendFixture(capture: Capture) {
     id: "test",
     detect: () => true,
     observe: () => ok(capture),
+  };
+}
+
+function findingFixture(): Finding {
+  return {
+    citedHeuristics: [],
+    confidenceBand: "assert",
+    dimensions: {
+      a11yLegalRisk: 0.8,
+      agentImplementability: 0.9,
+      businessImpact: 0.4,
+      confidence: 1,
+      effort: 0.2,
+      evidenceQuality: 1,
+      severity: 0.8,
+      userImpact: 0.7,
+    },
+    evidence: [],
+    gatedForHuman: false,
+    id: "finding_handler_preserved",
+    issueType: "handler-finding",
+    lens: "test",
+    location: { selector: ".primary" },
+    method: "measured",
+    rationale: "Handler-written finding must survive pipeline metadata persistence.",
+    severityBand: "P1",
+    title: "Handler finding",
   };
 }
 

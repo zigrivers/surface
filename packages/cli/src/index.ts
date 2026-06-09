@@ -9,6 +9,7 @@ import { parse as parseYaml } from "yaml";
 import {
   DEFAULT_COMPOSITION_STAGE_IDS,
   DEFAULT_SURFACE_CONFIG,
+  PROJECT_STATUS_RUN_HISTORY_LIMIT,
   BacklogSchema,
   DirectSubscriptionChannelIdSchema,
   DepthSchema,
@@ -42,7 +43,13 @@ import {
   installSubscriptionTempRootProcessCleanupHandlers,
   maskModelArtifactText,
   maskModelPlainText,
+  mergeProjectRunRecordsByRunId,
+  projectHasCompletedPipelineRun,
+  projectRunRecordHasAuditArtifacts,
+  projectStatusProgressForRunRecords,
+  projectStatusRunHistoryEntries,
   resolveSurfaceConfig,
+  stateWithUpsertedProjectRunRecord,
   toCliErrorEnvelope,
   transitionTrackedFinding,
   type AuditRunnerResult,
@@ -53,6 +60,7 @@ import {
   type Evidence,
   type GitHubChecksExport,
   type GitHubChecksExporterOptions,
+  type ProjectStatusRunHistoryEntry,
   type Result,
   type SurfaceSarifLog,
   type SurfaceConfigLayer,
@@ -63,6 +71,7 @@ import {
 import type {
   Capture,
   GateResult,
+  ProjectRunRecord,
   ProjectStateSnapshot as CoreProjectStateSnapshot,
   Target,
 } from "@zigrivers/surface-core/interfaces";
@@ -138,11 +147,15 @@ export type RunSurfaceCliOptions = SurfaceCompositionOptions & {
 
 type StatusOutput = {
   readonly progress: {
+    readonly completedRuns: number;
+    readonly failedRuns: number;
+    readonly findings: number;
     readonly hasPipeline: boolean;
   };
   readonly currentStage: string;
-  readonly runHistory: readonly unknown[];
+  readonly runHistory: readonly StatusRunHistoryEntry[];
 };
+type StatusRunHistoryEntry = ProjectStatusRunHistoryEntry;
 type InitOutput = {
   readonly stateDir: string;
   readonly config: SurfaceConfig;
@@ -750,12 +763,21 @@ async function readStatus(composition: SurfaceComposition): Promise<Result<Statu
     return state;
   }
 
+  const runRecords = mergeProjectRunRecordsByRunId(state.value.runRecords ?? []);
+  const runHistory = projectStatusRunHistoryEntries(runRecords, {
+    limit: PROJECT_STATUS_RUN_HISTORY_LIMIT,
+  });
+  const progress = projectStatusProgressForRunRecords(runRecords);
+
   return {
     ok: true,
     value: {
       currentStage: state.value.currentStage ?? state.value.pipeline?.lastCompletedStage ?? "new",
-      progress: { hasPipeline: state.value.pipeline !== undefined },
-      runHistory: [],
+      progress: {
+        ...progress,
+        hasPipeline: state.value.pipeline !== undefined,
+      },
+      runHistory,
     },
   };
 }
@@ -796,15 +818,64 @@ async function runPipelineStep(
   }
 
   const runId = nextCliRunId();
-  const run = await composition.pipelineOrchestrator.run({ config: config.value, runId });
+  let run: Awaited<ReturnType<SurfaceComposition["pipelineOrchestrator"]["run"]>>;
+
+  try {
+    run = await composition.pipelineOrchestrator.run({ config: config.value, runId });
+  } catch (cause) {
+    const recordWrite = await appendPipelineRunRecord(composition, {
+      completedAt: new Date().toISOString(),
+      runId,
+      stage: step,
+      status: "failed",
+      trackedFindings: [],
+    });
+
+    if (!recordWrite.ok) {
+      return recordWrite;
+    }
+
+    return resultErr(
+      createSurfaceError("step_failed", `Surface run ${runId} failed.`, {
+        cause,
+        details: { runId, stage: step },
+      }),
+    );
+  }
 
   if (!isResultOk(run)) {
+    const recordWrite = await appendPipelineRunRecord(composition, {
+      completedAt: new Date().toISOString(),
+      runId,
+      stage: step,
+      status: "failed",
+      trackedFindings: [],
+    });
+
+    if (!recordWrite.ok) {
+      return recordWrite;
+    }
+
     return resultErr(
       createSurfaceError("step_failed", `Surface run ${runId} failed.`, {
         cause: run.error,
         details: { runId, stage: step },
       }),
     );
+  }
+
+  const recordWrite = await appendPipelineRunRecord(composition, {
+    completedAt: new Date().toISOString(),
+    completedStages: run.value.newlyCompletedStages,
+    runId: run.value.runId,
+    skippedStages: run.value.skippedStages,
+    stage: step,
+    status: "completed",
+    trackedFindings: [],
+  });
+
+  if (!recordWrite.ok) {
+    return recordWrite;
   }
 
   return resultOk({
@@ -821,13 +892,43 @@ async function readNext(composition: SurfaceComposition): Promise<Result<NextOut
     return state;
   }
 
-  const lastCompletedStage = state.value.pipeline?.lastCompletedStage;
-  const eligible =
-    lastCompletedStage === undefined
-      ? ["run discovery", "run all"]
-      : eligibleStagesAfter(lastCompletedStage).map((stage) => `run ${stage}`);
+  return resultOk({ eligible: eligiblePipelineCommandsForState(state.value) });
+}
 
-  return resultOk({ eligible });
+async function appendPipelineRunRecord(
+  composition: SurfaceComposition,
+  record: ProjectRunRecord,
+): Promise<Result<void>> {
+  const appendRecord = (state: CliProjectStateSnapshot): CliProjectStateSnapshot =>
+    stateWithUpsertedProjectRunRecord(state, record);
+
+  if (composition.stateStore.updateState !== undefined) {
+    const updated = await composition.stateStore.updateState(appendRecord);
+
+    return updated.ok ? resultOk(undefined) : updated;
+  }
+
+  const current = await composition.stateStore.readState();
+
+  if (!current.ok) {
+    return current;
+  }
+
+  const written = await composition.stateStore.writeState(appendRecord(current.value));
+
+  return written.ok ? resultOk(undefined) : written;
+}
+
+function eligiblePipelineCommandsForState(state: CliProjectStateSnapshot): readonly string[] {
+  if (projectHasCompletedPipelineRun(state)) {
+    return [];
+  }
+
+  const lastCompletedStage = state.pipeline?.lastCompletedStage;
+
+  return lastCompletedStage === undefined
+    ? ["run discovery", "run all"]
+    : eligibleStagesAfter(lastCompletedStage).map((stage) => `run ${stage}`);
 }
 
 async function captureTarget(
@@ -1327,7 +1428,9 @@ function trackedFindingsForRunOption(
     return resultOk(state.trackedFindings ?? []);
   }
 
-  const record = state.runRecords?.find((candidate) => candidate.runId === runId);
+  const record = state.runRecords?.find(
+    (candidate) => candidate.runId === runId && isCliAuditRunRecord(candidate),
+  );
 
   if (record === undefined) {
     return resultErr(
@@ -1338,6 +1441,10 @@ function trackedFindingsForRunOption(
   }
 
   return resultOk(record.trackedFindings);
+}
+
+function isCliAuditRunRecord(record: ProjectRunRecord): boolean {
+  return projectRunRecordHasAuditArtifacts(record);
 }
 
 async function validateRun(
@@ -1590,8 +1697,12 @@ async function diffRuns(
     return state;
   }
 
-  const before = state.value.runRecords?.find((record) => record.runId === beforeRunId);
-  const after = state.value.runRecords?.find((record) => record.runId === afterRunId);
+  const before = state.value.runRecords?.find(
+    (record) => record.runId === beforeRunId && isCliAuditRunRecord(record),
+  );
+  const after = state.value.runRecords?.find(
+    (record) => record.runId === afterRunId && isCliAuditRunRecord(record),
+  );
 
   if (before === undefined || after === undefined) {
     return resultErr(

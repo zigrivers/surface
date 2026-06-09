@@ -470,6 +470,8 @@ export interface ProjectRunRecord {
   readonly runId: string;
   readonly status?: "completed" | "failed";
   readonly backlog?: FindingsBacklog;
+  readonly completedAt?: string;
+  readonly completedStages?: readonly string[];
   readonly capture?: Capture;
   readonly findings?: readonly Finding[];
   readonly reconciliationQuestions?: readonly ReconciliationQuestion[];
@@ -478,6 +480,11 @@ export interface ProjectRunRecord {
     readonly message: string;
     readonly reason: string;
   }[];
+  readonly skippedStages?: readonly {
+    readonly stage: string;
+    readonly reason: string;
+  }[];
+  readonly stage?: string;
   readonly trackedFindings: readonly TrackedFinding[];
 }
 

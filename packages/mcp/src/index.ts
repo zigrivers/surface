@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import {
   DEFAULT_COMPOSITION_STAGE_IDS,
   DEFAULT_SURFACE_CONFIG,
+  PROJECT_STATUS_RUN_HISTORY_LIMIT,
   browserQaFlowRunsForGate,
   browserQaFlowSeverityFromWithFlows,
   browserQaGateTargetCli,
@@ -17,9 +18,15 @@ import {
   evaluateGateWithQaFlows,
   instantiateLensExecutionPlan,
   isOk,
+  mergeProjectRunRecordsByRunId,
   ok,
+  projectHasCompletedPipelineRun,
+  projectRunRecordHasAuditArtifacts,
+  projectStatusProgressForRunRecords,
+  projectStatusRunHistoryEntries,
   scoreFinding,
   selectLensExecutionPlan,
+  stateWithUpsertedProjectRunRecord,
   synthesizeBacklog,
   toMcpError,
   transitionTrackedFinding,
@@ -148,10 +155,17 @@ export type SurfaceMcpStatusOutput = {
     readonly findings: number;
   };
   readonly runHistory: readonly {
+    readonly completedAt?: string;
+    readonly completedStages?: readonly string[];
+    readonly findings: number;
     readonly runId: string;
+    readonly skippedStages?: readonly {
+      readonly reason: string;
+      readonly stage: string;
+    }[];
+    readonly stage?: string;
     readonly status: "completed" | "failed";
     readonly target?: Target;
-    readonly findings: number;
   }[];
 };
 
@@ -497,10 +511,17 @@ type SurfaceMcpSessionState = {
 type SurfaceMcpRunRecord = {
   readonly runId: string;
   readonly status: "completed" | "failed";
-  readonly backlog: Backlog;
-  readonly capture: Capture;
-  readonly findings: readonly Finding[];
-  readonly skippedLenses: SurfaceMcpAuditOutput["skippedLenses"];
+  readonly backlog?: Backlog;
+  readonly capture?: Capture;
+  readonly completedAt?: string;
+  readonly completedStages?: readonly string[];
+  readonly findings?: readonly Finding[];
+  readonly skippedLenses?: SurfaceMcpAuditOutput["skippedLenses"];
+  readonly skippedStages?: readonly {
+    readonly reason: string;
+    readonly stage: string;
+  }[];
+  readonly stage?: string;
   readonly trackedFindings: readonly TrackedFinding[];
 };
 
@@ -529,6 +550,20 @@ function createSurfaceMcpSessionState(projectRoot: string): SurfaceMcpSessionSta
     nextBaselineSequence: 1,
     nextRunSequence: 1,
   };
+}
+
+function appendSurfaceMcpRunRecord(
+  session: SurfaceMcpSessionState,
+  record: SurfaceMcpRunRecord,
+): void {
+  const existingIndex = session.runOrder.indexOf(record.runId);
+
+  if (existingIndex !== -1) {
+    session.runOrder.splice(existingIndex, 1);
+  }
+
+  session.runs.set(record.runId, record);
+  session.runOrder.push(record.runId);
 }
 
 async function hydrateSurfaceMcpSession(
@@ -561,15 +596,16 @@ function resetSurfaceMcpSessionFromState(
     session.trackedByIdentity.set(trackedFinding.identityKey, trackedFinding);
   }
 
-  for (const record of state.runRecords ?? []) {
+  const runRecords = mergeProjectRunRecordsByRunId(state.runRecords ?? []);
+
+  for (const record of runRecords) {
     const mcpRecord = surfaceMcpRunRecordFromProjectRecord(record);
 
     if (mcpRecord === undefined) {
       continue;
     }
 
-    session.runs.set(mcpRecord.runId, mcpRecord);
-    session.runOrder.push(mcpRecord.runId);
+    appendSurfaceMcpRunRecord(session, mcpRecord);
 
     for (const trackedFinding of mcpRecord.trackedFindings) {
       session.trackedByIdentity.set(trackedFinding.identityKey, trackedFinding);
@@ -593,23 +629,29 @@ function resetSurfaceMcpSessionFromState(
 function surfaceMcpRunRecordFromProjectRecord(
   record: ProjectRunRecord,
 ): SurfaceMcpRunRecord | undefined {
-  if (
-    record.backlog === undefined ||
-    record.capture === undefined ||
-    record.findings === undefined ||
-    record.status === undefined ||
-    record.skippedLenses === undefined
-  ) {
+  const hasRunData =
+    record.status !== undefined ||
+    record.completedAt !== undefined ||
+    record.completedStages !== undefined ||
+    record.skippedStages !== undefined ||
+    record.stage !== undefined ||
+    projectRunRecordHasAuditArtifacts(record);
+
+  if (!hasRunData) {
     return undefined;
   }
 
   return {
-    backlog: record.backlog,
-    capture: record.capture,
-    findings: record.findings,
+    ...(record.backlog === undefined ? {} : { backlog: record.backlog }),
+    ...(record.capture === undefined ? {} : { capture: record.capture }),
+    ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+    ...(record.completedStages === undefined ? {} : { completedStages: record.completedStages }),
+    ...(record.findings === undefined ? {} : { findings: record.findings }),
     runId: record.runId,
-    skippedLenses: record.skippedLenses,
-    status: record.status,
+    ...(record.skippedLenses === undefined ? {} : { skippedLenses: record.skippedLenses }),
+    ...(record.skippedStages === undefined ? {} : { skippedStages: record.skippedStages }),
+    ...(record.stage === undefined ? {} : { stage: record.stage }),
+    status: record.status ?? "completed",
     trackedFindings: record.trackedFindings,
   };
 }
@@ -625,8 +667,34 @@ function surfaceMcpBaselineFromProjectBaseline(baseline: Baseline): SurfaceMcpBa
 async function persistSurfaceMcpSession(
   composition: SurfaceComposition,
   session: SurfaceMcpSessionState,
+  options: { readonly currentStage?: string } = {},
 ): Promise<Result<void>> {
-  const updateState = stateSnapshotForMcpSession(session);
+  const updateState = stateSnapshotForMcpSession(session, options);
+
+  if (composition.stateStore.updateState !== undefined) {
+    const updated = await composition.stateStore.updateState(updateState);
+
+    return updated.ok ? ok(undefined) : updated;
+  }
+
+  const current = await composition.stateStore.readState();
+
+  if (!current.ok) {
+    return current;
+  }
+
+  const written = await composition.stateStore.writeState(updateState(current.value));
+
+  return written.ok ? ok(undefined) : written;
+}
+
+async function appendSurfaceMcpRunRecordToState(
+  composition: SurfaceComposition,
+  record: SurfaceMcpRunRecord,
+): Promise<Result<void>> {
+  const projectRecord = projectRunRecordFromSurfaceMcpRecord(record);
+  const updateState = (state: ProjectStateSnapshot): ProjectStateSnapshot =>
+    stateWithUpsertedProjectRunRecord(state, projectRecord);
 
   if (composition.stateStore.updateState !== undefined) {
     const updated = await composition.stateStore.updateState(updateState);
@@ -647,6 +715,7 @@ async function persistSurfaceMcpSession(
 
 function stateSnapshotForMcpSession(
   session: SurfaceMcpSessionState,
+  options: { readonly currentStage?: string } = {},
 ): (state: ProjectStateSnapshot) => ProjectStateSnapshot {
   return (state) => {
     const runRecords = session.runOrder
@@ -660,7 +729,7 @@ function stateSnapshotForMcpSession(
       .map(projectBaselineFromSurfaceMcpBaseline);
     const trackedFindings = [...session.trackedByIdentity.values()];
     const verdicts = [...session.verdicts.values()];
-    const currentStage = latestRun?.status ?? state.currentStage;
+    const currentStage = options.currentStage ?? state.currentStage;
 
     return {
       ...state,
@@ -677,11 +746,15 @@ function stateSnapshotForMcpSession(
 
 function projectRunRecordFromSurfaceMcpRecord(record: SurfaceMcpRunRecord): ProjectRunRecord {
   return {
-    backlog: record.backlog,
-    capture: record.capture,
-    findings: record.findings,
+    ...(record.backlog === undefined ? {} : { backlog: record.backlog }),
+    ...(record.capture === undefined ? {} : { capture: record.capture }),
+    ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+    ...(record.completedStages === undefined ? {} : { completedStages: record.completedStages }),
+    ...(record.findings === undefined ? {} : { findings: record.findings }),
     runId: record.runId,
-    skippedLenses: record.skippedLenses,
+    ...(record.skippedLenses === undefined ? {} : { skippedLenses: record.skippedLenses }),
+    ...(record.skippedStages === undefined ? {} : { skippedStages: record.skippedStages }),
+    ...(record.stage === undefined ? {} : { stage: record.stage }),
     status: record.status,
     trackedFindings: record.trackedFindings,
   };
@@ -749,11 +822,11 @@ async function callSurfaceMcpTool(
     case "surface_trace":
       return callSurfaceTrace(input.session, input.input);
     case "surface_run":
-      return await callSurfaceRun(input.composition, input.input);
+      return await callSurfaceRun(input.composition, input.session, input.input);
     case "surface_next":
       return await callSurfaceNext(input.composition);
     case "surface_status":
-      return callSurfaceStatus(input.session);
+      return await callSurfaceStatus(input.composition, input.session);
   }
 }
 
@@ -834,21 +907,22 @@ async function callSurfaceAudit(
     status: "completed",
     trackedFindings,
   };
-  session.runs.set(runId, record);
-  session.runOrder.push(runId);
+  appendSurfaceMcpRunRecord(session, record);
 
-  const persisted = await persistSurfaceMcpSession(composition, session);
+  const persisted = await persistSurfaceMcpSession(composition, session, {
+    currentStage: record.status,
+  });
 
   if (!persisted.ok) {
     return persisted;
   }
 
   return ok({
-    backlog: record.backlog,
-    capture: record.capture,
-    findings: record.findings,
+    backlog: backlog.value,
+    capture: capture.value,
+    findings: findings.value,
     runId: record.runId,
-    skippedLenses: record.skippedLenses,
+    skippedLenses: plan.skipped,
   });
 }
 
@@ -898,12 +972,20 @@ async function callSurfaceBacklog(
     return parsed;
   }
 
-  const record = runRecordFor(session, parsed.value.runId);
+  const record = auditRunRecordFor(session, parsed.value.runId);
 
   if (record === undefined) {
     return err(
       createSurfaceError("run_not_found", "No stored MCP run matched the requested backlog.", {
         details: { runId: parsed.value.runId ?? null },
+      }),
+    );
+  }
+
+  if (record.backlog === undefined) {
+    return err(
+      createSurfaceError("run_not_found", "Stored MCP run does not have a backlog.", {
+        details: { runId: parsed.value.runId ?? record.runId },
       }),
     );
   }
@@ -969,7 +1051,7 @@ async function callSurfaceGate(
     return parsed;
   }
 
-  const record = runRecordFor(session, parsed.value.runId);
+  const record = auditRunRecordFor(session, parsed.value.runId);
 
   if (record === undefined) {
     return err(
@@ -981,7 +1063,7 @@ async function callSurfaceGate(
 
   const baseline = latestBaseline(session);
   const baselineIdentityKeys = baseline?.identityKeys ?? new Set<string>();
-  const findings = record.findings.filter((finding) => {
+  const findings = (record.findings ?? []).filter((finding) => {
     const tracked = trackedFindingForRunFinding(record, finding.id);
 
     return tracked === undefined || !baselineIdentityKeys.has(tracked.identityKey);
@@ -1035,7 +1117,7 @@ function callSurfaceValidate(
     return parsed;
   }
 
-  const record = runRecordFor(session, parsed.value.runId);
+  const record = auditRunRecordFor(session, parsed.value.runId);
 
   if (record === undefined) {
     return err(
@@ -1187,8 +1269,8 @@ function callSurfaceDiff(
     return parsed;
   }
 
-  const before = runRecordFor(session, parsed.value.before.runId);
-  const after = runRecordFor(session, parsed.value.after.runId);
+  const before = auditRunRecordFor(session, parsed.value.before.runId);
+  const after = auditRunRecordFor(session, parsed.value.after.runId);
 
   if (before === undefined || after === undefined) {
     return err(
@@ -1251,6 +1333,7 @@ function callSurfaceTrace(
 
 async function callSurfaceRun(
   composition: SurfaceComposition,
+  session: SurfaceMcpSessionState,
   rawInput: unknown,
 ): Promise<Result<SurfaceMcpRunOutput>> {
   const parsed = parseToolInput("surface_run", rawInput);
@@ -1268,12 +1351,47 @@ async function callSurfaceRun(
   }
 
   const runId = nextMcpPipelineRunId();
-  const run = await composition.pipelineOrchestrator.run({
-    config: DEFAULT_SURFACE_CONFIG,
-    runId,
-  });
+  let run: Awaited<ReturnType<SurfaceComposition["pipelineOrchestrator"]["run"]>>;
+
+  try {
+    run = await composition.pipelineOrchestrator.run({
+      config: DEFAULT_SURFACE_CONFIG,
+      runId,
+    });
+  } catch (cause) {
+    const persisted = await persistFailedSurfaceMcpPipelineRun(composition, session, {
+      completedAt: new Date().toISOString(),
+      runId,
+      stage: parsed.value.step,
+      status: "failed",
+      trackedFindings: [],
+    });
+
+    if (!persisted.ok) {
+      return persisted;
+    }
+
+    return err(
+      createSurfaceError("step_failed", `MCP pipeline run ${runId} failed.`, {
+        cause,
+        details: { runId, stage: parsed.value.step },
+      }),
+    );
+  }
 
   if (!run.ok) {
+    const persisted = await persistFailedSurfaceMcpPipelineRun(composition, session, {
+      completedAt: new Date().toISOString(),
+      runId,
+      stage: parsed.value.step,
+      status: "failed",
+      trackedFindings: [],
+    });
+
+    if (!persisted.ok) {
+      return persisted;
+    }
+
     return err(
       createSurfaceError("step_failed", `MCP pipeline run ${runId} failed.`, {
         cause: run.error,
@@ -1282,11 +1400,47 @@ async function callSurfaceRun(
     );
   }
 
+  const record: SurfaceMcpRunRecord = {
+    completedAt: new Date().toISOString(),
+    completedStages: run.value.newlyCompletedStages,
+    runId: run.value.runId,
+    skippedStages: run.value.skippedStages,
+    stage: parsed.value.step,
+    status: "completed",
+    trackedFindings: [],
+  };
+
+  const persisted = await appendSurfaceMcpRunRecordToState(composition, record);
+
+  if (!persisted.ok) {
+    return persisted;
+  }
+
+  const hydrated = await hydrateSurfaceMcpSession(composition, session);
+
+  if (!hydrated.ok) {
+    return hydrated;
+  }
+
   return ok({
     runId: run.value.runId,
     stage: parsed.value.step,
     status: "completed",
   });
+}
+
+async function persistFailedSurfaceMcpPipelineRun(
+  composition: SurfaceComposition,
+  session: SurfaceMcpSessionState,
+  record: SurfaceMcpRunRecord,
+): Promise<Result<void>> {
+  const persisted = await appendSurfaceMcpRunRecordToState(composition, record);
+
+  if (!persisted.ok) {
+    return persisted;
+  }
+
+  return await hydrateSurfaceMcpSession(composition, session);
 }
 
 async function callSurfaceNext(
@@ -1298,34 +1452,47 @@ async function callSurfaceNext(
     return state;
   }
 
-  const lastCompletedStage = state.value.pipeline?.lastCompletedStage;
-  const eligible =
-    lastCompletedStage === undefined
-      ? ["run discovery", "run all"]
-      : eligibleStagesAfter(lastCompletedStage).map((stage) => `run ${stage}`);
-
-  return ok({ eligible });
+  return ok({ eligible: eligiblePipelineCommandsForMcpState(state.value) });
 }
 
-function callSurfaceStatus(session: SurfaceMcpSessionState): Result<SurfaceMcpStatusOutput> {
-  const runHistory = session.runOrder
+function eligiblePipelineCommandsForMcpState(state: ProjectStateSnapshot): readonly string[] {
+  // Keep in sync with the CLI next-step projection without importing CLI code into MCP.
+  if (projectHasCompletedPipelineRun(state)) {
+    return [];
+  }
+
+  const lastCompletedStage = state.pipeline?.lastCompletedStage;
+
+  return lastCompletedStage === undefined
+    ? ["run discovery", "run all"]
+    : eligibleStagesAfter(lastCompletedStage).map((stage) => `run ${stage}`);
+}
+
+async function callSurfaceStatus(
+  composition: SurfaceComposition,
+  session: SurfaceMcpSessionState,
+): Promise<Result<SurfaceMcpStatusOutput>> {
+  const state = await composition.stateStore.readState();
+
+  if (!state.ok) {
+    return state;
+  }
+
+  const runRecords = session.runOrder
     .map((runId) => session.runs.get(runId))
     .filter((record): record is SurfaceMcpRunRecord => record !== undefined)
-    .map((record) => ({
-      findings: record.findings.length,
-      runId: record.runId,
-      status: record.status,
-      target: record.capture.target,
-    }));
-  const completedRuns = runHistory.filter((entry) => entry.status === "completed").length;
-  const failedRuns = runHistory.filter((entry) => entry.status === "failed").length;
+    .map(projectRunRecordFromSurfaceMcpRecord);
+  const runHistory = projectStatusRunHistoryEntries(runRecords, {
+    limit: PROJECT_STATUS_RUN_HISTORY_LIMIT,
+  });
+  const progress = projectStatusProgressForRunRecords(runRecords);
 
   return ok({
-    currentStage: runHistory.at(-1)?.status === "completed" ? "completed" : "pending",
+    currentStage: state.value.currentStage ?? state.value.pipeline?.lastCompletedStage ?? "pending",
     progress: {
-      completedRuns,
-      failedRuns,
-      findings: runHistory.reduce((total, entry) => total + entry.findings, 0),
+      completedRuns: progress.completedRuns,
+      failedRuns: progress.failedRuns,
+      findings: progress.findings,
     },
     runHistory,
   });
@@ -1491,9 +1658,33 @@ function runRecordFor(
     return session.runs.get(runId);
   }
 
-  const latestRunId = session.runOrder.at(-1);
+  for (let index = session.runOrder.length - 1; index >= 0; index -= 1) {
+    const candidateRunId = session.runOrder[index]!;
+    const record = session.runs.get(candidateRunId);
 
-  return latestRunId === undefined ? undefined : session.runs.get(latestRunId);
+    if (record !== undefined && isAuditRunRecord(record)) {
+      return record;
+    }
+  }
+
+  return undefined;
+}
+
+function auditRunRecordFor(
+  session: SurfaceMcpSessionState,
+  runId: string | undefined,
+): SurfaceMcpRunRecord | undefined {
+  const record = runRecordFor(session, runId);
+
+  if (record === undefined) {
+    return undefined;
+  }
+
+  return runId === undefined || isAuditRunRecord(record) ? record : undefined;
+}
+
+function isAuditRunRecord(record: SurfaceMcpRunRecord): boolean {
+  return projectRunRecordHasAuditArtifacts(record);
 }
 
 function findStoredFinding(
@@ -1502,7 +1693,7 @@ function findStoredFinding(
 ): Finding | undefined {
   for (const runId of session.runOrder) {
     const record = session.runs.get(runId);
-    const finding = record?.findings.find((candidate) => candidate.id === findingId);
+    const finding = record?.findings?.find((candidate) => candidate.id === findingId);
 
     if (finding !== undefined) {
       return finding;

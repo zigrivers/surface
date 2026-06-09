@@ -359,6 +359,334 @@ describe("@zigrivers/surface core verbs", () => {
     expect(stateStore.state.currentStage).toBe("completed");
   });
 
+  it("persists pipeline run history and reports no next steps after completion", async () => {
+    const runStdout: string[] = [];
+    const stateStore = new TestMemoryStateStore();
+    const runExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "run", "all"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => runStdout.push(chunk) },
+    });
+
+    expect(runExitCode).toBe(0);
+    const runEnvelope = JSON.parse(runStdout.join("")) as CliEnvelope<{
+      readonly runId: string;
+    }>;
+
+    if (!runEnvelope.ok) {
+      throw new Error("Expected pipeline run to emit a success envelope.");
+    }
+
+    const statusStdout: string[] = [];
+    const statusExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "status"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => statusStdout.push(chunk) },
+    });
+
+    expect(statusExitCode).toBe(0);
+    expect(JSON.parse(statusStdout.join(""))).toMatchObject({
+      data: {
+        currentStage: "completed",
+        progress: {
+          completedRuns: 1,
+          failedRuns: 0,
+          hasPipeline: true,
+        },
+        runHistory: [
+          {
+            runId: runEnvelope.data.runId,
+            stage: "all",
+            status: "completed",
+          },
+        ],
+      },
+      ok: true,
+    });
+
+    const nextStdout: string[] = [];
+    const nextExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "next"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => nextStdout.push(chunk) },
+    });
+
+    expect(nextExitCode).toBe(0);
+    expect(JSON.parse(nextStdout.join(""))).toMatchObject({
+      data: { eligible: [] },
+      ok: true,
+    });
+  });
+
+  it("merges pipeline metadata into same-run records written by handlers", async () => {
+    const stdout: string[] = [];
+    const stateStore = new TestMemoryStateStore();
+    const base = createSurfaceComposition({ stateStore });
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "run", "all"],
+      composition: {
+        ...base,
+        pipelineOrchestrator: {
+          run: ({ runId }) => {
+            stateStore.writeState({
+              ...stateStore.state,
+              runRecords: [
+                ...(stateStore.state.runRecords ?? []),
+                {
+                  findings: [testFinding()],
+                  runId,
+                  status: "completed",
+                  trackedFindings: [],
+                },
+              ],
+            });
+
+            return Promise.resolve(
+              ok({
+                events: [],
+                newlyCompletedStages: ["discovery"],
+                runId,
+                skippedStages: [],
+              }),
+            );
+          },
+        },
+      },
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    const parsed = JSON.parse(stdout.join("")) as CliEnvelope<{ readonly runId: string }>;
+
+    expect(parsed).toMatchObject({ ok: true });
+    if (!parsed.ok) {
+      throw new Error("Expected run to emit a success envelope.");
+    }
+    expect(stateStore.state.runRecords).toHaveLength(1);
+    expect(stateStore.state.runRecords?.[0]).toMatchObject({
+      completedStages: ["discovery"],
+      findings: [{ id: "finding_button_contrast" }],
+      runId: parsed.data.runId,
+      stage: "all",
+      status: "completed",
+    });
+  });
+
+  it("persists failed pipeline run history", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const stateStore = new TestMemoryStateStore();
+    const base = createSurfaceComposition({ stateStore });
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "run", "all"],
+      composition: {
+        ...base,
+        pipelineOrchestrator: {
+          run: ({ runId }) =>
+            Promise.resolve(
+              err(
+                createSurfaceError("step_failed", "Pipeline failed in test.", {
+                  details: { runId },
+                }),
+              ),
+            ),
+        },
+      },
+      io: {
+        stderr: (chunk) => stderr.push(chunk),
+        stdout: (chunk) => stdout.push(chunk),
+      },
+    });
+
+    expect(exitCode).toBe(1);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      error: { code: "step_failed" },
+      ok: false,
+    });
+    expect(stateStore.state.runRecords).toHaveLength(1);
+    expect(stateStore.state.runRecords?.[0]).toMatchObject({
+      stage: "all",
+      status: "failed",
+    });
+  });
+
+  it("does not drop persisted run records when status history is capped", async () => {
+    const stateStore = new TestMemoryStateStore({
+      runRecords: Array.from({ length: 25 }, (_, index) => ({
+        runId: `run_old_${index}`,
+        status: "completed" as const,
+        trackedFindings: [],
+      })),
+      version: "1.0",
+    });
+    const runStdout: string[] = [];
+    const runExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "run", "all"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => runStdout.push(chunk) },
+    });
+
+    expect(runExitCode).toBe(0);
+    expect(stateStore.state.runRecords).toHaveLength(26);
+
+    const statusStdout: string[] = [];
+    const statusExitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "status"],
+      composition: createSurfaceComposition({ stateStore }),
+      io: { stdout: (chunk) => statusStdout.push(chunk) },
+    });
+
+    expect(statusExitCode).toBe(0);
+    const statusEnvelope = JSON.parse(statusStdout.join("")) as CliEnvelope<{
+      readonly progress: {
+        readonly completedRuns: number;
+      };
+      readonly runHistory: readonly { readonly runId: string }[];
+    }>;
+
+    expect(statusEnvelope).toMatchObject({ ok: true });
+    if (!statusEnvelope.ok) {
+      throw new Error("Expected status to emit a success envelope.");
+    }
+    expect(statusEnvelope.data.progress.completedRuns).toBe(26);
+    expect(statusEnvelope.data.runHistory).toHaveLength(20);
+    const latestRunId = stateStore.state.runRecords?.at(-1)?.runId;
+
+    expect(statusEnvelope.data.runHistory.slice(0, 3).map((record) => record.runId)).toEqual([
+      latestRunId,
+      "run_old_24",
+      "run_old_23",
+    ]);
+  });
+
+  it("merges duplicate persisted run ids before reporting status progress", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "status"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore({
+          runRecords: [
+            {
+              completedStages: ["discovery"],
+              findings: [testFinding()],
+              runId: "run_duplicate",
+              status: "completed",
+              trackedFindings: [],
+            },
+            {
+              completedStages: ["capture"],
+              runId: "run_duplicate",
+              stage: "capture",
+              status: "completed",
+              trackedFindings: [],
+            },
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      data: {
+        progress: { completedRuns: 1, findings: 1 },
+        runHistory: [
+          {
+            completedStages: ["discovery", "capture"],
+            findings: 1,
+            runId: "run_duplicate",
+          },
+        ],
+      },
+      ok: true,
+    });
+  });
+
+  it("does not treat audit-completed currentStage as completed pipeline state", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "next"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore({
+          currentStage: "completed",
+          pipeline: {
+            lastCompletedStage: "capture",
+            runId: "run_pipeline",
+            stageIds: ["discovery", "capture", "heuristic"],
+          },
+          runRecords: [
+            {
+              completedStages: ["discovery"],
+              runId: "run_pipeline",
+              stage: "discovery",
+              status: "completed",
+              trackedFindings: [],
+            },
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    const nextEnvelope = JSON.parse(stdout.join("")) as CliEnvelope<{
+      readonly eligible: readonly string[];
+    }>;
+
+    expect(nextEnvelope).toMatchObject({ ok: true });
+    if (!nextEnvelope.ok) {
+      throw new Error("Expected next to emit a success envelope.");
+    }
+    expect(nextEnvelope.data.eligible).toContain("run heuristic");
+  });
+
+  it("uses aggregate same-run stage coverage for completed step-by-step runs", async () => {
+    const stdout: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "next"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore({
+          currentStage: "completed",
+          pipeline: {
+            runId: "run_pipeline",
+            stageIds: ["discovery", "capture", "heuristic"],
+          },
+          runRecords: [
+            {
+              completedStages: ["discovery", "capture"],
+              runId: "run_pipeline",
+              stage: "capture",
+              status: "completed",
+              trackedFindings: [],
+            },
+            {
+              completedStages: ["heuristic"],
+              runId: "run_pipeline",
+              stage: "heuristic",
+              status: "completed",
+              trackedFindings: [],
+            },
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    const nextEnvelope = JSON.parse(stdout.join("")) as CliEnvelope<{
+      readonly eligible: readonly string[];
+    }>;
+
+    expect(nextEnvelope).toMatchObject({
+      data: { eligible: [] },
+      ok: true,
+    });
+  });
+
   it("purges generated model egress artifacts on request", async () => {
     const root = await mkdtemp(join(tmpdir(), "surface-cleanup-model-egress-"));
     const stdout: string[] = [];
