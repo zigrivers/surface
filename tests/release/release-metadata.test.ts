@@ -109,7 +109,8 @@ describe("release package metadata", () => {
     for (const pkg of RELEASE_PACKAGES) {
       expect(workflow).toContain(`pnpm --dir ${pkg.dir} pack --pack-destination "$PACK_DIR"`);
     }
-    expect(workflow).toContain('"$PACK_DIR/zigrivers-surface-$VERSION.tgz"');
+    expect(workflow).toContain('"zigrivers-surface-$VERSION.tgz"');
+    expect(workflow).toContain('npm publish "$PACK_DIR/${tarballs[$index]}"');
     expect(workflow).not.toContain("-0.1.1.tgz");
     expect(workflow).not.toContain("pack --pack-destination .release-packs");
   });
@@ -133,6 +134,9 @@ describe("release package metadata", () => {
     expect(workflow).toContain(
       'if npm view "$package_name@$VERSION" version >/dev/null 2>&1; then',
     );
+    expect(workflow).toContain("already exists on npm; rerun will skip it");
+    expect(workflow).toContain("Skipping $package_name@$VERSION because it already exists on npm");
+    expect(workflow).toContain('for index in "${!package_names[@]}"; do');
     expect(workflow).toContain("if: github.event.inputs.publish == 'true'");
     expect(workflow).toContain('gh release create "$RELEASE_TAG" --title "$RELEASE_TAG"');
     expect(workflow).not.toContain("ref: ${{ inputs.tag }}");
