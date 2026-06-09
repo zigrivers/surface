@@ -26,6 +26,8 @@ export type SurfaceErrorKind = z.infer<typeof SurfaceErrorKindSchema>;
 
 export const SurfaceErrorCodeSchema = z.enum([
   "unknown_step",
+  "unknown_command",
+  "unknown_option",
   "unknown_lens",
   "unknown_export_target",
   "no_target",
@@ -81,6 +83,8 @@ export type SurfaceErrorDefinition = {
 
 export const SURFACE_ERROR_DEFINITIONS = {
   unknown_step: { kind: "UsageError", exitCode: 2 },
+  unknown_command: { kind: "UsageError", exitCode: 2 },
+  unknown_option: { kind: "UsageError", exitCode: 2 },
   unknown_lens: { kind: "UsageError", exitCode: 2 },
   unknown_export_target: { kind: "UsageError", exitCode: 2 },
   no_target: { kind: "UsageError", exitCode: 2 },

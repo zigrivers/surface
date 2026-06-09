@@ -37,7 +37,7 @@ describe("agent-browser capture backend", () => {
       });
     };
 
-    await writeFile(authStatePath, "{}");
+    await writeFile(authStatePath, JSON.stringify({ cookies: [], origins: [] }));
 
     const result = await createAgentBrowserCaptureBackend({
       idFactory: () => "cap-redaction",
@@ -70,6 +70,225 @@ describe("agent-browser capture backend", () => {
       expect(JSON.stringify(result.error.details)).not.toContain(stderrSecret);
       expect(JSON.stringify(result.error.details)).not.toContain(capturedContent);
     }
+  });
+
+  it("reports invalid agent-browser auth-state content as auth injection failure", async () => {
+    const root = await tempRoot();
+    const authStatePath = path.join(root, "auth-state.json");
+    await writeFile(authStatePath, "{}");
+
+    const result = await createAgentBrowserCaptureBackend({
+      runCommand: () => {
+        throw new Error("agent-browser should not run for invalid auth state");
+      },
+    }).observe(
+      { kind: "url", ref: "https://example.com/private-checkout" },
+      {
+        artifactRoot: path.join(root, "captures"),
+        authStateRef: authStatePath,
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      },
+    );
+
+    expect(result).toMatchObject({
+      error: { code: "auth_injection_failed", details: { reason: "invalid-storage-state" } },
+      ok: false,
+    });
+  });
+
+  it("reports agent-browser connection failures as unreachable captures", async () => {
+    const root = await tempRoot();
+    const runCommand: AgentBrowserCommandRunner = (args) => {
+      if (args.includes("close")) {
+        return Promise.resolve({
+          exitCode: 0,
+          stderr: "",
+          stdout: JSON.stringify({ data: null, success: true }),
+        });
+      }
+
+      return Promise.resolve({
+        exitCode: 1,
+        stderr: "net::ERR_CONNECTION_REFUSED at http://127.0.0.1:59998",
+        stdout: "",
+      });
+    };
+
+    const result = await createAgentBrowserCaptureBackend({
+      idFactory: () => "cap-unreachable",
+      runCommand,
+      sessionName: "session-unreachable",
+    }).observe(
+      { kind: "localhost", ref: "http://127.0.0.1:59998" },
+      {
+        artifactRoot: path.join(root, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      },
+    );
+
+    expect(result).toMatchObject({
+      error: {
+        code: "capture_unreachable",
+        details: { backendId: "agent-browser", reason: "target-unreachable" },
+      },
+      ok: false,
+    });
+  });
+
+  it("reports agent-browser network timeout errors as unreachable captures", async () => {
+    const root = await tempRoot();
+    const runCommand: AgentBrowserCommandRunner = (args) => {
+      if (args.includes("close")) {
+        return Promise.resolve({
+          exitCode: 0,
+          stderr: "",
+          stdout: JSON.stringify({ data: null, success: true }),
+        });
+      }
+
+      return Promise.resolve({
+        exitCode: 1,
+        stderr: "net::ERR_TIMED_OUT at https://example.invalid",
+        stdout: "",
+      });
+    };
+
+    const result = await createAgentBrowserCaptureBackend({
+      idFactory: () => "cap-network-timeout",
+      runCommand,
+      sessionName: "session-network-timeout",
+    }).observe(
+      { kind: "url", ref: "https://example.invalid" },
+      {
+        artifactRoot: path.join(root, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      },
+    );
+
+    expect(result).toMatchObject({
+      error: {
+        code: "capture_unreachable",
+        details: { backendId: "agent-browser", reason: "target-unreachable" },
+      },
+      ok: false,
+    });
+  });
+
+  it("classifies network errors at the tail of long agent-browser stderr", async () => {
+    const root = await tempRoot();
+    const runCommand: AgentBrowserCommandRunner = (args) => {
+      if (args.includes("close")) {
+        return Promise.resolve({
+          exitCode: 0,
+          stderr: "",
+          stdout: JSON.stringify({ data: null, success: true }),
+        });
+      }
+
+      return Promise.resolve({
+        exitCode: 1,
+        stderr: `${"x".repeat(20_000)} net::ERR_ADDRESS_UNREACHABLE`,
+        stdout: "",
+      });
+    };
+
+    const result = await createAgentBrowserCaptureBackend({
+      idFactory: () => "cap-long-network-error",
+      runCommand,
+      sessionName: "session-long-network-error",
+    }).observe(
+      { kind: "url", ref: "https://example.invalid" },
+      {
+        artifactRoot: path.join(root, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      },
+    );
+
+    expect(result).toMatchObject({
+      error: {
+        code: "capture_unreachable",
+        details: { backendId: "agent-browser", reason: "target-unreachable" },
+      },
+      ok: false,
+    });
+  });
+
+  it("ignores empty agent-browser failure fields when classifying capture errors", async () => {
+    const root = await tempRoot();
+    const runCommand: AgentBrowserCommandRunner = (args) => {
+      if (args.includes("close")) {
+        return Promise.resolve({
+          exitCode: 0,
+          stderr: "",
+          stdout: JSON.stringify({ data: null, success: true }),
+        });
+      }
+
+      return Promise.resolve({
+        exitCode: 1,
+        stderr: "",
+        stdout: "",
+      });
+    };
+
+    const result = await createAgentBrowserCaptureBackend({
+      idFactory: () => "cap-empty-fields",
+      runCommand,
+      sessionName: "session-empty-fields",
+    }).observe(
+      { kind: "localhost", ref: "http://127.0.0.1:59998" },
+      {
+        artifactRoot: path.join(root, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      },
+    );
+
+    expect(result).toMatchObject({
+      error: {
+        code: "capture_failed",
+        details: { backendId: "agent-browser", reason: "agent-browser-command-failed" },
+      },
+      ok: false,
+    });
+  });
+
+  it("does not classify generic page timeouts as unreachable captures", async () => {
+    const root = await tempRoot();
+    const runCommand: AgentBrowserCommandRunner = (args) => {
+      if (args.includes("close")) {
+        return Promise.resolve({
+          exitCode: 0,
+          stderr: "",
+          stdout: JSON.stringify({ data: null, success: true }),
+        });
+      }
+
+      return Promise.resolve({
+        exitCode: 1,
+        stderr: "Timeout 30000ms exceeded while waiting for selector main",
+        stdout: "",
+      });
+    };
+
+    const result = await createAgentBrowserCaptureBackend({
+      idFactory: () => "cap-selector-timeout",
+      runCommand,
+      sessionName: "session-selector-timeout",
+    }).observe(
+      { kind: "localhost", ref: "http://127.0.0.1:59998" },
+      {
+        artifactRoot: path.join(root, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      },
+    );
+
+    expect(result).toMatchObject({
+      error: {
+        code: "capture_failed",
+        details: { backendId: "agent-browser", reason: "agent-browser-command-failed" },
+      },
+      ok: false,
+    });
   });
 
   it("writes computed styles as lens-readable element snapshots", async () => {

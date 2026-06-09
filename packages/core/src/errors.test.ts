@@ -14,6 +14,8 @@ import {
 
 const API_CONTRACT_ERROR_CODES = [
   "unknown_step",
+  "unknown_command",
+  "unknown_option",
   "unknown_lens",
   "unknown_export_target",
   "no_target",

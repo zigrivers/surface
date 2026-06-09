@@ -54,7 +54,7 @@ describe("E6 Interfaces", () => {
       expect(exitCode).toBe(2);
       expect(stderr.join("")).toBe("");
       expect(JSON.parse(stdout.join(""))).toMatchObject({
-        error: { code: "unknown_step", exitCode: 2 },
+        error: { code: "unknown_command", exitCode: 2 },
         ok: false,
       });
     });
@@ -72,7 +72,7 @@ describe("E6 Interfaces", () => {
         error: {
           likelyCause: expect.any(String),
           nextCommand: "surface --help",
-          whatFailed: expect.stringContaining("unknown_step"),
+          whatFailed: expect.stringContaining("unknown_command"),
         },
       });
     });
