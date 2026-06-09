@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.2 - Durable State and Capture Reliability
+
+- Redacts unsafe `agent-browser` capture command failure details so command errors do not leak raw
+  capture output into Surface error envelopes.
+- Makes pipeline state transitions atomic, preserving overlapping-run acceptance behavior while
+  avoiding partially written stage updates.
+- Validates canonical durable state fields and persists canonical verdict records from CLI and MCP
+  paths.
+- Adds regression coverage for agent-browser capture redaction, pipeline transition races, state
+  validation, and closed-loop CLI/MCP verdict persistence.
+
 ## 0.2.1 - Subscription-Backed Model Fallback
 
 - Adds opt-in judged synthesis through existing subscription CLIs, starting with direct Claude and
