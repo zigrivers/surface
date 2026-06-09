@@ -232,7 +232,9 @@ sensitive values with opaque placeholders. Tests must prove masked DOM/accessibi
 emails, tokens, passwords, session text, and user free-text while preserving enough structure for
 the lens prompt. Tests must also cover computed-style excerpts, including sensitive URLs, CSS
 `content` values, tokens, emails, and user-provided text; these values are masked or the artifact is
-blocked.
+blocked. Add explicit regression coverage for long hex-like secrets and path-like target refs in
+DOM, accessibility, and computed-style artifacts so model prompts cannot carry bearer tokens,
+session ids, local artifact paths, or sensitive URL path segments after redaction.
 
 - [ ] **Step 4: Verify and commit**
 
@@ -296,24 +298,29 @@ or be unset when the provider does not need them; they must not inherit project/
 channel cannot authenticate without persistent prompt/session writes, mark it
 `unsupported-capability`. It catches ENOENT as exit 127, catches timeouts as exit 124, always
 attempts cwd and isolated env cleanup through `try...finally`, and registers best-effort process
-exit handling only for asynchronous interrupts such as SIGINT/SIGTERM. Use a shared cleanup
-registry with one listener per process signal; runner invocations register/unregister cleanup tasks
-in `finally` on normal completion or error so concurrent providers do not accumulate global
-listeners. Signal handlers must wrap each registered cleanup task in its own `try...catch` so one
-runner's cleanup failure cannot block the remaining cleanup tasks. Signal handlers must not swallow
-termination: after cleanup, restore the default behavior and re-send the signal or exit with the
-conventional code such as 130 for SIGINT and 143 for SIGTERM. Asynchronous pruning errors must be
-caught and converted to sanitized debug diagnostics so unhandled promise rejections cannot crash the
-CLI.
+exit handling for normal `exit` plus asynchronous interrupts such as SIGINT/SIGTERM/SIGHUP/SIGQUIT
+where the current platform supports them. Use a shared cleanup registry with one listener per
+process signal; runner invocations register/unregister cleanup tasks in `finally` on normal
+completion or error so concurrent providers do not accumulate global listeners. Signal handlers
+must wrap each registered cleanup task in its own `try...catch` so one runner's cleanup failure
+cannot block the remaining cleanup tasks. Signal handlers must not swallow termination: after
+cleanup, restore the default behavior and re-send the signal or exit with the conventional code such
+as 130 for SIGINT and 143 for SIGTERM. Failed cleanup roots remain tracked, are made read-only as
+damage control, and are left with the Surface temp-prefix metadata needed for startup pruning to
+retry them by age. Asynchronous pruning errors must be caught and converted to sanitized debug
+diagnostics so unhandled promise rejections cannot crash the CLI.
 
 Add an auth-mirror contract per channel. The runner may read original HOME/XDG locations only before
 execution to locate channel-specific credential files, copy them into the isolated HOME/XDG tree
 with child-visible non-writable permissions such as read-only files inside non-writable directories,
-and remove the mirror after execution. Same-UID permissions and pre/post snapshots are not an
-isolation boundary. Direct subscription completion is supported only when an enforceable filesystem
-isolation mechanism is active, such as a container, separate UID, OS sandbox, or read-only mount
-setup that denies access to the real HOME and workspace while exposing only the copied auth mirror
-and isolated temp/cache tree. If that boundary is unavailable for a channel, mark the channel
+and remove the mirror after execution. Mirror copying must validate every source path and descendant
+with symlink-safe checks before copy, reject symlinked credential roots or descendants, preserve
+credential timestamps, and fail closed on any insecure or uninspectable source. Same-UID
+permissions and pre/post snapshots are not an isolation boundary. Direct subscription completion is
+supported only when an enforceable filesystem isolation mechanism is active, such as a container,
+separate UID, OS sandbox, or read-only mount setup that denies access to the real HOME and workspace
+while exposing only the copied auth mirror and isolated temp/cache tree. If that boundary is
+unavailable for a channel, mark the channel
 `unsupported-capability` before discovery or completion and emit a sanitized warning/setup hint. Do
 not add a bypass flag; local development can use BYO/local providers or install/configure an
 enforced sandbox. Do not use bind mounts to expose real HOME/XDG paths. Within the enforced
@@ -381,15 +388,16 @@ is never parsed for safety decisions.
 
 Use discovery capability to choose stdin vs prompt-file delivery. Prompt files live in temp dirs
 `0700` and files `0600`; prompt text never appears in argv. Prompt-file cleanup success requires
-overwriting the full original byte range with zero bytes, calling `fsync` or `fdatasync` on the file
-descriptor, unlinking the file, and removing the prompt temp directory. If unlink or directory
-cleanup fails, return `model_request_failed` with `details.reason = "prompt-cleanup-failed"` and do
-not create a normal successful egress ledger entry. Chmod or making the file unreadable is only
-best-effort damage control after cleanup failure. Expected unsupported sync errors such as `EINVAL`
-or `ENOTSUP` on tmpfs/overlayfs are downgraded only when overwrite and unlink succeed; other cleanup
-failures mark prompt-file capability unsupported for that channel. Add a fake-filesystem test where
-unlink fails but chmod succeeds and the run still fails closed. Cleanup failure on thrown invocation
-still attempts wipe/unlink and reports a combined sanitized error with
+overwriting the actual current prompt-file size with zero bytes, including bytes appended after
+creation, calling `fsync` or `fdatasync` on the file descriptor, unlinking the file, and removing the
+prompt temp directory. If unlink or directory cleanup fails, return `model_request_failed` with
+`details.reason = "prompt-cleanup-failed"` and do not create a normal successful egress ledger entry.
+Chmod or making the file unreadable is only best-effort damage control after cleanup failure.
+Expected unsupported sync errors such as `EINVAL` or `ENOTSUP` on tmpfs/overlayfs are downgraded only
+when overwrite and unlink succeed; other cleanup failures mark prompt-file capability unsupported for
+that channel. Add fake-filesystem tests where appended bytes are zero-filled and unlink fails but
+chmod succeeds and the run still fails closed. Cleanup failure on thrown invocation still attempts
+wipe/unlink and reports a combined sanitized error with
 `details.cleanupFailed = true`, without prompt path or prompt content.
 Document that zero-filling is best-effort only on copy-on-write filesystems and SSDs.
 
@@ -401,8 +409,9 @@ and tests.
 
 - [ ] **Step 5: Add resolver helper**
 
-Export `resolveDirectProviders(config, runner)` returning `{ subscriptionProviders,
-discoveryUnavailableChannels }`. It uses the same injected runner for discovery and provider
+Export `resolveDirectProviders(config, runner)` returning
+`{ subscriptionProviders, discoveryUnavailableChannels }`. It uses the same injected runner for
+discovery and provider
 creation, but callers should wrap it in a lazy resolver when lens selection may prove no model is
 needed.
 
@@ -529,6 +538,9 @@ Add `--model-fallback`, `--model-channels`, `--model-depth`, and `--model-screen
 `--model-channel` as a repeatable alias for `--model-channels` for ergonomics. Thread
 `RunSurfaceCliOptions.env`, `processRunner`, `modelProvider`, and `modelProviderFactory` through
 program creation into `auditTarget()` as `cliRuntime`.
+Implementation note: the CLI normalizes comma-separated `--model-channels` and repeated
+`--model-channel` values through one parser before config validation, so the aliases share the same
+project/env precedence path.
 
 `--model-screenshots=blocked|redacted-only` maps to runtime screenshot policy. Bare
 `--model-screenshots` is accepted as shorthand for `redacted-only`; `--model-screenshots=blocked`
@@ -590,7 +602,8 @@ Expected: tests pass.
 - [ ] **Step 1: Add docs**
 
 Document `SURFACE_MODEL_FALLBACK=off|direct|mmr|auto`,
-`SURFACE_MODEL_CHANNELS=claude,codex,gemini`,
+`SURFACE_MODEL_CHANNELS=claude,gemini` for this release, with Codex reserved until a no-shell
+direct mode exists,
 `SURFACE_MODEL_DEPTH=3`, and `SURFACE_MODEL_SCREENSHOTS=blocked|redacted-only`. State that normal
 tests use fake runners and real subscription CLIs are never invoked in CI. Document that
 `SURFACE_MODEL_SCREENSHOTS=redacted-only` also raises runtime model egress mode to

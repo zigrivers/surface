@@ -35,9 +35,10 @@ cp .env.example .env                         # 4. (optional) configure explicit 
 pnpm run check                               # 5. verify: format + lint + typecheck + test
 ```
 
-No `.env` is required: surface runs **measured-only** with zero keys (NFR-DATA-1). The stock CLI
-does not call API provider SDKs from raw `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY`
-alone; API/local providers remain a core BYO extension point for hosts that inject a real adapter.
+No `.env` is required: surface runs **measured-only** with zero keys (NFR-DATA-1). Supplying BYO
+provider env such as `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`,
+`SURFACE_MODEL_PROVIDER`, or `SURFACE_MODEL_BASE_URL` grants text-only model egress consent for a
+configured provider; subscription-backed fallback still requires its separate explicit opt-in.
 
 ### Model fallback controls
 
@@ -86,9 +87,10 @@ advertises filesystem isolation when the host can enforce it with `sandbox-exec`
 Windows, direct subscription completion is disabled unless the host injects a sandbox-capable runner
 such as a future bubblewrap/firejail-backed adapter; otherwise direct channels are reported
 unavailable.
-When the sandbox is active, `HOME`/`XDG_CONFIG_HOME` are visible for auth discovery, but the sandbox
-permits read access only to known Claude/Codex/Gemini auth/config directories and runtime/toolchain
-paths; completion writes stay inside the temporary runner root.
+When the sandbox is active, real `HOME`/`XDG_CONFIG_HOME` locations are used only before execution to
+copy known Claude/Gemini auth/config directories into an isolated mirror. The sandboxed CLI receives
+isolated `HOME`/XDG paths, read-only access to that copied mirror, and write access only to isolated
+temp/cache/state/runtime directories.
 
 Real subscription CLI compatibility checks live behind an opt-in smoke gate:
 

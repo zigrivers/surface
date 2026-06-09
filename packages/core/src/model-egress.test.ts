@@ -331,6 +331,18 @@ describe("model egress policy", () => {
     );
   });
 
+  it("preserves common non-secret identifiers while masking opaque high-entropy tokens", () => {
+    const text =
+      "Build 550e8400-e29b-41d4-a716-446655440000 uses artifact abcdef1234567890abcdef1234567890 and token MDEyMzQ1Njc4OWFiY2RlZkFCQ0RFRjAxMjM0NTY3ODlhYmNkZWY= with hex abcdef1234567890abcdef1234567890abcdef1234567890";
+
+    const masked = maskModelPlainText(text);
+
+    expect(masked).toContain("550e8400-e29b-41d4-a716-446655440000");
+    expect(masked).toContain("abcdef1234567890abcdef1234567890");
+    expect(masked).not.toContain("MDEyMzQ1Njc4");
+    expect(masked).not.toContain("abcdef1234567890abcdef1234567890abcdef1234567890");
+  });
+
   it("preserves non-secret DOM structure while masking realistic captured markup", () => {
     const dom = `<!doctype html>
       <html lang="en">
@@ -378,6 +390,34 @@ describe("model egress policy", () => {
     );
   });
 
+  it("parses DOM fragments with quoted greater-than characters before masking", () => {
+    const dom =
+      '<main><button aria-label="2 > 1" data-token="sess_1234567890abcdef">Pay</button></main>';
+
+    const result = maskModelArtifactText({ artifactType: "dom-snapshot", text: dom });
+
+    expect(result.maskingStrategy).toBe("structural");
+    expect(result.text).toContain('aria-label="2 > 1"');
+    expect(result.text).toContain(">Pay</button>");
+    expect(result.text).not.toContain("sess_1234567890abcdef");
+  });
+
+  it("masks auth, password, credential, and key-like DOM attributes structurally", () => {
+    const dom = `<main>
+      <div data-password="correct-horse" data-auth="bearer-token" data-credential="cred-1234567890" data-api-key="key-1234567890" data-key="abcdef1234567890abcdef1234567890"></div>
+    </main>`;
+
+    const result = maskModelArtifactText({ artifactType: "dom-snapshot", text: dom });
+
+    expect(result.maskingStrategy).toBe("structural");
+    expect(result.text).toContain('data-password="[masked-secret]"');
+    expect(result.text).toContain('data-auth="[masked-secret]"');
+    expect(result.text).toContain('data-credential="[masked-secret]"');
+    expect(result.text).toContain('data-api-key="[masked-secret]"');
+    expect(result.text).toContain('data-key="[masked-secret]"');
+    expect(result.text).not.toMatch(/correct-horse|bearer-token|cred-1234567890|key-1234567890/);
+  });
+
   it("masks plain model text without parsing HTML-like copy as DOM", () => {
     const text =
       'Provider said CTA copy "<button>Pay now</button>" was confusing for ada@example.test with sk-live-secret.';
@@ -390,7 +430,7 @@ describe("model egress policy", () => {
 
   it("preserves truncated DOM excerpts while masking secrets", () => {
     const dom =
-      '<section class="checkout-panel"><button data-token=sess_1234567890abcdef data-secret=visibleSecret1234567890>Pay now</button><input type="password" value="correct-horse"><input value="Call Ada at 303-555-0199"><textarea>Leave at private desk<div contenteditable="true">Card ending 4242';
+      '<section class="checkout-panel"><button data-token=sess_1234567890abcdef data-secret=visibleSecret1234567890 data-password=correct-horse-token>Pay now</button><input type="password" value="correct-horse"><input value="Call Ada at 303-555-0199"><textarea>Leave at private desk<div contenteditable="true">Card ending 4242';
 
     const result = maskModelArtifactText({ artifactType: "dom-snapshot", text: dom });
     const masked = result.text;
@@ -402,9 +442,10 @@ describe("model egress policy", () => {
     expect(masked).toContain('<input type="password"');
     expect(masked).toContain('value="[masked-form-value]"');
     expect(masked).toContain("data-secret=[masked-secret]");
+    expect(masked).toContain("data-password=[masked-secret]");
     expect(masked).toContain("[masked-form-text]");
     expect(masked).not.toMatch(
-      /sess_1234567890abcdef|visibleSecret1234567890|correct-horse|303-555-0199|Leave at private desk|Card ending 4242/,
+      /sess_1234567890abcdef|visibleSecret1234567890|correct-horse-token|correct-horse|303-555-0199|Leave at private desk|Card ending 4242/,
     );
   });
 

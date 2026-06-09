@@ -48,7 +48,7 @@ describe("@zigrivers/surface bootstrap", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout.join("").trim()).toBe("0.2.0");
+    expect(stdout.join("").trim()).toBe("0.2.1");
   });
 
   it("emits a machine-readable success envelope for --json status", async () => {
@@ -464,6 +464,33 @@ describe("@zigrivers/surface core verbs", () => {
     });
   });
 
+  it("normalizes comma-separated and repeatable model channel flags together", async () => {
+    const seenConfigs: AuditRunnerInput["config"][] = [];
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "audit",
+        "--dom",
+        "<main>Checkout</main>",
+        "--model-fallback",
+        "direct",
+        "--model-channels",
+        "claude,gemini",
+        "--model-channel",
+        "codex",
+        "--model-channel",
+        "claude",
+      ],
+      composition: compositionWithAuditSpy(seenConfigs),
+      io: { stdout: () => undefined },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(seenConfigs[0]?.model.fallback.effectiveChannels).toEqual(["claude", "gemini", "codex"]);
+  });
+
   it("accepts --no-model-screenshots as an explicit runtime block", async () => {
     const seenConfigs: AuditRunnerInput["config"][] = [];
     const exitCode = await runSurfaceCli({
@@ -491,7 +518,7 @@ describe("@zigrivers/surface core verbs", () => {
     });
   });
 
-  it("lets CLI model fallback off revoke lower-precedence fallback egress consent", async () => {
+  it("lets CLI model fallback off disable fallback without revoking egress consent", async () => {
     const seenConfigs: AuditRunnerInput["config"][] = [];
     const exitCode = await runSurfaceCli({
       argv: [
@@ -515,13 +542,29 @@ describe("@zigrivers/surface core verbs", () => {
     expect(exitCode).toBe(0);
     expect(seenConfigs[0]?.model).toMatchObject({
       effectiveEgressPolicy: {
-        mode: "off",
+        mode: "text",
         screenshots: "blocked",
       },
       fallback: {
         effectiveChannels: [],
         mode: "off",
       },
+    });
+  });
+
+  it("treats BYO provider env as text egress consent without enabling fallback", async () => {
+    const seenConfigs: AuditRunnerInput["config"][] = [];
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "audit", "--dom", "<main>Checkout</main>"],
+      composition: compositionWithAuditSpy(seenConfigs),
+      env: { OPENAI_API_KEY: "sk-test" },
+      io: { stdout: () => undefined },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(seenConfigs[0]?.model).toMatchObject({
+      effectiveEgressPolicy: { mode: "text", screenshots: "blocked" },
+      fallback: { effectiveChannels: [], mode: "off" },
     });
   });
 
@@ -1174,6 +1217,65 @@ describe("@zigrivers/surface core verbs", () => {
     expect(stdout.join("")).not.toContain("sk-live-secret");
   });
 
+  it("shows sanitized model coverage in human audit output", async () => {
+    const stdout: string[] = [];
+    const composition = {
+      ...createSurfaceComposition({
+        captureBackends: [createTestCaptureBackend()],
+        stateStore: new TestMemoryStateStore(),
+      }),
+      auditRunner: () =>
+        ok({
+          blockedReasons: ["channel_denied_by_policy"],
+          evaluatedLenses: ["accessibility"],
+          findings: [testFinding()],
+          modelEgress: [
+            {
+              artifactClassesSent: ["dom-snapshot"],
+              attemptedChannels: ["codex"],
+              blockedReasons: ["channel_denied_by_policy"],
+              completedChannels: [],
+              redactionStatus: "text-only",
+              runId: "run_cli",
+              sourceKind: "subscription-cli",
+              unavailableChannels: [
+                {
+                  channelId: "codex",
+                  message: "codex login unavailable sk-live-secret",
+                  reason: "auth-unavailable",
+                  sourceKind: "subscription-cli",
+                },
+              ],
+            },
+          ],
+          skippedLenses: [],
+          unavailableChannels: [
+            {
+              id: "codex",
+              message: "codex login unavailable sk-live-secret",
+              reason: "auth-unavailable",
+            },
+          ],
+        } satisfies AuditRunnerResult),
+    };
+
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "audit", "--dom", "<main>Checkout</main>"],
+      composition,
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+    const output = stdout.join("");
+
+    expect(exitCode).toBe(0);
+    expect(output).toContain("Model coverage:");
+    expect(output).toContain("- Attempted channels: codex");
+    expect(output).toContain("- Completed channels: none");
+    expect(output).toContain("- Artifact classes sent: dom-snapshot");
+    expect(output).toContain("- Blocked reasons: channel_denied_by_policy");
+    expect(output).toContain("- Unavailable channels: codex (auth-unavailable)");
+    expect(output).not.toContain("sk-live-secret");
+  });
+
   it("rotates model egress ledger entries when persisting audit state", async () => {
     const previousEntries: NonNullable<TestProjectStateSnapshot["modelEgress"]> = Array.from(
       { length: 100 },
@@ -1273,6 +1375,64 @@ describe("@zigrivers/surface core verbs", () => {
     expect(persistedDom).toContain("<main>");
     expect(persistedDom).toContain('data-testid="checkout-submit"');
     expect(persistedDom).not.toContain("sk-live-secret");
+  });
+
+  it("redacts sensitive query parameters from persisted target refs", async () => {
+    const stateStore = new TestMemoryStateStore();
+    const verification = {
+      authInjectedBeforeNavigation: true,
+      isRequestedTarget: true,
+      landedUrl: "https://example.com/app?session_id=secret-session",
+      requestedUrl: "https://example.com/app?access_token=secret-token",
+    } satisfies TestCapture["verification"];
+    const composition = {
+      ...createSurfaceComposition({
+        captureBackends: [createTestCaptureBackend()],
+        stateStore,
+      }),
+      auditRunner: (input: AuditRunnerInput) => {
+        Object.assign(input.capture, { verification });
+
+        return ok({
+          blockedReasons: [],
+          evaluatedLenses: [],
+          findings: [],
+          modelEgress: [],
+          skippedLenses: [],
+          unavailableChannels: [],
+        } satisfies AuditRunnerResult);
+      },
+    };
+
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "audit",
+        "--url",
+        "https://example.com/app/session_abcdef1234567890?access_token=abc&ok=1&session_id=s&password=p",
+      ],
+      composition,
+      io: { stdout: () => undefined },
+    });
+
+    expect(exitCode).toBe(0);
+    const runRecord = stateStore.state.runRecords?.at(-1);
+    if (runRecord === undefined) {
+      throw new Error("Expected audit run record.");
+    }
+    if (runRecord.capture === undefined) {
+      throw new Error("Expected audit capture metadata.");
+    }
+    expect(runRecord.capture.target).toMatchObject({
+      kind: "url",
+      ref: "https://example.com/app/[masked-secret]?access_token=[masked-secret]&ok=1&session_id=[masked-secret]&password=[masked-secret]",
+    });
+    expect(runRecord.capture.verification).toMatchObject({
+      landedUrl: "https://example.com/app?session_id=[masked-secret]",
+      requestedUrl: "https://example.com/app?access_token=[masked-secret]",
+    });
   });
 
   it("does not resolve findings from lenses skipped in the current audit", async () => {
@@ -2543,7 +2703,10 @@ class TestMemoryStateStore implements StateStore {
   }
 }
 
-function createTestCaptureBackend(capturedTargets: TestTarget[] = []) {
+function createTestCaptureBackend(
+  capturedTargets: TestTarget[] = [],
+  captureOverrides: Partial<TestCapture> = {},
+) {
   return {
     id: "test",
     detect: () => true,
@@ -2557,6 +2720,7 @@ function createTestCaptureBackend(capturedTargets: TestTarget[] = []) {
         id: `capture_${target.kind}`,
         status: "requested",
         target,
+        ...captureOverrides,
       } satisfies TestCapture);
     },
   };

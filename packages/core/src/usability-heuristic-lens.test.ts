@@ -52,6 +52,7 @@ describe("usability heuristic lens", () => {
       });
 
       expect(isOk(result)).toBe(true);
+      expect(requests[0]?.responseFormat).toEqual({ type: "json" });
       expect(requests[0]?.prompt.instructions).toContain("usability");
       const modelInput = requests[0]?.prompt.input as
         | { readonly heuristic?: { readonly guidance?: unknown; readonly id?: unknown } }

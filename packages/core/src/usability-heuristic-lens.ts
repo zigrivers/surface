@@ -64,6 +64,7 @@ export function createUsabilityHeuristicLens(options: UsabilityHeuristicLensOpti
 
       const completion = await context.model.complete({
         maxOutputTokens: 1_200,
+        responseFormat: { type: "json" },
         temperature: 0,
         prompt: {
           instructions:

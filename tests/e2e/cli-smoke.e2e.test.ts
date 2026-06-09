@@ -171,7 +171,12 @@ describe("surface CLI e2e smoke", () => {
 
     const audit = await runSurface(["--json", "audit", "--dom", html], cwd);
     expect(audit.exitCode).toBe(0);
-    const auditEnvelope = JSON.parse(audit.stdout) as { readonly data: { readonly runId: string } };
+    const auditEnvelope = JSON.parse(audit.stdout) as {
+      readonly data: {
+        readonly runId: string;
+        readonly topFinding: { readonly id: string };
+      };
+    };
 
     const validate = await runSurface(
       ["--json", "validate", "--run", auditEnvelope.data.runId],
@@ -180,7 +185,7 @@ describe("surface CLI e2e smoke", () => {
     expect(validate.exitCode).toBe(0);
     expect(JSON.parse(validate.stdout)).toMatchObject({
       command: "validate",
-      data: { checks: [{ findingId: "seeded_low_contrast", passed: true }] },
+      data: { checks: [{ findingId: auditEnvelope.data.topFinding.id, passed: true }] },
       ok: true,
     });
 

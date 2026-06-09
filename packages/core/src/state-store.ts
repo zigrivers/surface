@@ -7,7 +7,6 @@ import writeFileAtomic from "write-file-atomic";
 import { z } from "zod";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
-import { isNodeErrorWithCode } from "./internal-utils.js";
 import type {
   PersistArtifactIntent,
   PersistedArtifactRef,

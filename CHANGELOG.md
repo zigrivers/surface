@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.1 - Subscription-Backed Model Fallback
+
+- Adds opt-in judged synthesis through existing subscription CLIs, starting with direct Claude and
+  Gemini providers.
+- Adds model fallback controls for `surface audit`, including `--model-fallback`,
+  `--model-channel`, `--model-channels`, `--model-depth`, and `--model-screenshots`.
+- Adds explicit egress policy, redacted model artifact persistence, cleanup support, and audit
+  output disclosures for attempted, completed, unavailable, and blocked model channels.
+- Adds a compatible MMR audit fallback boundary that reports unsupported capability without sending
+  captured artifacts.
+- Adds release and smoke coverage for subscription-backed model discovery while keeping default
+  audits measured-only.
+
 ## 0.2.0 - Browser QA Orchestrator
 
 - Adds agent-led browser QA orchestration powered by `agent-browser`.

@@ -15,6 +15,7 @@ import type {
   KnowledgeSource,
   Lens,
   ModelProvider,
+  Target,
 } from "./interfaces.js";
 import {
   instantiateLensExecutionPlan,
@@ -880,7 +881,7 @@ async function runMmrModelLens(
         availability: () => ok(availability.value),
         complete: (request) =>
           mmr.run({
-            capture: capture.value,
+            capture: sanitizeMmrCapture(capture.value),
             request,
           }),
       }),
@@ -1021,6 +1022,58 @@ function modelArtifactMetadataCapture(
         : { ...artifact },
     ),
   });
+}
+
+function sanitizeMmrCapture(capture: Capture): Capture {
+  return {
+    ...capture,
+    artifacts: capture.artifacts.map(sanitizeMmrArtifact),
+    ...(capture.degradation === undefined
+      ? {}
+      : {
+          degradation: {
+            ...capture.degradation,
+            skippedReason: maskModelPlainText(capture.degradation.skippedReason),
+          },
+        }),
+    target: sanitizeMmrTarget(capture.target),
+    ...(capture.verification === undefined
+      ? {}
+      : {
+          verification: {
+            ...capture.verification,
+            landedUrl: maskModelPlainText(capture.verification.landedUrl),
+            requestedUrl: maskModelPlainText(capture.verification.requestedUrl),
+          },
+        }),
+  };
+}
+
+function sanitizeMmrTarget(target: Target): Target {
+  if (target.kind === "dom") {
+    return { ...target, ref: "[redacted-inline-dom]" };
+  }
+
+  return {
+    ...target,
+    ref: maskModelPlainText(target.ref),
+  };
+}
+
+function sanitizeMmrArtifact(artifact: CaptureArtifact): CaptureArtifact {
+  if (artifact.type === "screenshot") {
+    return {
+      ...artifact,
+      path: "[redacted-screenshot-metadata-only]",
+      redacted: true,
+    };
+  }
+
+  return {
+    ...artifact,
+    path: `surface://model-egress/redacted/${safeArtifactPathSegment(artifact.id)}.txt`,
+    redacted: true,
+  };
 }
 
 type ModelTextArtifactType = "accessibility-tree" | "computed-styles" | "dom-snapshot";

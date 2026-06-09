@@ -1,5 +1,30 @@
-import { accessSync, constants as fsConstants, existsSync, realpathSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, open, rm, rmdir, unlink, writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import {
+  accessSync,
+  chmodSync,
+  constants as fsConstants,
+  existsSync,
+  lstatSync,
+  readdirSync,
+  realpathSync,
+  rmSync,
+  statSync,
+} from "node:fs";
+import {
+  chmod,
+  cp,
+  lstat,
+  mkdir,
+  mkdtemp,
+  open,
+  readdir,
+  readFile,
+  readlink,
+  rm,
+  rmdir,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
@@ -14,6 +39,7 @@ import {
   ModelRequestSchema,
   type ModelAvailability,
   type ModelProvider,
+  type ModelRequest,
   type ModelResponse,
 } from "./model-provider.js";
 
@@ -107,17 +133,10 @@ const CODEX_DIRECT_UNSUPPORTED_MESSAGE =
 // fallback for disk-backed temporary directories.
 const PROMPT_CLEANUP_ZERO_CHUNK_BYTES = 64 * 1024;
 const PROMPT_TMPDIR_ENV = "SURFACE_MODEL_PROMPT_TMPDIR";
+const STALE_SURFACE_TEMP_ROOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const SURFACE_TEMP_ROOT_PREFIXES = ["surface-model-cli-", "surface-model-prompt-"] as const;
 
-const BASE_ENV_ALLOWLIST = new Set([
-  "USER",
-  "LOGNAME",
-  "USERNAME",
-  "HOME",
-  "XDG_CONFIG_HOME",
-  "LANG",
-  "LC_ALL",
-  "TERM",
-]);
+const BASE_ENV_ALLOWLIST = new Set(["USER", "LOGNAME", "USERNAME", "LANG", "LC_ALL", "TERM"]);
 const WINDOWS_ENV_ALLOWLIST = new Set(["SystemRoot", "windir", "SystemDrive", "PATHEXT"]);
 const SANDBOX_EXEC_PATH = "/usr/bin/sandbox-exec";
 const DEFAULT_RUNNER_ENFORCES_FILESYSTEM_ISOLATION =
@@ -128,8 +147,12 @@ const CHANNEL_COMMAND = {
   codex: "codex",
   gemini: "gemini",
 } as const satisfies Record<DirectSubscriptionChannelId, string>;
+type CleanupSignal = "SIGHUP" | "SIGINT" | "SIGQUIT" | "SIGTERM";
 const DEFAULT_WINDOWS_PATHEXT = ".COM;.EXE;.BAT;.CMD";
 const discoveryCacheByRunner = new WeakMap<ProcessRunner, Map<string, Promise<ChannelDiscovery>>>();
+const activeTempRoots = new Set<string>();
+let processCleanupHandlersInstalled = false;
+let signalCleanupInProgress = false;
 
 function subscriptionProbeRequest(): string {
   return JSON.stringify({
@@ -153,17 +176,27 @@ export const defaultProcessRunner: ProcessRunner = {
       };
     }
 
+    await pruneStaleSurfaceTempRoots(os.tmpdir());
     const isolatedRoot = await mkdtemp(path.join(os.tmpdir(), "surface-model-cli-"));
+    trackTempRoot(isolatedRoot);
+    let processResult: ProcessRunResult;
 
     try {
       await chmod(isolatedRoot, 0o700);
-      await mkdir(path.join(isolatedRoot, "tmp"), { mode: 0o700, recursive: true });
       const env = buildIsolatedProcessEnvironment({
         baseEnv: process.env,
         isolatedRoot,
         workspaceRoot: process.cwd(),
         ...(request.env === undefined ? {} : { commandEnv: request.env }),
       });
+      await createIsolatedWritableDirectories(env);
+      const authMirrorRoots = await mirrorSubscriptionAuth({
+        baseEnv: process.env,
+        channelId: request.channelId,
+        env,
+      });
+      await chmodAuthMirrors(authMirrorRoots, "read-only");
+      const authSnapshot = await snapshotAuthMirrors(authMirrorRoots);
       const invocation = await isolatedInvocation(request, isolatedRoot, env);
       const result = await execa(invocation.command, invocation.args, {
         cwd: isolatedRoot,
@@ -174,25 +207,40 @@ export const defaultProcessRunner: ProcessRunner = {
         timeout: request.timeoutMs,
       });
 
-      return {
+      processResult = {
         exitCode: result.exitCode ?? 0,
         stdout: result.stdout,
         stderr: result.stderr,
         timedOut: result.timedOut,
       };
+      const authMutation = await authMirrorMutation(authSnapshot);
+
+      if (authMutation !== undefined) {
+        processResult = unsupportedCapabilityProcessResult(authMutation);
+      }
     } catch (error) {
       if (isNodeErrorWithCode(error, "ENOENT")) {
-        return { exitCode: 127, stdout: "", stderr: "" };
+        processResult = { exitCode: 127, stdout: "", stderr: "" };
+      } else if (isTimedOutError(error)) {
+        processResult = { exitCode: 124, stdout: "", stderr: "", timedOut: true };
+      } else if (error instanceof AuthMirrorUnsupportedError) {
+        processResult = unsupportedCapabilityProcessResult(error.message);
+      } else {
+        processResult = { exitCode: 1, stdout: "", stderr: "" };
       }
-
-      if (isTimedOutError(error)) {
-        return { exitCode: 124, stdout: "", stderr: "", timedOut: true };
-      }
-
-      return { exitCode: 1, stdout: "", stderr: "" };
-    } finally {
-      await rm(isolatedRoot, { force: true, recursive: true });
     }
+
+    const cleanup = await cleanupIsolatedRoot(isolatedRoot);
+
+    if (cleanup) {
+      untrackTempRoot(isolatedRoot);
+    }
+
+    if (!cleanup && processResult.exitCode === 0) {
+      return unsupportedCapabilityProcessResult("subscription CLI isolated cleanup failed");
+    }
+
+    return processResult;
   },
 };
 
@@ -203,10 +251,20 @@ export function buildIsolatedProcessEnvironment(input: {
   readonly commandEnv?: Readonly<Record<string, string | undefined>>;
 }): Record<string, string> {
   const isolatedTmp = path.join(input.isolatedRoot, "tmp");
+  const isolatedHome = path.join(input.isolatedRoot, "home");
+  const isolatedConfigHome = path.join(isolatedHome, ".config");
+  const isolatedCacheHome = path.join(input.isolatedRoot, "cache");
+  const isolatedRuntimeDir = path.join(input.isolatedRoot, "run");
+  const isolatedStateHome = path.join(input.isolatedRoot, "state");
   const env: Record<string, string> = {
+    HOME: isolatedHome,
     TMP: isolatedTmp,
     TEMP: isolatedTmp,
     TMPDIR: isolatedTmp,
+    XDG_CACHE_HOME: isolatedCacheHome,
+    XDG_CONFIG_HOME: isolatedConfigHome,
+    XDG_RUNTIME_DIR: isolatedRuntimeDir,
+    XDG_STATE_HOME: isolatedStateHome,
   };
 
   for (const [key, value] of Object.entries(input.baseEnv)) {
@@ -227,12 +285,183 @@ export function buildIsolatedProcessEnvironment(input: {
   }
 
   for (const [key, value] of Object.entries(input.commandEnv ?? {})) {
+    if (
+      key === "HOME" ||
+      key === "XDG_CACHE_HOME" ||
+      key === "XDG_CONFIG_HOME" ||
+      key === "XDG_RUNTIME_DIR" ||
+      key === "XDG_STATE_HOME"
+    ) {
+      continue;
+    }
+
     if (value !== undefined) {
       env[key] = value;
     }
   }
 
   return env;
+}
+
+async function createIsolatedWritableDirectories(
+  env: Readonly<Record<string, string>>,
+): Promise<void> {
+  for (const directory of isolatedWritableSubpaths(env)) {
+    await mkdir(directory, { mode: 0o700, recursive: true });
+  }
+}
+
+function isolatedWritableSubpaths(env: Readonly<Record<string, string>>): readonly string[] {
+  return [
+    env.TMPDIR,
+    env.XDG_CACHE_HOME,
+    env.XDG_RUNTIME_DIR,
+    env.XDG_STATE_HOME,
+    env.TMP,
+    env.TEMP,
+  ].filter((value): value is string => value !== undefined && value.length > 0);
+}
+
+async function mirrorSubscriptionAuth(input: {
+  readonly baseEnv: Readonly<Record<string, string | undefined>>;
+  readonly channelId: DirectSubscriptionChannelId | undefined;
+  readonly env: Readonly<Record<string, string>>;
+}): Promise<readonly string[]> {
+  const isolatedHome = input.env.HOME;
+  const isolatedXdgConfigHome = input.env.XDG_CONFIG_HOME;
+
+  if (isolatedHome === undefined || isolatedXdgConfigHome === undefined) {
+    return [];
+  }
+
+  await mkdir(isolatedHome, { mode: 0o700, recursive: true });
+  await mkdir(isolatedXdgConfigHome, { mode: 0o700, recursive: true });
+  const copiedMirrors: string[] = [];
+
+  for (const mirror of subscriptionAuthMirrorPaths({
+    ...input,
+    isolatedHome,
+    isolatedXdgConfigHome,
+  })) {
+    if (!existsSync(mirror.source)) {
+      continue;
+    }
+
+    if (!(await validateSubscriptionAuthMirrorSource(mirror.source))) {
+      throw new AuthMirrorUnsupportedError("subscription CLI auth mirror contains symlinks");
+    }
+
+    await mkdir(path.dirname(mirror.destination), { mode: 0o700, recursive: true });
+    await cp(mirror.source, mirror.destination, {
+      dereference: false,
+      errorOnExist: false,
+      force: false,
+      preserveTimestamps: true,
+      recursive: true,
+    });
+    copiedMirrors.push(mirror.destination);
+  }
+
+  return copiedMirrors;
+}
+
+class AuthMirrorUnsupportedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "AuthMirrorUnsupportedError";
+  }
+}
+
+export async function validateSubscriptionAuthMirrorSource(source: string): Promise<boolean> {
+  try {
+    return await hasNoSymlinkDescendants(source);
+  } catch {
+    return false;
+  }
+}
+
+async function hasNoSymlinkDescendants(source: string): Promise<boolean> {
+  const stats = await lstat(source);
+
+  if (stats.isSymbolicLink()) {
+    return false;
+  }
+
+  if (!stats.isDirectory()) {
+    return true;
+  }
+
+  for (const entry of await readdir(source)) {
+    if (!(await hasNoSymlinkDescendants(path.join(source, entry)))) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+function subscriptionAuthMirrorPaths(input: {
+  readonly baseEnv: Readonly<Record<string, string | undefined>>;
+  readonly channelId: DirectSubscriptionChannelId | undefined;
+  readonly isolatedHome: string;
+  readonly isolatedXdgConfigHome: string;
+}): readonly { readonly destination: string; readonly source: string }[] {
+  const sourceHome = input.baseEnv.HOME ?? input.baseEnv.USERPROFILE;
+  const sourceXdgConfigHome =
+    input.baseEnv.XDG_CONFIG_HOME ??
+    (sourceHome === undefined ? undefined : path.join(sourceHome, ".config"));
+
+  if (input.channelId === "claude") {
+    return [
+      ...homeMirrorPaths(sourceHome, input.isolatedHome, [
+        ".claude",
+        path.join("Library", "Application Support", "Claude"),
+      ]),
+      ...xdgMirrorPaths(sourceXdgConfigHome, input.isolatedXdgConfigHome, ["claude"]),
+    ];
+  }
+
+  if (input.channelId === "gemini") {
+    return [
+      ...homeMirrorPaths(sourceHome, input.isolatedHome, [
+        ".gemini",
+        path.join("Library", "Application Support", "Gemini"),
+      ]),
+      ...xdgMirrorPaths(sourceXdgConfigHome, input.isolatedXdgConfigHome, ["gemini", "gcloud"]),
+    ];
+  }
+
+  return [];
+}
+
+function homeMirrorPaths(
+  sourceHome: string | undefined,
+  destinationHome: string,
+  relativePaths: readonly string[],
+): readonly { readonly destination: string; readonly source: string }[] {
+  if (sourceHome === undefined) {
+    return [];
+  }
+
+  return relativePaths.map((relativePath) => ({
+    destination: path.join(destinationHome, relativePath),
+    source: path.join(sourceHome, relativePath),
+  }));
+}
+
+function xdgMirrorPaths(
+  sourceXdgConfigHome: string | undefined,
+  destinationXdgConfigHome: string,
+  relativePaths: readonly string[],
+): readonly { readonly destination: string; readonly source: string }[] {
+  if (sourceXdgConfigHome === undefined) {
+    return [];
+  }
+
+  return relativePaths.map((relativePath) => ({
+    destination: path.join(destinationXdgConfigHome, relativePath),
+    source: path.join(sourceXdgConfigHome, relativePath),
+  }));
 }
 
 async function isolatedInvocation(
@@ -305,6 +534,9 @@ function sandboxProfile(
   const literalReadClauses = [...new Set(readLiterals)]
     .map((literal) => `(allow file-read* (literal "${sandboxString(literal)}"))`)
     .join("\n");
+  const writeClauses = [...new Set(isolatedWritableSubpaths(env))]
+    .map((subpath) => `(allow file-write* (subpath "${sandboxString(subpath)}"))`)
+    .join("\n");
 
   return [
     "(version 1)",
@@ -317,7 +549,7 @@ function sandboxProfile(
     "(allow file-read-metadata)",
     readClauses,
     literalReadClauses,
-    `(allow file-write* (subpath "${sandboxString(isolatedRoot)}"))`,
+    writeClauses,
   ]
     .filter((line) => line.length > 0)
     .join("\n");
@@ -556,7 +788,7 @@ export function createSubscriptionCliProvider(
           });
         }
 
-        return parseCompletionResult(options.capability, result);
+        return parseCompletionResult(options.capability, result, parsedRequest.data.responseFormat);
       } catch (error) {
         const cleanup = await promptDelivery.value.cleanup();
 
@@ -772,6 +1004,14 @@ function classifyDiscoveryFailure(
   result: ProcessRunResult,
   timeoutReason: "auth-unavailable" | "unsupported-capability",
 ): ChannelDiscovery | undefined {
+  if (isUnsupportedCapabilityResult(result)) {
+    return unavailable(
+      channelId,
+      "unsupported-capability",
+      `${channelId} subscription CLI requires filesystem isolation`,
+    );
+  }
+
   if (result.exitCode === 127) {
     return unavailable(
       channelId,
@@ -801,6 +1041,19 @@ function classifyDiscoveryFailure(
   }
 
   return undefined;
+}
+
+function isIsolationUnavailableResult(result: ProcessRunResult): boolean {
+  return result.stderr.includes("filesystem isolation is unavailable");
+}
+
+function isUnsupportedCapabilityResult(result: ProcessRunResult): boolean {
+  return (
+    isIsolationUnavailableResult(result) ||
+    result.stderr.includes("subscription CLI auth mirror contains symlinks") ||
+    result.stderr.includes("subscription CLI auth mirror was mutated") ||
+    result.stderr.includes("subscription CLI isolated cleanup failed")
+  );
 }
 
 type PromptDelivery = {
@@ -840,14 +1093,17 @@ async function preparePromptDelivery(
 const defaultPromptStore: SubscriptionPromptStore = {
   async create(prompt) {
     try {
-      const root = await mkdtemp(path.join(resolvePromptTempParent(), "surface-model-prompt-"));
+      const parent = resolvePromptTempParent();
+      await pruneStaleSurfaceTempRoots(parent);
+      const root = await mkdtemp(path.join(parent, "surface-model-prompt-"));
+      trackTempRoot(root);
       await chmod(root, 0o700);
       const promptPath = path.join(root, "prompt.txt");
       await writeFile(promptPath, prompt, { mode: 0o600 });
 
       return ok({
         path: promptPath,
-        cleanup: async () => cleanupPromptFile(root, promptPath, Buffer.byteLength(prompt)),
+        cleanup: async () => cleanupPromptFile(root, promptPath),
       });
     } catch (error) {
       return err(
@@ -903,7 +1159,6 @@ function isWritableDirectory(directory: string): boolean {
 async function cleanupPromptFile(
   root: string,
   promptPath: string,
-  byteLength: number,
 ): Promise<Result<void, SurfaceError>> {
   let cleanupError: unknown;
   const recordCleanupError = (error: unknown) => {
@@ -914,12 +1169,14 @@ async function cleanupPromptFile(
     const handle = await open(promptPath, "r+");
 
     try {
-      if (byteLength > 0) {
-        const zeroChunk = Buffer.alloc(Math.min(PROMPT_CLEANUP_ZERO_CHUNK_BYTES, byteLength));
+      const actualByteLength = (await handle.stat()).size;
+
+      if (actualByteLength > 0) {
+        const zeroChunk = Buffer.alloc(Math.min(PROMPT_CLEANUP_ZERO_CHUNK_BYTES, actualByteLength));
         let offset = 0;
 
-        while (offset < byteLength) {
-          const bytesToWrite = Math.min(zeroChunk.length, byteLength - offset);
+        while (offset < actualByteLength) {
+          const bytesToWrite = Math.min(zeroChunk.length, actualByteLength - offset);
           const { bytesWritten } = await handle.write(zeroChunk, 0, bytesToWrite, offset);
 
           if (bytesWritten <= 0) {
@@ -963,6 +1220,12 @@ async function cleanupPromptFile(
   }
 
   if (cleanupError !== undefined) {
+    try {
+      await chmodTree(root, "read-only");
+    } catch {
+      // Keep cleanup errors focused on the original cleanup failure.
+    }
+
     return err(
       createSurfaceError("model_request_failed", "prompt cleanup failed", {
         cause: cleanupError,
@@ -971,15 +1234,336 @@ async function cleanupPromptFile(
     );
   }
 
+  untrackTempRoot(root);
   return ok(undefined);
+}
+
+function trackTempRoot(root: string): void {
+  activeTempRoots.add(root);
+}
+
+function untrackTempRoot(root: string): void {
+  activeTempRoots.delete(root);
+}
+
+async function cleanupIsolatedRoot(root: string): Promise<boolean> {
+  try {
+    await chmodTree(root, "writable");
+    await rm(root, { force: true, recursive: true });
+    return true;
+  } catch {
+    try {
+      await chmodTree(root, "read-only");
+    } catch {
+      // Preserve the cleanup failure result; process cleanup may retry later.
+    }
+
+    return false;
+  }
+}
+
+export async function pruneStaleSurfaceTempRoots(
+  parent: string = os.tmpdir(),
+  nowMs: number = Date.now(),
+): Promise<void> {
+  let entries: { isDirectory(): boolean; name: string }[];
+
+  try {
+    entries = await readdir(parent, { withFileTypes: true });
+  } catch {
+    return;
+  }
+
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (
+        !entry.isDirectory() ||
+        !SURFACE_TEMP_ROOT_PREFIXES.some((prefix) => entry.name.startsWith(prefix))
+      ) {
+        return;
+      }
+
+      const candidate = path.join(parent, entry.name);
+      try {
+        const stats = await lstat(candidate);
+
+        if (nowMs - stats.mtimeMs <= STALE_SURFACE_TEMP_ROOT_MAX_AGE_MS) {
+          return;
+        }
+
+        await chmodTree(candidate, "writable");
+        await rm(candidate, { force: true, recursive: true });
+      } catch {
+        // Startup pruning is best-effort; active run cleanup still fails closed.
+      }
+    }),
+  );
+}
+
+type AuthMirrorSnapshot = {
+  readonly root: string;
+  readonly entries: ReadonlyMap<string, string>;
+};
+
+async function snapshotAuthMirrors(
+  roots: readonly string[],
+): Promise<readonly AuthMirrorSnapshot[]> {
+  return await Promise.all(
+    roots.map(async (root) => ({
+      entries: await snapshotDirectory(root),
+      root,
+    })),
+  );
+}
+
+async function authMirrorMutation(
+  snapshots: readonly AuthMirrorSnapshot[],
+): Promise<string | undefined> {
+  for (const snapshot of snapshots) {
+    try {
+      const current = await snapshotDirectory(snapshot.root);
+
+      if (!sameSnapshot(snapshot.entries, current)) {
+        return "subscription CLI auth mirror was mutated during execution";
+      }
+    } catch {
+      return "subscription CLI auth mirror was mutated during execution";
+    }
+  }
+
+  return undefined;
+}
+
+async function snapshotDirectory(root: string): Promise<ReadonlyMap<string, string>> {
+  const entries = new Map<string, string>();
+  await snapshotDirectoryEntry(root, root, entries);
+  return entries;
+}
+
+async function snapshotDirectoryEntry(
+  root: string,
+  entryPath: string,
+  entries: Map<string, string>,
+): Promise<void> {
+  const stats = await lstat(entryPath);
+  const relativePath = path.relative(root, entryPath) || ".";
+  const mode = (stats.mode & 0o777).toString(8);
+
+  if (stats.isDirectory()) {
+    entries.set(relativePath, `dir:${mode}`);
+    const children = await readdir(entryPath);
+
+    for (const child of children) {
+      await snapshotDirectoryEntry(root, path.join(entryPath, child), entries);
+    }
+    return;
+  }
+
+  if (stats.isSymbolicLink()) {
+    entries.set(relativePath, `symlink:${mode}:${await readlink(entryPath)}`);
+    return;
+  }
+
+  if (stats.isFile()) {
+    const hash = createHash("sha256")
+      .update(await readFile(entryPath))
+      .digest("hex");
+    entries.set(relativePath, `file:${mode}:${stats.size}:${hash}`);
+    return;
+  }
+
+  entries.set(relativePath, `other:${mode}:${stats.size}`);
+}
+
+function sameSnapshot(
+  left: ReadonlyMap<string, string>,
+  right: ReadonlyMap<string, string>,
+): boolean {
+  if (left.size !== right.size) {
+    return false;
+  }
+
+  for (const [key, value] of left) {
+    if (right.get(key) !== value) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function chmodAuthMirrors(roots: readonly string[], mode: "read-only" | "writable") {
+  for (const root of roots) {
+    await chmodTree(root, mode);
+  }
+}
+
+async function chmodTree(root: string, mode: "read-only" | "writable"): Promise<void> {
+  const stats = await lstat(root);
+
+  if (stats.isSymbolicLink()) {
+    return;
+  }
+
+  if (stats.isDirectory()) {
+    await chmod(root, mode === "read-only" ? 0o500 : 0o700);
+    for (const entry of await readdir(root)) {
+      await chmodTree(path.join(root, entry), mode);
+    }
+    return;
+  }
+
+  await chmod(root, mode === "read-only" ? 0o400 : 0o600);
+}
+
+function unsupportedCapabilityProcessResult(message: string): ProcessRunResult {
+  return {
+    exitCode: 126,
+    stdout: "",
+    stderr: message,
+  };
+}
+
+export async function cleanupActiveSubscriptionTempRootsForProcess(): Promise<void> {
+  for (const root of [...activeTempRoots]) {
+    try {
+      if (await cleanupIsolatedRoot(root)) {
+        untrackTempRoot(root);
+      }
+    } catch {
+      // Host-level process cleanup is best-effort; normal runner cleanup fails closed.
+    }
+  }
+}
+
+function cleanupActiveSubscriptionTempRootsSync(): void {
+  for (const root of [...activeTempRoots]) {
+    try {
+      if (cleanupIsolatedRootSync(root)) {
+        untrackTempRoot(root);
+      }
+    } catch {
+      // Signal and exit cleanup are best-effort.
+    }
+  }
+}
+
+function cleanupIsolatedRootSync(root: string): boolean {
+  try {
+    chmodTreeSync(root, "writable");
+    rmSync(root, { force: true, recursive: true });
+    return true;
+  } catch {
+    try {
+      chmodTreeSync(root, "read-only");
+    } catch {
+      // Leave the original cleanup failure as the controlling outcome.
+    }
+
+    return false;
+  }
+}
+
+function chmodTreeSync(root: string, mode: "read-only" | "writable"): void {
+  const stats = lstatSync(root);
+
+  if (stats.isSymbolicLink()) {
+    return;
+  }
+
+  if (stats.isDirectory()) {
+    chmodSync(root, mode === "read-only" ? 0o500 : 0o700);
+    for (const entry of readdirSync(root)) {
+      chmodTreeSync(path.join(root, entry), mode);
+    }
+    return;
+  }
+
+  chmodSync(root, mode === "read-only" ? 0o400 : 0o600);
+}
+
+export function installSubscriptionTempRootProcessCleanupHandlers(): () => void {
+  if (processCleanupHandlersInstalled) {
+    return () => undefined;
+  }
+
+  processCleanupHandlersInstalled = true;
+
+  let dispose = () => undefined;
+  const signalHandlers: { readonly handler: () => void; readonly signal: CleanupSignal }[] = [];
+  const handleExit = () => {
+    cleanupActiveSubscriptionTempRootsSync();
+  };
+  const handleSignal = (signal: CleanupSignal) => {
+    if (signalCleanupInProgress) {
+      return;
+    }
+
+    signalCleanupInProgress = true;
+    cleanupActiveSubscriptionTempRootsSync();
+    dispose();
+
+    try {
+      process.kill(process.pid, signal);
+    } catch {
+      process.exit(signalExitCode(signal));
+    }
+  };
+  const registerSignalHandler = (signal: CleanupSignal) => {
+    const handler = () => handleSignal(signal);
+
+    try {
+      process.on(signal, handler);
+      signalHandlers.push({ handler, signal });
+    } catch {
+      // Some platforms do not expose every POSIX signal; unsupported handlers are skipped.
+    }
+  };
+  dispose = () => {
+    process.off("exit", handleExit);
+    for (const { handler, signal } of signalHandlers) {
+      process.off(signal, handler);
+    }
+    signalHandlers.length = 0;
+    processCleanupHandlersInstalled = false;
+  };
+
+  process.on("exit", handleExit);
+  registerSignalHandler("SIGHUP");
+  registerSignalHandler("SIGINT");
+  registerSignalHandler("SIGQUIT");
+  registerSignalHandler("SIGTERM");
+
+  return dispose;
+}
+
+function signalExitCode(signal: CleanupSignal): number {
+  switch (signal) {
+    case "SIGHUP":
+      return 129;
+    case "SIGINT":
+      return 130;
+    case "SIGQUIT":
+      return 131;
+    case "SIGTERM":
+      return 143;
+  }
 }
 
 function parseCompletionResult(
   capability: SubscriptionCliCapability,
   result: ProcessRunResult,
+  responseFormat: ModelRequest["responseFormat"] | undefined,
 ): Result<ModelResponse, SurfaceError> {
   if (result.timedOut === true || result.exitCode === 124) {
     return modelRequestFailed("subscription CLI timed out", "timeout");
+  }
+
+  if (isUnsupportedCapabilityResult(result)) {
+    return modelRequestFailed(
+      "subscription CLI could not satisfy the filesystem isolation contract",
+      "unsupported-capability",
+    );
   }
 
   if (result.exitCode !== 0) {
@@ -997,12 +1581,24 @@ function parseCompletionResult(
       });
     }
 
+    if (!responseTextMatchesFormat(rawText, responseFormat)) {
+      return modelRequestFailed("subscription CLI returned malformed JSON output", "parse-failed", {
+        outputPreview: sanitizedOutputPreview(result.stdout),
+      });
+    }
+
     return ok({
       channelId: capability.channelId,
       model: capability.model,
       provider: capability.channelId,
       sourceKind: "subscription-cli",
       text: rawText,
+    });
+  }
+
+  if (!responseTextMatchesFormat(parsedOutput.data.text, responseFormat)) {
+    return modelRequestFailed("subscription CLI returned malformed JSON output", "parse-failed", {
+      outputPreview: sanitizedOutputPreview(parsedOutput.data.text),
     });
   }
 
@@ -1013,6 +1609,17 @@ function parseCompletionResult(
     sourceKind: "subscription-cli",
     text: parsedOutput.data.text,
   });
+}
+
+function responseTextMatchesFormat(
+  text: string,
+  responseFormat: ModelRequest["responseFormat"] | undefined,
+): boolean {
+  if (responseFormat?.type !== "json") {
+    return true;
+  }
+
+  return parseJson(text) !== undefined;
 }
 
 function textFromRawCompletionOutput(
@@ -1101,7 +1708,8 @@ function modelRequestFailed(
     | "command-failed"
     | "parse-failed"
     | "prompt-cleanup-failed"
-    | "serialization-failed",
+    | "serialization-failed"
+    | "unsupported-capability",
   details: Record<string, unknown> = {},
 ): Result<never, SurfaceError> {
   return err(
@@ -1389,7 +1997,9 @@ function sanitizePath(
     if (
       realSegment === undefined ||
       isBroadPathSegment(resolvedSegment, workspaceRealPath, homeRealPath) ||
-      isBroadPathSegment(realSegment, workspaceRealPath, homeRealPath)
+      isBroadPathSegment(realSegment, workspaceRealPath, homeRealPath) ||
+      !isTrustedExecutableDirectory(resolvedSegment) ||
+      !isTrustedExecutableDirectory(realSegment)
     ) {
       continue;
     }
@@ -1399,6 +2009,28 @@ function sanitizePath(
   }
 
   return [...new Set(segments)].join(path.delimiter);
+}
+
+function isTrustedExecutableDirectory(directory: string): boolean {
+  if (isWindows()) {
+    return true;
+  }
+
+  let stats: ReturnType<typeof statSync>;
+
+  try {
+    stats = statSync(directory);
+  } catch {
+    return false;
+  }
+
+  if (!stats.isDirectory() || (stats.mode & 0o022) !== 0) {
+    return false;
+  }
+
+  const uid = process.getuid?.();
+
+  return uid === undefined || stats.uid === uid || stats.uid === 0;
 }
 
 function pathEnvValue(env: Readonly<Record<string, string | undefined>>): string | undefined {

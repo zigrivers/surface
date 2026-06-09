@@ -292,13 +292,17 @@ function maskSensitivePatterns(text: string): string {
     .replace(/\bAIza[0-9A-Za-z_-]{20,}\b/g, "[masked-token]")
     .replace(/\bya29\.[0-9A-Za-z_-]+(?:\.[0-9A-Za-z_-]+)*\b/g, "[masked-token]")
     .replace(/\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g, "[masked-token]")
-    .replace(/\b(?:sess|session|token|secret|api[_-]?key)_[A-Za-z0-9_-]{8,}\b/gi, "[masked-secret]")
+    .replace(/\b[a-f0-9]{40,}\b/gi, "[masked-hex-secret]")
+    .replace(
+      /\b(?:sess|session|token|secret|api[_-]?key|auth|credential|password|key)_[A-Za-z0-9_-]{8,}\b/gi,
+      "[masked-secret]",
+    )
     .replace(
       /([?&][A-Za-z0-9_.:-]*(?:token|secret|session|api[-_]?key|key|auth|credential|password)[A-Za-z0-9_.:-]*=)[^"')\s&]+/gi,
       "$1[masked-secret]",
     )
     .replace(
-      /(\s(?:data-)?[A-Za-z0-9_:-]*(?:session|token|secret|api[-_]?key)[A-Za-z0-9_:-]*\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/giu,
+      /(\s(?:data-)?[A-Za-z0-9_:-]*(?:session|token|secret|api[-_]?key|auth|credential|password|key)[A-Za-z0-9_:-]*\s*=\s*)(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/giu,
       (
         _match: string,
         prefix: string,
@@ -495,6 +499,10 @@ function hasNonEmptyText(value: string): boolean {
 }
 
 function isLikelyHighEntropySecret(candidate: string): boolean {
+  if (isCommonNonSecretIdentifier(candidate)) {
+    return false;
+  }
+
   const characterClasses = [
     /[a-z]/u.test(candidate),
     /[A-Z]/u.test(candidate),
@@ -503,6 +511,13 @@ function isLikelyHighEntropySecret(candidate: string): boolean {
   ].filter(Boolean).length;
 
   return characterClasses >= 3 && shannonEntropy(candidate) >= 4.5;
+}
+
+function isCommonNonSecretIdentifier(candidate: string): boolean {
+  return (
+    /^[a-f0-9]{32}$/iu.test(candidate) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(candidate)
+  );
 }
 
 function shannonEntropy(value: string): number {
@@ -579,28 +594,163 @@ const VOID_HTML_TAGS = new Set([
 
 function hasUnclosedNonVoidHtmlTag(text: string): boolean {
   const stack: string[] = [];
+  let index = 0;
 
-  for (const match of text.matchAll(/<\/?([a-z][\w:-]*)(?:\s[^<>]*)?>/giu)) {
-    const tag = match[1]?.toLowerCase();
-    const rawTag = match[0];
+  while (index < text.length) {
+    const tagStart = text.indexOf("<", index);
 
-    if (tag === undefined || VOID_HTML_TAGS.has(tag) || rawTag.endsWith("/>")) {
+    if (tagStart === -1) {
+      break;
+    }
+
+    const scanned = scanHtmlTag(text, tagStart);
+
+    if (scanned === undefined) {
+      index = tagStart + 1;
       continue;
     }
 
-    if (rawTag.startsWith("</")) {
-      const index = stack.lastIndexOf(tag);
+    if (scanned.incomplete) {
+      return true;
+    }
 
-      if (index !== -1) {
-        stack.splice(index);
+    index = scanned.end + 1;
+
+    if (
+      scanned.tagName === undefined ||
+      scanned.special ||
+      scanned.selfClosing ||
+      VOID_HTML_TAGS.has(scanned.tagName)
+    ) {
+      continue;
+    }
+
+    if (scanned.closing) {
+      const stackIndex = stack.lastIndexOf(scanned.tagName);
+
+      if (stackIndex !== -1) {
+        stack.splice(stackIndex);
       }
       continue;
     }
 
-    stack.push(tag);
+    stack.push(scanned.tagName);
   }
 
   return stack.length > 0;
+}
+
+type ScannedHtmlTag = {
+  readonly closing: boolean;
+  readonly end: number;
+  readonly incomplete: boolean;
+  readonly selfClosing: boolean;
+  readonly special: boolean;
+  readonly tagName?: string;
+};
+
+function scanHtmlTag(text: string, start: number): ScannedHtmlTag | undefined {
+  const next = text[start + 1];
+
+  if (next === undefined) {
+    return { closing: false, end: start, incomplete: true, selfClosing: false, special: false };
+  }
+
+  if (next === "!" || next === "?") {
+    const commentEnd = text.startsWith("<!--", start) ? text.indexOf("-->", start + 4) : -1;
+
+    if (commentEnd >= 0) {
+      return {
+        closing: false,
+        end: commentEnd + 2,
+        incomplete: false,
+        selfClosing: true,
+        special: true,
+      };
+    }
+
+    const specialEnd = scanHtmlTagEnd(text, start + 1);
+    return {
+      closing: false,
+      end: specialEnd ?? text.length - 1,
+      incomplete: specialEnd === undefined,
+      selfClosing: true,
+      special: true,
+    };
+  }
+
+  let cursor = start + 1;
+  let closing = false;
+
+  if (text[cursor] === "/") {
+    closing = true;
+    cursor += 1;
+  }
+
+  while (/\s/u.test(text[cursor] ?? "")) {
+    cursor += 1;
+  }
+
+  const tagNameStart = cursor;
+
+  if (!/[a-z]/iu.test(text[cursor] ?? "")) {
+    return undefined;
+  }
+
+  cursor += 1;
+  while (/[\w:-]/u.test(text[cursor] ?? "")) {
+    cursor += 1;
+  }
+
+  const end = scanHtmlTagEnd(text, cursor);
+
+  if (end === undefined) {
+    return {
+      closing,
+      end: text.length - 1,
+      incomplete: true,
+      selfClosing: false,
+      special: false,
+      tagName: text.slice(tagNameStart, cursor).toLowerCase(),
+    };
+  }
+
+  const beforeEnd = text.slice(cursor, end).trimEnd();
+
+  return {
+    closing,
+    end,
+    incomplete: false,
+    selfClosing: beforeEnd.endsWith("/"),
+    special: false,
+    tagName: text.slice(tagNameStart, cursor).toLowerCase(),
+  };
+}
+
+function scanHtmlTagEnd(text: string, cursor: number): number | undefined {
+  let quote: '"' | "'" | undefined;
+
+  for (let index = cursor; index < text.length; index += 1) {
+    const character = text[index];
+
+    if (quote !== undefined) {
+      if (character === quote) {
+        quote = undefined;
+      }
+      continue;
+    }
+
+    if (character === '"' || character === "'") {
+      quote = character;
+      continue;
+    }
+
+    if (character === ">") {
+      return index;
+    }
+  }
+
+  return undefined;
 }
 
 function maskHtmlNode(node: HtmlNode, textMask?: string): void {
@@ -679,7 +829,9 @@ function childTextMaskForElement(node: HtmlElement): string | undefined {
 const NON_VISIBLE_TEXT_TAGS = new Set(["noscript", "script", "style", "template"]);
 
 function isSensitiveAttributeName(name: string): boolean {
-  return /(?:session|token|secret|api[_-]?key)/i.test(name);
+  return /(?:^|[-_:])(?:session|token|secret|api[-_]?key|apikey|auth|credential|password|key)(?:$|[-_:])/iu.test(
+    name,
+  );
 }
 
 function hasVerifiedScreenshotRedaction(artifact: CaptureArtifact): boolean {

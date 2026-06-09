@@ -1,5 +1,16 @@
 import { existsSync } from "node:fs";
-import { chmod, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  appendFile,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  symlink,
+  utimes,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 
@@ -11,8 +22,10 @@ import {
   buildIsolatedProcessEnvironment,
   createSubscriptionCliProvider,
   defaultProcessRunner,
+  pruneStaleSurfaceTempRoots,
   resolvePromptTempParent,
   resolveDirectProviders,
+  validateSubscriptionAuthMirrorSource,
   type ProcessRunRequest,
   type ProcessRunResult,
   type ProcessRunner,
@@ -350,6 +363,16 @@ describe("subscription CLI provider", () => {
       }),
       fakeRunner(() => ({ exitCode: 127, stderr: "ENOENT /usr/bin/claude", stdout: "" })).runner,
     );
+    const sandboxUnavailable = await resolveDirectProviders(
+      resolveSurfaceConfig({
+        cli: { model: { fallback: { mode: "direct", providerOrder: ["claude"] } } },
+      }),
+      fakeRunner(() => ({
+        exitCode: 127,
+        stderr: "filesystem isolation is unavailable for the default process runner",
+        stdout: "",
+      })).runner,
+    );
     const auth = await resolveDirectProviders(
       resolveSurfaceConfig({
         cli: { model: { fallback: { mode: "direct", providerOrder: ["claude"] } } },
@@ -384,6 +407,9 @@ describe("subscription CLI provider", () => {
 
     expect(missing.discoveryUnavailableChannels).toMatchObject([
       { reason: "not-installed", channelId: "claude", sourceKind: "subscription-cli" },
+    ]);
+    expect(sandboxUnavailable.discoveryUnavailableChannels).toMatchObject([
+      { reason: "unsupported-capability", channelId: "claude", sourceKind: "subscription-cli" },
     ]);
     expect(auth.discoveryUnavailableChannels).toMatchObject([
       { reason: "auth-unavailable", channelId: "claude", sourceKind: "subscription-cli" },
@@ -629,6 +655,26 @@ describe("subscription CLI provider", () => {
     );
   });
 
+  it("rejects non-json subscription output when the request asks for JSON", async () => {
+    const provider = createSubscriptionCliProvider({
+      capability: claudeCapability,
+      runner: fakeRunner(() => success("plain prose that is not json")).runner,
+      timeoutMs: 1,
+    });
+
+    const result = await provider.complete({
+      prompt: {
+        instructions: "Return JSON.",
+        input: {},
+      },
+      responseFormat: { type: "json" },
+    });
+
+    expect(result).toMatchObject({
+      error: { code: "model_request_failed", details: { reason: "parse-failed" } },
+    });
+  });
+
   it("does not serialize raw thrown runner values into model error details", async () => {
     const provider = createSubscriptionCliProvider({
       capability: claudeCapability,
@@ -694,6 +740,52 @@ describe("subscription CLI provider", () => {
     expect(existsSync(dirname(promptPath ?? ""))).toBe(false);
   });
 
+  it("zero-fills appended prompt file bytes when cleanup cannot unlink the file", async () => {
+    let promptPath: string | undefined;
+    const appendedSecret = "appended-secret-after-original-prompt";
+    const provider = createSubscriptionCliProvider({
+      capability: {
+        ...claudeCapability,
+        completionArgs: ["--print", "--output-format", "json", "--prompt-file"],
+        promptDelivery: "prompt-file",
+      },
+      runner: fakeRunner(async (request) => {
+        promptPath = request.allowedReadPaths?.[0];
+        expect(promptPath).toBeDefined();
+
+        await appendFile(promptPath ?? "", appendedSecret);
+        await chmod(dirname(promptPath ?? ""), 0o500);
+
+        return success('{"type":"agent_message","message":"[]"}\n');
+      }).runner,
+      timeoutMs: 1,
+    });
+
+    try {
+      const result = await provider.complete({
+        prompt: {
+          instructions: "secret prompt",
+          input: {},
+        },
+      });
+
+      expect(result).toMatchObject({
+        error: { code: "model_request_failed", details: { reason: "prompt-cleanup-failed" } },
+      });
+      expect(promptPath).toBeDefined();
+
+      const remaining = await readFile(promptPath ?? "");
+
+      expect(remaining.includes(Buffer.from(appendedSecret))).toBe(false);
+      expect(remaining.every((byte) => byte === 0)).toBe(true);
+    } finally {
+      if (promptPath !== undefined) {
+        await chmod(dirname(promptPath), 0o700);
+        await rm(dirname(promptPath), { force: true, recursive: true });
+      }
+    }
+  });
+
   it("prefers an explicit writable prompt temp parent for prompt-file delivery", async () => {
     const promptParent = await mkdtemp(join(tmpdir(), "surface-prompt-parent-"));
 
@@ -726,12 +818,24 @@ describe("subscription CLI provider", () => {
         LANG: "en_US.UTF-8",
         Path: "relative:/tmp/workspace/bin:/tmp:/usr/bin:/definitely/missing:/Users/ken:/",
         USER: "ken",
+        XDG_CONFIG_HOME: "/Users/ken/.config",
+      },
+      commandEnv: {
+        HOME: "/Users/ken",
+        XDG_CACHE_HOME: "/Users/ken/.cache",
+        XDG_CONFIG_HOME: "/Users/ken/.config",
+        XDG_RUNTIME_DIR: "/Users/ken/.run",
+        XDG_STATE_HOME: "/Users/ken/.state",
       },
       isolatedRoot: "/tmp/surface-runner-123",
       workspaceRoot: "/tmp/workspace",
     });
 
-    expect(env.HOME).toBe("/Users/ken");
+    expect(env.HOME).toBe("/tmp/surface-runner-123/home");
+    expect(env.XDG_CONFIG_HOME).toBe("/tmp/surface-runner-123/home/.config");
+    expect(env.XDG_CACHE_HOME).toBe("/tmp/surface-runner-123/cache");
+    expect(env.XDG_RUNTIME_DIR).toBe("/tmp/surface-runner-123/run");
+    expect(env.XDG_STATE_HOME).toBe("/tmp/surface-runner-123/state");
     expect(env.USER).toBe("ken");
     expect(env.LANG).toBe("en_US.UTF-8");
     expect(env.TMPDIR).toBe("/tmp/surface-runner-123/tmp");
@@ -745,6 +849,56 @@ describe("subscription CLI provider", () => {
         "/",
       ]),
     );
+  });
+
+  it("rejects writable temp PATH entries before resolving subscription CLI commands", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-path-trust-"));
+
+    try {
+      const unsafeBin = join(root, "unsafe-bin");
+      const safeBin = join(root, "safe-bin");
+      await mkdir(unsafeBin);
+      await mkdir(safeBin);
+      await chmod(unsafeBin, 0o777);
+      await chmod(safeBin, 0o755);
+
+      const env = buildIsolatedProcessEnvironment({
+        baseEnv: {
+          PATH: `${unsafeBin}${delimiter}${safeBin}`,
+        },
+        isolatedRoot: join(root, "isolated"),
+        workspaceRoot: join(root, "workspace"),
+      });
+
+      expect(env.PATH?.split(delimiter)).toContain(safeBin);
+      expect(env.PATH?.split(delimiter)).not.toContain(unsafeBin);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("rejects auth mirror sources that contain symlink escapes", async () => {
+    const root = await mkdtemp(join(tmpdir(), "surface-auth-mirror-"));
+
+    try {
+      const authRoot = join(root, ".claude");
+      const outsideFile = join(root, "outside-token.json");
+      const outsideDir = join(root, "outside-dir");
+      await mkdir(authRoot);
+      await mkdir(outsideDir);
+      await writeFile(outsideFile, "token");
+
+      expect(await validateSubscriptionAuthMirrorSource(authRoot)).toBe(true);
+
+      await symlink(outsideFile, join(authRoot, "token-link.json"));
+      expect(await validateSubscriptionAuthMirrorSource(authRoot)).toBe(false);
+      await rm(join(authRoot, "token-link.json"), { force: true });
+
+      await symlink(outsideDir, join(authRoot, "dir-link"));
+      expect(await validateSubscriptionAuthMirrorSource(authRoot)).toBe(false);
+    } finally {
+      await rm(root, { force: true, recursive: true });
+    }
   });
 
   it("keeps symlinked CLI shim and real node toolchain directories in sanitized PATH", async () => {
@@ -772,6 +926,31 @@ describe("subscription CLI provider", () => {
       );
     } finally {
       await rm(root, { force: true, recursive: true });
+    }
+  });
+
+  it("prunes stale Surface-owned temp roots without touching fresh or unrelated dirs", async () => {
+    const parent = await mkdtemp(join(tmpdir(), "surface-prune-parent-"));
+
+    try {
+      const staleRunner = join(parent, "surface-model-cli-old");
+      const freshPrompt = join(parent, "surface-model-prompt-new");
+      const unrelated = join(parent, "other-temp-old");
+      await mkdir(staleRunner);
+      await mkdir(freshPrompt);
+      await mkdir(unrelated);
+      const now = Date.now();
+      const staleDate = new Date(now - 25 * 60 * 60 * 1000);
+      await utimes(staleRunner, staleDate, staleDate);
+      await utimes(unrelated, staleDate, staleDate);
+
+      await pruneStaleSurfaceTempRoots(parent, now);
+
+      expect(existsSync(staleRunner)).toBe(false);
+      expect(existsSync(freshPrompt)).toBe(true);
+      expect(existsSync(unrelated)).toBe(true);
+    } finally {
+      await rm(parent, { force: true, recursive: true });
     }
   });
 });

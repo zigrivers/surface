@@ -1609,6 +1609,78 @@ describe("audit runner", () => {
     ]);
   });
 
+  it("passes sanitized capture metadata to MMR fallback", async () => {
+    let seenCapture: Capture | undefined;
+    const mmr: MmrAuditFallback = {
+      id: "mmr",
+      availability: () =>
+        ok({
+          available: true,
+          channelId: "mmr",
+          model: "mmr-review",
+          provider: "mmr",
+          sourceKind: "mmr",
+        }),
+      run: (input) => {
+        seenCapture = input.capture;
+        return ok({
+          channelId: "mmr",
+          model: "mmr-review",
+          provider: "mmr",
+          sourceKind: "mmr",
+          text: "[]",
+        });
+      },
+    };
+    const runner = createAuditRunner({
+      knowledgeSource: knowledge,
+      lensRegistry: [lensRegistration("usability", true, modelLens("usability"))],
+      mmrFallback: mmr,
+    });
+
+    const result = await runner({
+      capture: {
+        ...capture,
+        target: {
+          kind: "url",
+          ref: "https://example.test/app?access_token=secret-token&ok=1",
+        },
+        verification: {
+          authInjectedBeforeNavigation: true,
+          isRequestedTarget: true,
+          landedUrl: "https://example.test/app?session_id=secret-session",
+          requestedUrl: "https://example.test/app?access_token=secret-token",
+        },
+      },
+      config: resolveSurfaceConfig({
+        cli: {
+          model: {
+            egressPolicy: { mode: "text" },
+            fallback: { mode: "mmr" },
+          },
+        },
+      }),
+      runId: "run_mmr_sanitized_capture",
+    });
+
+    if (seenCapture === undefined) {
+      throw new Error("expected MMR capture");
+    }
+
+    expect(isOk(result)).toBe(true);
+    expect(seenCapture.target.ref).toBe(
+      "https://example.test/app?access_token=[masked-secret]&ok=1",
+    );
+    expect(seenCapture.verification?.landedUrl).toBe(
+      "https://example.test/app?session_id=[masked-secret]",
+    );
+    expect(seenCapture.artifacts.map((artifact) => artifact.path)).toEqual([
+      "surface://model-egress/redacted/dom.txt",
+      "surface://model-egress/redacted/styles.txt",
+    ]);
+    expect(JSON.stringify(seenCapture)).not.toMatch(/secret-token|secret-session|\.surface\//u);
+  });
+
   it("does not record artifact classes for unavailable MMR availability probes", async () => {
     const mmr = fakeMmr();
     const runner = createAuditRunner({

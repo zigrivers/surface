@@ -36,6 +36,7 @@ import {
   deriveFindingIdentity,
   diffTrackedFindings,
   exitCodeForSurfaceError,
+  installSubscriptionTempRootProcessCleanupHandlers,
   maskModelArtifactText,
   maskModelPlainText,
   resolveSurfaceConfig,
@@ -298,6 +299,7 @@ const SURFACE_CLI_VERSION = JSON.parse(
 ) as { version: string };
 
 export async function runSurfaceCli(options: RunSurfaceCliOptions = {}): Promise<CliExitCode> {
+  installSubscriptionTempRootProcessCleanupHandlers();
   const composition = options.composition ?? createSurfaceComposition(options);
   const env = options.env ?? process.env;
   const io = options.io ?? {};
@@ -1733,6 +1735,8 @@ function humanizeAudit(data: unknown, options: { readonly all: boolean }): strin
     }`,
   ];
 
+  lines.push(...humanizeModelAudit(data.model));
+
   if (findingCount === 0) {
     lines.push("No findings were reported.");
 
@@ -1751,6 +1755,38 @@ function humanizeAudit(data: unknown, options: { readonly all: boolean }): strin
   }
 
   return `${lines.join("\n")}\n`;
+}
+
+function humanizeModelAudit(model: unknown): readonly string[] {
+  if (!isRecord(model)) {
+    return [];
+  }
+
+  const unavailableChannels = arrayValue(model.unavailableChannels)
+    .map((channel) => {
+      if (!isRecord(channel)) {
+        return undefined;
+      }
+
+      const id = stringValue(channel.id);
+      const reason = stringValue(channel.reason);
+
+      if (id === undefined && reason === undefined) {
+        return undefined;
+      }
+
+      return `${id ?? "unknown"}${reason === undefined ? "" : ` (${reason})`}`;
+    })
+    .filter((channel): channel is string => channel !== undefined);
+
+  return [
+    "Model coverage:",
+    `- Attempted channels: ${formatStringList(stringArrayValue(model.attemptedChannels))}`,
+    `- Completed channels: ${formatStringList(stringArrayValue(model.completedChannels))}`,
+    `- Artifact classes sent: ${formatStringList(stringArrayValue(model.artifactClassesSent))}`,
+    `- Blocked reasons: ${formatStringList(stringArrayValue(model.blockedReasons))}`,
+    `- Unavailable channels: ${formatStringList(unavailableChannels)}`,
+  ];
 }
 
 function humanizeBacklog(data: unknown, options: { readonly all: boolean }): string {
@@ -1872,12 +1908,20 @@ function arrayValue(value: unknown): readonly unknown[] {
   return Array.isArray(value) ? value : [];
 }
 
+function stringArrayValue(value: unknown): readonly string[] {
+  return arrayValue(value).filter((entry): entry is string => typeof entry === "string");
+}
+
 function stringValue(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
 function numberValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function formatStringList(values: readonly string[]): string {
+  return values.length === 0 ? "none" : values.join(", ");
 }
 
 function plural(count: number, singular: string, pluralValue = `${singular}s`): string {
@@ -2077,6 +2121,10 @@ function modelConfigLayerFromEnv(env: SurfaceCliEnv): ModelConfigLayer | undefin
     }
   }
 
+  if (hasByoModelEnv(env) && egressPolicy.mode === undefined) {
+    egressPolicy.mode = "text";
+  }
+
   const channels = parseModelChannels(env.SURFACE_MODEL_CHANNELS);
 
   if (channels.length > 0) {
@@ -2097,12 +2145,25 @@ function modelConfigLayerFromEnv(env: SurfaceCliEnv): ModelConfigLayer | undefin
   return modelLayerFromParts(fallback, egressPolicy);
 }
 
+function hasByoModelEnv(env: SurfaceCliEnv): boolean {
+  return [
+    env.ANTHROPIC_API_KEY,
+    env.GEMINI_API_KEY,
+    env.OPENAI_API_KEY,
+    env.SURFACE_MODEL_BASE_URL,
+    env.SURFACE_MODEL_PROVIDER,
+  ].some(hasEnvText);
+}
+
+function hasEnvText(value: string | undefined): boolean {
+  return value !== undefined && value.trim().length > 0;
+}
+
 function modelConfigLayerFromOptions(
   options: ConfigCommandOptions,
 ): Result<ModelConfigLayer | undefined> {
   const fallback: Record<string, unknown> = {};
   const egressPolicy: Record<string, unknown> = {};
-  let explicitFallbackMode: string | undefined;
 
   if (options.modelFallback !== undefined) {
     const parsedFallback = ModelFallbackModeSchema.safeParse(options.modelFallback);
@@ -2121,7 +2182,6 @@ function modelConfigLayerFromOptions(
     }
 
     fallback.mode = parsedFallback.data;
-    explicitFallbackMode = parsedFallback.data;
 
     if (parsedFallback.data !== "off") {
       egressPolicy.mode = "text";
@@ -2168,10 +2228,6 @@ function modelConfigLayerFromOptions(
     if (screenshotPolicy.value.mode !== undefined) {
       egressPolicy.mode = screenshotPolicy.value.mode;
     }
-  }
-
-  if (explicitFallbackMode === "off") {
-    egressPolicy.mode = "off";
   }
 
   return resultOk(modelLayerFromParts(fallback, egressPolicy));
@@ -2397,6 +2453,15 @@ async function observeCliTarget(
 function captureForState(capture: Capture): Capture {
   return {
     ...capture,
+    ...(capture.verification === undefined
+      ? {}
+      : {
+          verification: {
+            ...capture.verification,
+            landedUrl: redactStateRef(capture.verification.landedUrl),
+            requestedUrl: redactStateRef(capture.verification.requestedUrl),
+          },
+        }),
     target: {
       ...capture.target,
       ref: redactedTargetRef(capture.target),
@@ -2409,10 +2474,34 @@ function redactedTargetRef(target: Target): string {
     return "[redacted-inline-dom]";
   }
 
-  return target.ref.replace(
-    /([?&](?:token|secret|session|api[_-]?key)=)[^"'&\s]+/gi,
-    "$1[redacted]",
+  return redactStateRef(target.ref);
+}
+
+function redactStateRef(value: string): string {
+  return maskModelPlainText(redactSensitiveQueryValues(value));
+}
+
+function redactSensitiveQueryValues(value: string): string {
+  return value.replace(
+    /([?&])([^=&#\s]+)=([^&#"'\s]*)/g,
+    (match: string, prefix: string, rawKey: string) => {
+      const decodedKey = safeDecodeQueryKey(rawKey);
+
+      return isSensitiveQueryKey(decodedKey) ? `${prefix}${rawKey}=[redacted]` : match;
+    },
   );
+}
+
+function safeDecodeQueryKey(value: string): string {
+  try {
+    return decodeURIComponent(value.replace(/\+/g, " "));
+  } catch {
+    return value;
+  }
+}
+
+function isSensitiveQueryKey(value: string): boolean {
+  return /token|secret|session|key|auth|credential|password/iu.test(value);
 }
 
 function isExecutableStageId(step: string): step is ExecutablePipelineStageId {
