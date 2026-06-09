@@ -11,6 +11,7 @@ import {
   createTrackedFinding,
   createSurfaceComposition,
   createSurfaceError,
+  createVerdict,
   diffTrackedFindings,
   err,
   evaluateGateWithQaFlows,
@@ -27,6 +28,7 @@ import {
   type Finding,
   type TrackedFinding,
   type ValidationCheck,
+  type Verdict,
   type Result,
   type SurfaceConfig,
   type SurfaceComposition,
@@ -487,7 +489,7 @@ type SurfaceMcpSessionState = {
   readonly runOrder: string[];
   readonly projectRoot: string;
   readonly trackedByIdentity: Map<string, TrackedFinding>;
-  readonly verdicts: Map<string, SurfaceMcpVerdictOutput>;
+  readonly verdicts: Map<string, Verdict>;
   nextBaselineSequence: number;
   nextRunSequence: number;
 };
@@ -581,9 +583,7 @@ function resetSurfaceMcpSessionFromState(
   }
 
   for (const verdict of state.verdicts ?? []) {
-    if (isSurfaceMcpVerdict(verdict)) {
-      session.verdicts.set(verdict.findingId, verdict);
-    }
+    session.verdicts.set(verdict.findingId, verdict);
   }
 
   session.nextRunSequence = nextSequenceFromIds(session.runOrder, "run_mcp_");
@@ -620,19 +620,6 @@ function surfaceMcpBaselineFromProjectBaseline(baseline: Baseline): SurfaceMcpBa
     identityKeys: new Set(baseline.identityKeys),
     ...(baseline.reason === undefined ? {} : { reason: baseline.reason }),
   };
-}
-
-function isSurfaceMcpVerdict(verdict: {
-  readonly decision: string;
-  readonly findingId: string;
-  readonly rationale: string;
-}): verdict is SurfaceMcpVerdictOutput {
-  return (
-    verdict.decision === "accept" ||
-    verdict.decision === "reject" ||
-    verdict.decision === "correct" ||
-    verdict.decision === "defer"
-  );
 }
 
 async function persistSurfaceMcpSession(
@@ -1161,12 +1148,17 @@ async function callSurfaceVerdict(
     );
   }
 
-  const verdict = {
+  const verdict = createVerdict({
     decision: parsed.value.decision,
-    findingId: parsed.value.findingId,
+    finding,
     rationale: parsed.value.rationale,
-  } satisfies SurfaceMcpVerdictOutput;
-  session.verdicts.set(parsed.value.findingId, verdict);
+  });
+
+  if (!verdict.ok) {
+    return verdict;
+  }
+
+  session.verdicts.set(parsed.value.findingId, verdict.value);
 
   const persisted = await persistSurfaceMcpSession(composition, session);
 
@@ -1174,7 +1166,15 @@ async function callSurfaceVerdict(
     return persisted;
   }
 
-  return ok(verdict);
+  return ok(surfaceMcpVerdictOutputFromVerdict(verdict.value));
+}
+
+function surfaceMcpVerdictOutputFromVerdict(verdict: Verdict): SurfaceMcpVerdictOutput {
+  return {
+    decision: verdict.decision,
+    findingId: verdict.findingId,
+    rationale: verdict.rationale,
+  };
 }
 
 function callSurfaceDiff(

@@ -32,6 +32,7 @@ import {
   evaluateGateWithQaFlows,
   createModelEgressLedgerEntry,
   createSarifRenderer,
+  createVerdict,
   assignFindingIdentities,
   deriveFindingIdentity,
   diffTrackedFindings,
@@ -1519,16 +1520,26 @@ async function recordVerdict(
     );
   }
 
-  const verdict: VerdictRecord = {
+  const verdict = createVerdict({
     decision: decision.value,
-    findingId,
+    finding,
     rationale: options.reason ?? "",
+  });
+
+  if (!isResultOk(verdict)) {
+    return verdict;
+  }
+
+  const outputVerdict: VerdictRecord = {
+    decision: verdict.value.decision,
+    findingId: verdict.value.findingId,
+    rationale: verdict.value.rationale,
   };
   const writtenState = await composition.stateStore.writeState({
     ...state.value,
     verdicts: [
       ...(state.value.verdicts ?? []).filter((entry) => entry.findingId !== findingId),
-      verdict,
+      verdict.value,
     ],
   });
 
@@ -1536,7 +1547,7 @@ async function recordVerdict(
     return writtenState;
   }
 
-  return resultOk({ verdict });
+  return resultOk({ verdict: outputVerdict });
 }
 
 async function diffRuns(

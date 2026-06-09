@@ -14,6 +14,7 @@ import type {
 import type { ModelAvailability, ModelProvider, ModelSourceKind } from "./model-provider.js";
 import type { ReconciliationQuestion } from "./reconciliation.js";
 import type { Baseline, TrackedFinding } from "./tracked-findings.js";
+import type { Verdict } from "./verdicts.js";
 export type { Backlog, BacklogEntry } from "./findings.js";
 export type { ModelProvider } from "./model-provider.js";
 export type { Baseline } from "./tracked-findings.js";
@@ -381,9 +382,9 @@ export interface ArtifactWriter {
 export interface ProjectStateSnapshot {
   readonly version: string;
   readonly baselines?: readonly Baseline[];
-  readonly backlog?: ProjectBacklogSnapshot;
+  readonly backlog?: FindingsBacklog;
   readonly currentStage?: string;
-  readonly findings?: readonly ProjectFindingSnapshot[];
+  readonly findings?: readonly Finding[];
   readonly modelEgress?: readonly ProjectModelEgressLedgerEntry[];
   readonly runRecords?: readonly ProjectRunRecord[];
   readonly discovery?: {
@@ -434,7 +435,7 @@ export interface ProjectStateSnapshot {
     readonly stageIds: readonly string[];
   };
   readonly trackedFindings?: readonly TrackedFinding[];
-  readonly verdicts?: readonly ProjectVerdictSnapshot[];
+  readonly verdicts?: readonly Verdict[];
 }
 
 export interface ProjectModelEgressUnavailableChannel {

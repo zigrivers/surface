@@ -7,14 +7,24 @@ import writeFileAtomic from "write-file-atomic";
 import { z } from "zod";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "./errors.js";
-import type {
-  PersistArtifactIntent,
-  PersistedArtifactRef,
-  ProjectStateSnapshot,
-  StateStore,
+import { BacklogSchema, FindingSchema } from "./findings.js";
+import {
+  CaptureArtifactSchema,
+  CaptureArtifactTypeSchema,
+  type ArtifactRedactionMetadata,
+  type Capture,
+  type CaptureArtifact,
+  type PersistArtifactIntent,
+  type PersistedArtifactRef,
+  type ProjectRunRecord,
+  type ProjectStateSnapshot,
+  type StateStore,
+  type Target,
 } from "./interfaces.js";
-import { isNodeErrorWithCode, isSameOrChildPath } from "./path-safety.js";
+import { ReconciliationQuestionSchema } from "./reconciliation.js";
 import { BaselineSchema, TrackedFindingSchema } from "./tracked-findings.js";
+import { VerdictSchema } from "./verdicts.js";
+import { isNodeErrorWithCode, isSameOrChildPath } from "./path-safety.js";
 
 /** Default project-local directory used for Surface state and artifacts. */
 export const SURFACE_STATE_DIR = ".surface";
@@ -27,33 +37,113 @@ export const SURFACE_STATE_FILE = "state.json";
  */
 export const SURFACE_STATE_VERSION = "1.0";
 
+const nonEmptyStringSchema = z.string().trim().min(1);
+
+const ProjectStateViewportSchema = z
+  .object({
+    height: z.number().positive(),
+    label: z.enum(["mobile", "tablet", "desktop"]),
+    width: z.number().positive(),
+  })
+  .strict();
+
+const ProjectStateTargetSchema = z
+  .object({
+    kind: z.enum(["url", "localhost", "route", "screenshot", "component", "dom"]),
+    ref: nonEmptyStringSchema,
+    theme: z.enum(["light", "dark"]).optional(),
+    viewport: ProjectStateViewportSchema.optional(),
+  })
+  .strict();
+type ParsedProjectStateTarget = z.infer<typeof ProjectStateTargetSchema>;
+type ParsedCaptureArtifact = z.infer<typeof CaptureArtifactSchema>;
+
+const ProjectStateCaptureSchema = z
+  .object({
+    artifacts: z.array(CaptureArtifactSchema),
+    authUsed: z.boolean().optional(),
+    backend: nonEmptyStringSchema,
+    capturedAt: nonEmptyStringSchema,
+    degradation: z
+      .object({
+        skippedArtifacts: z.array(CaptureArtifactTypeSchema),
+        skippedReason: nonEmptyStringSchema,
+      })
+      .strict()
+      .optional(),
+    id: nonEmptyStringSchema,
+    status: z.enum(["requested", "completed", "degraded", "auth-failed", "unreachable"]),
+    target: ProjectStateTargetSchema,
+    verification: z
+      .object({
+        authInjectedBeforeNavigation: z.boolean(),
+        isRequestedTarget: z.boolean(),
+        landedUrl: nonEmptyStringSchema,
+        requestedUrl: nonEmptyStringSchema,
+      })
+      .strict()
+      .optional(),
+  })
+  .strict();
+
 const ProjectStatePipelineSchema = z
   .object({
-    lastCompletedStage: z.string().min(1).optional(),
+    lastCompletedStage: nonEmptyStringSchema.optional(),
     nextEventSequence: z.number().int().nonnegative().optional(),
-    runId: z.string().trim().min(1),
-    stageIds: z.array(z.string().min(1)),
+    runId: nonEmptyStringSchema,
+    stageIds: z.array(nonEmptyStringSchema),
   })
   .passthrough();
 
+const ProjectStateSkippedLensSchema = z
+  .object({
+    lensId: nonEmptyStringSchema,
+    message: nonEmptyStringSchema,
+    reason: nonEmptyStringSchema,
+  })
+  .strict();
+
+const ProjectStateRunRecordSchema = z
+  .object({
+    backlog: BacklogSchema.optional(),
+    capture: ProjectStateCaptureSchema.optional(),
+    findings: z.array(FindingSchema).optional(),
+    reconciliationQuestions: z.array(ReconciliationQuestionSchema).optional(),
+    runId: nonEmptyStringSchema,
+    skippedLenses: z.array(ProjectStateSkippedLensSchema).optional(),
+    status: z.enum(["completed", "failed"]).optional(),
+    trackedFindings: z.array(TrackedFindingSchema),
+  })
+  .strict();
+type ParsedProjectStateCapture = z.infer<typeof ProjectStateCaptureSchema>;
+type ParsedProjectStateRunRecord = z.infer<typeof ProjectStateRunRecordSchema>;
+
 const ProjectStateSnapshotSchema = z
   .object({
-    version: z.string().min(1),
+    version: nonEmptyStringSchema,
+    backlog: BacklogSchema.optional(),
     baselines: z.array(BaselineSchema).optional(),
-    currentStage: z.string().min(1).optional(),
+    currentStage: nonEmptyStringSchema.optional(),
+    findings: z.array(FindingSchema).optional(),
     pipeline: ProjectStatePipelineSchema.optional(),
+    runRecords: z.array(ProjectStateRunRecordSchema).optional(),
     trackedFindings: z.array(TrackedFindingSchema).optional(),
+    verdicts: z.array(VerdictSchema).optional(),
   })
   .passthrough();
 
 const LegacyProjectStateSnapshotSchema = z
   .object({
-    schemaVersion: z.string().min(1).optional(),
-    version: z.string().min(1).optional(),
+    schemaVersion: nonEmptyStringSchema.optional(),
+    version: nonEmptyStringSchema.optional(),
+    backlog: z.unknown().optional(),
     baselines: z.array(z.unknown()).optional(),
-    currentStage: z.string().min(1).optional(),
+    currentStage: nonEmptyStringSchema.optional(),
+    findings: z.array(z.unknown()).optional(),
     pipeline: ProjectStatePipelineSchema.optional(),
+    runRecords: z.array(z.unknown()).optional(),
     trackedFindings: z.array(z.unknown()).optional(),
+    verdicts: z.array(z.unknown()).optional(),
   })
   .passthrough();
 
@@ -529,20 +619,31 @@ function migrateProjectState(
   // migration here before changing required tracked finding fields or history invariants.
   const legacy = LegacyProjectStateSnapshotSchema.parse(value);
   const {
+    backlog,
     baselines,
     currentStage,
+    findings,
     pipeline,
+    runRecords,
     schemaVersion,
     trackedFindings,
+    verdicts,
     version,
     ...passthrough
   } = legacy;
+  const migratedBacklog = backlog === undefined ? undefined : BacklogSchema.parse(backlog);
   const migratedBaselines =
     baselines === undefined ? undefined : z.array(BaselineSchema).parse(baselines);
+  const migratedFindings =
+    findings === undefined ? undefined : z.array(FindingSchema).parse(findings);
+  const migratedRunRecords =
+    runRecords === undefined ? undefined : migrateProjectRunRecords(runRecords);
   const migratedTrackedFindings =
     trackedFindings === undefined
       ? undefined
       : z.array(TrackedFindingSchema).parse(trackedFindings);
+  const migratedVerdicts =
+    verdicts === undefined ? undefined : z.array(VerdictSchema).parse(verdicts);
   const hadSchemaVersion = schemaVersion !== undefined;
   const hadVersion = version !== undefined;
   const migratedVersion =
@@ -550,14 +651,98 @@ function migrateProjectState(
   const migrated: ProjectStateSnapshot = {
     ...passthrough,
     version: migratedVersion,
+    ...(migratedBacklog !== undefined ? { backlog: migratedBacklog } : {}),
     ...(migratedBaselines !== undefined ? { baselines: migratedBaselines } : {}),
     ...(currentStage !== undefined ? { currentStage } : {}),
+    ...(migratedFindings !== undefined ? { findings: migratedFindings } : {}),
     ...(pipeline !== undefined ? { pipeline } : {}),
+    ...(migratedRunRecords !== undefined ? { runRecords: migratedRunRecords } : {}),
     ...(migratedTrackedFindings !== undefined ? { trackedFindings: migratedTrackedFindings } : {}),
+    ...(migratedVerdicts !== undefined ? { verdicts: migratedVerdicts } : {}),
   };
 
   ProjectStateSnapshotSchema.parse(migrated);
   return { hadSchemaVersion, hadVersion, state: migrated };
+}
+
+function migrateProjectRunRecords(runRecords: readonly unknown[]): readonly ProjectRunRecord[] {
+  return z.array(ProjectStateRunRecordSchema).parse(runRecords).map(projectRunRecordFromParsed);
+}
+
+function projectRunRecordFromParsed(record: ParsedProjectStateRunRecord): ProjectRunRecord {
+  return {
+    runId: record.runId,
+    trackedFindings: record.trackedFindings,
+    ...(record.backlog === undefined ? {} : { backlog: record.backlog }),
+    ...(record.capture === undefined ? {} : { capture: captureFromParsed(record.capture) }),
+    ...(record.findings === undefined ? {} : { findings: record.findings }),
+    ...(record.reconciliationQuestions === undefined
+      ? {}
+      : { reconciliationQuestions: record.reconciliationQuestions }),
+    ...(record.skippedLenses === undefined ? {} : { skippedLenses: record.skippedLenses }),
+    ...(record.status === undefined ? {} : { status: record.status }),
+  };
+}
+
+function captureFromParsed(capture: ParsedProjectStateCapture): Capture {
+  return {
+    artifacts: capture.artifacts.map(captureArtifactFromParsed),
+    backend: capture.backend,
+    capturedAt: capture.capturedAt,
+    id: capture.id,
+    status: capture.status,
+    target: targetFromParsed(capture.target),
+    ...(capture.authUsed === undefined ? {} : { authUsed: capture.authUsed }),
+    ...(capture.degradation === undefined ? {} : { degradation: capture.degradation }),
+    ...(capture.verification === undefined ? {} : { verification: capture.verification }),
+  };
+}
+
+function captureArtifactFromParsed(artifact: ParsedCaptureArtifact): CaptureArtifact {
+  return {
+    id: artifact.id,
+    path: artifact.path,
+    redacted: artifact.redacted,
+    type: artifact.type,
+    ...(artifact.redaction === undefined
+      ? {}
+      : { redaction: redactionMetadataFromParsed(artifact.redaction) }),
+  };
+}
+
+function redactionMetadataFromParsed(
+  redaction: NonNullable<ParsedCaptureArtifact["redaction"]>,
+): ArtifactRedactionMetadata {
+  return {
+    maskedClasses: redaction.maskedClasses,
+    safeNoSensitiveRegions: redaction.safeNoSensitiveRegions,
+    status: redaction.status,
+    unsafeRegions: redaction.unsafeRegions,
+    ...(redaction.boundingBoxesVerified === undefined
+      ? {}
+      : { boundingBoxesVerified: redaction.boundingBoxesVerified }),
+    ...(redaction.selectorsVerified === undefined
+      ? {}
+      : { selectorsVerified: redaction.selectorsVerified }),
+    ...(redaction.sensitiveSelectors === undefined
+      ? {}
+      : { sensitiveSelectors: redaction.sensitiveSelectors }),
+    ...(redaction.sensitiveTextRanges === undefined
+      ? {}
+      : { sensitiveTextRanges: redaction.sensitiveTextRanges }),
+    ...(redaction.textRangesVerified === undefined
+      ? {}
+      : { textRangesVerified: redaction.textRangesVerified }),
+  };
+}
+
+function targetFromParsed(target: ParsedProjectStateTarget): Target {
+  return {
+    kind: target.kind,
+    ref: target.ref,
+    ...(target.theme === undefined ? {} : { theme: target.theme }),
+    ...(target.viewport === undefined ? {} : { viewport: target.viewport }),
+  };
 }
 
 async function releaseLock(release: () => Promise<void>): Promise<void> {
