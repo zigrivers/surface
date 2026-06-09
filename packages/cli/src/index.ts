@@ -29,6 +29,7 @@ import {
   createTrackedFinding,
   createSurfaceComposition,
   createSurfaceError,
+  applyWaiversToTrackedFindings,
   evaluateGateWithQaFlows,
   createModelEgressLedgerEntry,
   redactCaptureArtifactText,
@@ -187,9 +188,18 @@ type ExplainOutput = {
   readonly evidence: readonly unknown[];
 };
 type BacklogOutput = {
-  readonly backlog: readonly unknown[];
+  readonly backlog: readonly ExpandedBacklogEntry[];
   readonly backlogId: string;
   readonly runId: string;
+};
+type ExpandedBacklogEntry = Omit<Backlog["entries"][number], "demotedAsDuplicateOf"> & {
+  readonly demotedAsDuplicateOf: string | null;
+  readonly executable: boolean;
+  readonly gateDisposition: string;
+  readonly gatedForHuman: boolean;
+  readonly identityKey: string;
+  readonly method: Finding["method"];
+  readonly status: string;
 };
 type SarifExportOutput = {
   readonly sarif: SurfaceSarifLog;
@@ -1188,8 +1198,10 @@ async function readBacklog(
     return resultOk({ export: exported.value });
   }
 
+  const now = new Date();
+
   return resultOk({
-    backlog: backlog.entries,
+    backlog: expandedBacklogEntries(backlog.entries, state.value, now),
     backlogId: backlog.id,
     runId: backlog.runId,
   });
@@ -2707,6 +2719,69 @@ function fullFindingsForState(state: CliProjectStateSnapshot): readonly Finding[
       (result): result is { readonly success: true; readonly data: Finding } => result.success,
     )
     .map((result) => result.data);
+}
+
+function expandedBacklogEntries(
+  entries: Backlog["entries"],
+  state: CliProjectStateSnapshot,
+  now: Date,
+): readonly ExpandedBacklogEntry[] {
+  const findingsById = new Map(fullFindingsForState(state).map((finding) => [finding.id, finding]));
+  const trackedFindings = effectiveTrackedFindingsForBacklog(state, now);
+  const trackedByFindingId = new Map(
+    trackedFindings
+      .filter(
+        (
+          trackedFinding,
+        ): trackedFinding is TrackedFinding & { readonly currentFindingId: string } =>
+          typeof trackedFinding.currentFindingId === "string",
+      )
+      .map((trackedFinding) => [trackedFinding.currentFindingId, trackedFinding]),
+  );
+
+  return entries.map((entry) => {
+    const finding = findingsById.get(entry.findingId);
+    const trackedFinding = trackedByFindingId.get(entry.findingId);
+    const gatedForHuman = finding?.gatedForHuman ?? false;
+
+    return {
+      ...entry,
+      demotedAsDuplicateOf: entry.demotedAsDuplicateOf ?? null,
+      executable: finding === undefined ? false : !gatedForHuman,
+      gateDisposition: trackedFinding?.gateDisposition ?? "active",
+      gatedForHuman,
+      identityKey:
+        trackedFinding?.identityKey ??
+        (finding === undefined ? entry.findingId : deriveFindingIdentity(finding).identityKey),
+      method: finding?.method ?? "judged",
+      severityBand: entry.severityBand ?? finding?.severityBand,
+      status: trackedFinding?.status ?? "new",
+    };
+  });
+}
+
+function effectiveTrackedFindingsForBacklog(
+  state: CliProjectStateSnapshot,
+  now: Date,
+): readonly TrackedFinding[] {
+  const trackedFindings = state.trackedFindings ?? [];
+  const latestBaseline = state.baselines?.at(-1);
+
+  if (latestBaseline === undefined) {
+    return trackedFindings;
+  }
+
+  return applyWaiversToTrackedFindings({
+    now,
+    trackedFindings,
+    waivers: waiversForBacklogBaseline(latestBaseline),
+  });
+}
+
+function waiversForBacklogBaseline(baseline: Baseline): Baseline["waivers"] {
+  const candidate = (baseline as { readonly waivers?: unknown }).waivers;
+
+  return Array.isArray(candidate) ? (candidate as Baseline["waivers"]) : [];
 }
 
 function persistedFindingsForTrackedState(
