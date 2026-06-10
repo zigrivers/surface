@@ -25,6 +25,11 @@
   output, including bracket refs such as `[ref=e2]`.
 - Skips passive snapshot roles such as headings when generating browser-QA exploration actions, so
   bounded exploration reaches actionable links and controls sooner.
+- Rejects conflicting capture and audit target flags instead of silently choosing one target.
+- Reports missing static screenshot files as static input errors with the requested source path,
+  rather than surfacing an unrelated browser backend error.
+- Returns promoted finding details from `surface replay --promote-on-repro` JSON output when replay
+  promotion succeeds.
 - Writes an inferred URL target when promoting candidate browser-QA flows that start from an
   absolute `open` step, so promoted flows can run without repeating the target flag.
 - Documents a safe direct CLI smoke-test fallback for local development when `npm link` conflicts
@@ -35,6 +40,9 @@
   localhost capture/audit, MCP candidate listing, and pipeline JSON projections.
 - Adds a third post-PR deep dogfood report covering exploration action prioritization, failing
   flow-aware gates, promotion, evidence, replay, MCP smoke, and pipeline projections.
+- Adds a seventh deep dogfood report covering static targets, auth-state errors, model fallback
+  disclosure, browser-QA cleanup/flow/evidence/replay paths, MCP artifact reads, and structured
+  invalid-path errors.
 
 ## 0.2.3 - Pipeline History and Runtime Updates
 

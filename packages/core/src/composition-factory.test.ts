@@ -9,7 +9,7 @@ import type {
   BrowserQaDriverActionInput,
 } from "./browser-qa/agent-browser-driver.js";
 import { DEFAULT_SURFACE_CONFIG } from "./config.js";
-import { ok } from "./errors.js";
+import { createSurfaceError, err, ok } from "./errors.js";
 import type {
   CaptureBackend,
   FrameworkAdapter,
@@ -156,6 +156,80 @@ describe("createSurfaceComposition", () => {
 
       expect(result.ok).toBe(true);
       expect(actionCalls.map((call) => call.locator?.refHint)).toEqual(["@e3", "@e3"]);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("returns promotion details when replay promotion reproduces a browser QA candidate", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "surface-composition-qa-"));
+    let failReplayNavigation = false;
+    const baseDriver = makeSnapshotDriver({
+      data: {
+        origin: "http://localhost:3000/billing",
+        refs: {
+          e1: { name: "Billing", role: "heading" },
+          e2: { name: "Delete account", role: "button" },
+        },
+        snapshot: `- main
+  - heading "Billing" [level=1, ref=e1]
+  - button "Delete account" [ref=e2]`,
+      },
+      error: null,
+      success: true,
+    });
+    const driver: BrowserQaDriver = {
+      ...baseDriver,
+      navigate: (input) =>
+        failReplayNavigation
+          ? Promise.resolve(
+              err(createSurfaceError("action_policy_denied", "Replay navigation failed.")),
+            )
+          : baseDriver.navigate(input),
+    };
+
+    try {
+      const composition = createSurfaceComposition({
+        browserQa: { driver },
+        projectRoot: root,
+        stateStore: new MemoryStateStore(),
+      });
+      const exploration = await composition.browserQa.orchestrator.runExplore({
+        maxActions: 2,
+        maxDepth: 1,
+        maxStates: 2,
+        qaRunId: "qa_replay_promotion",
+        target: { kind: "url", ref: "http://localhost:3000/billing" },
+      });
+
+      expect(exploration.ok).toBe(true);
+      if (!exploration.ok) {
+        throw new Error(exploration.error.message);
+      }
+      const candidateId = exploration.value.candidateFindings[0]?.id;
+      expect(candidateId).toMatch(/^qfc_/);
+
+      failReplayNavigation = true;
+      const replay = await composition.browserQa.orchestrator.replay({
+        promoteOnRepro: true,
+        refId: candidateId ?? "",
+      });
+
+      expect(replay.ok).toBe(true);
+      if (!replay.ok) {
+        throw new Error(replay.error.message);
+      }
+      expect(replay.value.replayStatus).toBe("reproduced");
+      expect(typeof replay.value.promotion).toBe("object");
+      expect(replay.value.promotion).not.toBeNull();
+      const promotion = replay.value.promotion as {
+        readonly candidateFindingId?: unknown;
+        readonly findingId?: unknown;
+        readonly promotionSource?: unknown;
+      };
+      expect(promotion.candidateFindingId).toBe(candidateId);
+      expect(promotion.findingId).toEqual(expect.stringMatching(/^f_/));
+      expect(promotion.promotionSource).toBe("replay");
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
