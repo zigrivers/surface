@@ -37,6 +37,7 @@ export * from "./model-provider.js";
 export * from "./mmr-audit-fallback.js";
 export * from "./multi-state-capture.js";
 export * from "./pipeline-orchestrator.js";
+export * from "./project-state-projections.js";
 export * from "./reconciliation.js";
 export * from "./report-renderers.js";
 export * from "./responsiveness-states-lens.js";

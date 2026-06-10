@@ -103,14 +103,25 @@ const ProjectStateSkippedLensSchema = z
   })
   .strict();
 
+const ProjectStateSkippedStageSchema = z
+  .object({
+    reason: nonEmptyStringSchema,
+    stage: nonEmptyStringSchema,
+  })
+  .strict();
+
 const ProjectStateRunRecordSchema = z
   .object({
     backlog: BacklogSchema.optional(),
+    completedAt: nonEmptyStringSchema.optional(),
+    completedStages: z.array(nonEmptyStringSchema).optional(),
     capture: ProjectStateCaptureSchema.optional(),
     findings: z.array(FindingSchema).optional(),
     reconciliationQuestions: z.array(ReconciliationQuestionSchema).optional(),
     runId: nonEmptyStringSchema,
     skippedLenses: z.array(ProjectStateSkippedLensSchema).optional(),
+    skippedStages: z.array(ProjectStateSkippedStageSchema).optional(),
+    stage: nonEmptyStringSchema.optional(),
     status: z.enum(["completed", "failed"]).optional(),
     trackedFindings: z.array(TrackedFindingSchema),
   })
@@ -674,12 +685,16 @@ function projectRunRecordFromParsed(record: ParsedProjectStateRunRecord): Projec
     runId: record.runId,
     trackedFindings: record.trackedFindings,
     ...(record.backlog === undefined ? {} : { backlog: record.backlog }),
+    ...(record.completedAt === undefined ? {} : { completedAt: record.completedAt }),
+    ...(record.completedStages === undefined ? {} : { completedStages: record.completedStages }),
     ...(record.capture === undefined ? {} : { capture: captureFromParsed(record.capture) }),
     ...(record.findings === undefined ? {} : { findings: record.findings }),
     ...(record.reconciliationQuestions === undefined
       ? {}
       : { reconciliationQuestions: record.reconciliationQuestions }),
     ...(record.skippedLenses === undefined ? {} : { skippedLenses: record.skippedLenses }),
+    ...(record.skippedStages === undefined ? {} : { skippedStages: record.skippedStages }),
+    ...(record.stage === undefined ? {} : { stage: record.stage }),
     ...(record.status === undefined ? {} : { status: record.status }),
   };
 }
