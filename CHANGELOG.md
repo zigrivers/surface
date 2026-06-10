@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.2.3 - Pipeline History and Runtime Updates
+
+- Fixes live localhost audits by writing `agent-browser` computed-style artifacts in the shape
+  expected by the visual hierarchy and responsiveness lenses.
+- Honors requested capture configuration and locatorless flow text assertions during browser-driven
+  capture flows.
+- Persists pipeline run history so `surface status`, `surface next`, and MCP status projections
+  expose completed, skipped, and failed runs.
+- Expands backlog JSON entries, JSON error output, and CLI recovery guidance for machine-readable
+  follow-up workflows.
+- Keeps Homebrew release metadata current and updates CI/release workflows to Node 22-compatible
+  action runtimes.
+
 ## 0.2.2 - Durable State and Capture Reliability
 
 - Redacts unsafe `agent-browser` capture command failure details so command errors do not leak raw

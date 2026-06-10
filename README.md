@@ -15,7 +15,7 @@ Run without installing:
 npx @zigrivers/surface --help
 ```
 
-Homebrew support is planned for the initial release through the `zigrivers/surface` tap:
+Homebrew installation is available through the `zigrivers/surface` tap:
 
 ```bash
 brew tap zigrivers/surface
@@ -140,12 +140,17 @@ diff-shaped MMR review flow is reported as unavailable instead of receiving capt
 ## Reliability and State Safety
 
 Surface persists audit, gate, browser QA, and verdict records through a durable local state store.
-The `0.2.2` release tightens those paths so state transitions are atomic, canonical durable fields
-are validated before persistence, and CLI/MCP verdict writes produce the same canonical records.
+Recent releases tighten those paths so state transitions are atomic, canonical durable fields are
+validated before persistence, and CLI/MCP verdict writes produce the same canonical records.
 
 Capture and browser automation failures are also sanitized before they reach machine-readable error
 envelopes. Unsafe `agent-browser` command details are replaced with redacted context, keeping raw
 capture output and command failure payloads out of logs and artifacts.
+
+The `0.2.3` release also aligns live `agent-browser` computed-style artifacts with the visual
+hierarchy and responsiveness lenses, honors requested capture configuration through `surface
+capture`, and projects completed or failed pipeline runs through `surface status` and `surface
+next`.
 
 ## Packages
 

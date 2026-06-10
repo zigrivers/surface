@@ -5,8 +5,8 @@ class Surface < Formula
   desc "Local-first UI audit CLI and MCP server"
   homepage "https://github.com/zigrivers/surface"
   # Keep URL and sha256 in sync with the published @zigrivers/surface npm tarball.
-  url "https://registry.npmjs.org/@zigrivers/surface/-/surface-0.2.2.tgz"
-  sha256 "c733fddd7da7b56f9426daf762aceda507f6ba9bc281fb33bac9b85548be8773"
+  url "https://registry.npmjs.org/@zigrivers/surface/-/surface-0.2.3.tgz"
+  sha256 "5f3d54bdea06a185cbff1f0ebc64f2b09b32cec9d3471a6ea5e41fef13bffd84"
   license "MIT"
 
   depends_on "node@22"

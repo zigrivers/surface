@@ -16,14 +16,14 @@ current published `@zigrivers/surface` npm tarball before copying it to the tap.
 
 ## Release Flow
 
-1. Create and push the GitHub release tag, for example `v0.2.2`.
+1. Create and push the GitHub release tag, for example `v0.2.3`.
 2. Run the manual release workflow with `publish=true` and wait for npm publication to complete.
 3. Compute the published npm tarball checksum:
 
    ```bash
-   TARBALL_URL=$(npm view @zigrivers/surface@0.2.2 dist.tarball)
-   curl -L "$TARBALL_URL" -o /tmp/surface-0.2.2.tgz
-   shasum -a 256 /tmp/surface-0.2.2.tgz
+   TARBALL_URL=$(npm view @zigrivers/surface@0.2.3 dist.tarball)
+   curl -L "$TARBALL_URL" -o /tmp/surface-0.2.3.tgz
+   shasum -a 256 /tmp/surface-0.2.3.tgz
    ```
 
 4. In the Surface repository, update `packaging/homebrew/surface.rb` with the tarball URL and

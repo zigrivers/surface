@@ -52,7 +52,7 @@ describe("@zigrivers/surface bootstrap", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout.join("").trim()).toBe("0.2.2");
+    expect(stdout.join("").trim()).toBe("0.2.3");
   });
 
   it("emits a machine-readable success envelope for --json status", async () => {
