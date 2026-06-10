@@ -23,6 +23,8 @@
   instead of reviewed flow run history.
 - Restores browser-QA exploration candidate generation with current `agent-browser --json snapshot`
   output, including bracket refs such as `[ref=e2]`.
+- Skips passive snapshot roles such as headings when generating browser-QA exploration actions, so
+  bounded exploration reaches actionable links and controls sooner.
 - Writes an inferred URL target when promoting candidate browser-QA flows that start from an
   absolute `open` step, so promoted flows can run without repeating the target flag.
 - Documents a safe direct CLI smoke-test fallback for local development when `npm link` conflicts
@@ -31,6 +33,8 @@
   browser QA flows, gates, and MCP smoke coverage.
 - Adds a second post-PR deep dogfood report covering candidate discovery, promotion, replay,
   localhost capture/audit, MCP candidate listing, and pipeline JSON projections.
+- Adds a third post-PR deep dogfood report covering exploration action prioritization, failing
+  flow-aware gates, promotion, evidence, replay, MCP smoke, and pipeline projections.
 
 ## 0.2.3 - Pipeline History and Runtime Updates
 

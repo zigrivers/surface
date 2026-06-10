@@ -624,8 +624,8 @@ function snapshotTextForActions(snapshot: unknown): string {
   return JSON.stringify(snapshot);
 }
 
-const SNAPSHOT_ROLE_PREFIX =
-  /^(?:[-*]\s*)?(?:button|link|textbox|input|checkbox|radio|combobox|option|menuitem|tab|dialog|heading|img|image|text)\b/iu;
+const SNAPSHOT_ACTIONABLE_ROLE_PREFIX =
+  /^(?:[-*]\s*)?(?:button|link|textbox|input|checkbox|radio|combobox|option|menuitem|tab|dialog)\b/iu;
 
 function structuralRefForSnapshotLine(line: string): string | undefined {
   const trimmed = line.trim();
@@ -634,7 +634,7 @@ function structuralRefForSnapshotLine(line: string): string | undefined {
     return direct;
   }
 
-  if (!SNAPSHOT_ROLE_PREFIX.test(trimmed)) {
+  if (!SNAPSHOT_ACTIONABLE_ROLE_PREFIX.test(trimmed)) {
     return undefined;
   }
 
