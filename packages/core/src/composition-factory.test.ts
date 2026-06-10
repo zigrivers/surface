@@ -1,3 +1,7 @@
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { DEFAULT_SURFACE_CONFIG } from "./config.js";
@@ -40,6 +44,24 @@ class MemoryStateStore implements StateStore {
 }
 
 describe("createSurfaceComposition", () => {
+  it("resolves the default project root to the nearest ancestor with Surface state", () => {
+    const root = mkdtempSync(path.join(tmpdir(), "surface-composition-root-"));
+    const nested = path.join(root, "apps", "web");
+    mkdirSync(path.join(root, ".surface"), { recursive: true });
+    mkdirSync(nested, { recursive: true });
+
+    const originalCwd = process.cwd();
+    try {
+      process.chdir(nested);
+      const composition = createSurfaceComposition({ stateStore: new MemoryStateStore() });
+
+      expect(composition.lensFactoryOptions.projectRoot).toBe(realpathSync(root));
+    } finally {
+      process.chdir(originalCwd);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
   it("builds the shared core registry used by interface adapters", async () => {
     const stateStore = new MemoryStateStore();
     const composition = createSurfaceComposition({

@@ -13,6 +13,12 @@
   failures after a newer pass.
 - Stores plain title and URL strings in browser QA evidence snapshots when parsing current
   `agent-browser` scalar JSON envelopes.
+- Makes the bundled mutating settings browser-QA fixture pass CI flow execution with the current
+  action policy and `agent-browser` command surface.
+- Resolves default Surface project roots from nested working directories by finding the nearest
+  ancestor `.surface` state directory.
+- Reports missing browser-QA candidate flow promotion attempts with the candidate id and
+  `surface flow list --candidates --json` recovery command.
 - Documents a safe direct CLI smoke-test fallback for local development when `npm link` conflicts
   with an existing global `surface` binary.
 - Adds a dated 0.2.3 post-release dogfood report covering live capture/audit, pipeline projections,

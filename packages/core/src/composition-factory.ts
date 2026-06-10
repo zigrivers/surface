@@ -159,8 +159,10 @@ export type SurfaceComposition = {
 export function createSurfaceComposition(
   options: SurfaceCompositionOptions = {},
 ): SurfaceComposition {
-  const projectRoot = path.resolve(options.projectRoot ?? process.cwd());
   const stateDir = options.stateDir ?? SURFACE_STATE_DIR;
+  const projectRoot = path.resolve(
+    options.projectRoot ?? resolveDefaultProjectRoot(process.cwd(), stateDir),
+  );
   const staticFallback = options.staticFallback ?? createStaticCaptureBackend();
   const browserBackends = options.captureBackends ?? [
     createAgentBrowserCaptureBackend(),
@@ -416,6 +418,34 @@ export function createSurfaceComposition(
     stateDir,
     stateStore,
   };
+}
+
+function resolveDefaultProjectRoot(cwd: string, stateDir: string): string {
+  const fallback = path.resolve(cwd);
+
+  if (
+    path.isAbsolute(stateDir) ||
+    stateDir === "." ||
+    stateDir === ".." ||
+    stateDir.startsWith(`..${path.sep}`)
+  ) {
+    return fallback;
+  }
+
+  let current = fallback;
+
+  while (true) {
+    if (existsSync(path.join(current, stateDir))) {
+      return current;
+    }
+
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return fallback;
+    }
+
+    current = parent;
+  }
 }
 
 function defaultReportRenderers(

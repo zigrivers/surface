@@ -39,10 +39,19 @@
     },
     {
       "id": "allow-seeded-profile-save",
-      "actions": ["click", "fill", "type", "press"],
+      "actions": ["click"],
       "categories": ["save", "persistent"],
       "decision": "allow",
       "locators": [{ "role": "button", "name": "Save profile" }],
+      "routes": ["/settings/profile"],
+      "origins": ["http://127.0.0.1:*", "http://localhost:*"]
+    },
+    {
+      "id": "allow-seeded-profile-name-input",
+      "actions": ["fill", "type", "press"],
+      "categories": ["save", "persistent"],
+      "decision": "allow",
+      "locators": [{ "label": "Profile name" }],
       "routes": ["/settings/profile"],
       "origins": ["http://127.0.0.1:*", "http://localhost:*"]
     },
