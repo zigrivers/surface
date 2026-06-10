@@ -5,7 +5,6 @@ import path from "node:path";
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "../errors.js";
 import type { BrowserQaExploreInput, BrowserQaExploreResult } from "./explorer.js";
 import {
-  createQaJsonReport,
   createQaMarkdownReport,
   createQaReportManifest,
   type QaReportManifest,
@@ -418,8 +417,7 @@ class DefaultBrowserQaOrchestrator implements BrowserQaOrchestrator {
 
     return ok({
       format,
-      report:
-        format === "json" ? createQaJsonReport(reportInput) : createQaReportManifest(reportInput),
+      report: createQaReportManifest(reportInput),
     });
   }
 

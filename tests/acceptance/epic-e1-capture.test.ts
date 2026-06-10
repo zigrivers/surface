@@ -1009,6 +1009,52 @@ describe("E1 Capture & Inputs", () => {
       expect(observed).toBe(true);
     });
 
+    it("[US-001][AC1] URL target kind allows explicitly allowlisted loopback refs (unit)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const observedTargets: Target[] = [];
+      const service = createCaptureService({
+        backends: [
+          {
+            id: "playwright",
+            detect: () => true,
+            observe: async (observedTarget) => {
+              observedTargets.push(observedTarget);
+              return ok(await captureFor("playwright", observedTarget, artifactRoot));
+            },
+          },
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const loopbackResult = await service.capture(
+        { kind: "url", ref: "http://127.0.0.1:3000/checkout" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://127.0.0.1:3000"],
+          },
+        },
+      );
+      const localhostResult = await service.capture(
+        { kind: "url", ref: "http://localhost:3000/settings" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://localhost:3000"],
+          },
+        },
+      );
+
+      expect(isOk(loopbackResult)).toBe(true);
+      expect(isOk(localhostResult)).toBe(true);
+      expect(observedTargets.map((observedTarget) => observedTarget.ref)).toEqual([
+        "http://127.0.0.1:3000/checkout",
+        "http://localhost:3000/settings",
+      ]);
+    });
+
     it("[US-001][AC1] URL target kind rejects alternate loopback hosts (unit)", async () => {
       let observed = false;
       const service = createCaptureService({
