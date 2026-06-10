@@ -6,7 +6,7 @@ class Surface < Formula
   homepage "https://github.com/zigrivers/surface"
   # Keep URL and sha256 in sync with the published @zigrivers/surface npm tarball.
   url "https://registry.npmjs.org/@zigrivers/surface/-/surface-0.2.3.tgz"
-  sha256 "5f3d54bdea06a185cbff1f0ebc64f2b09b32cec9d3471a6ea5e41fef13bffd84"
+  sha256 "b9698775b66507b8f5d20a9a1823309dde61be1ccd860a086aacbfe3f1906314"
   license "MIT"
 
   depends_on "node@22"
