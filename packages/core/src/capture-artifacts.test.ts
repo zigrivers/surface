@@ -10,8 +10,8 @@ import {
   type CaptureIdFactory,
 } from "./capture.js";
 import { DEFAULT_SURFACE_CONFIG } from "./config.js";
-import { isOk, ok } from "./errors.js";
-import type { ArtifactWriter, PersistArtifactIntent } from "./interfaces.js";
+import { createSurfaceError, err, isOk, ok } from "./errors.js";
+import type { ArtifactWriter, CaptureBackend, PersistArtifactIntent } from "./interfaces.js";
 
 const tempRoots: string[] = [];
 
@@ -67,6 +67,52 @@ describe("capture artifact persistence", () => {
           type: "dom-snapshot",
         },
       ]);
+    }
+  });
+
+  it("reports static screenshot validation errors when a selected browser backend cannot capture screenshots", async () => {
+    const root = await tempRoot();
+    const missingScreenshotPath = join(root, "missing.png");
+    const browserBackend: CaptureBackend = {
+      id: "agent-browser",
+      detect: () => true,
+      observe: () =>
+        err(
+          createSurfaceError(
+            "capture_failed",
+            "agent-browser backend does not support screenshot targets.",
+            {
+              details: { backendId: "agent-browser", targetKind: "screenshot" },
+            },
+          ),
+        ),
+    };
+
+    const capture = await createCaptureService({
+      backends: [browserBackend],
+      staticFallback: createStaticCaptureBackend({
+        idFactory: () => "cap-missing-static-screenshot",
+      }),
+    }).capture(
+      { kind: "screenshot", ref: missingScreenshotPath },
+      {
+        artifactRoot: join(root, "captures"),
+        config: DEFAULT_SURFACE_CONFIG.capture,
+      },
+    );
+
+    expect(isOk(capture)).toBe(false);
+    if (!capture.ok) {
+      expect(capture.error).toMatchObject({
+        code: "capture_failed",
+        details: {
+          backendId: "static",
+          reason: "screenshot-source-unavailable",
+          sourcePath: missingScreenshotPath,
+          targetKind: "screenshot",
+        },
+        message: "Static backend screenshot source must be a readable file.",
+      });
     }
   });
 });

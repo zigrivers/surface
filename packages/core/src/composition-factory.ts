@@ -292,7 +292,13 @@ export function createSurfaceComposition(
         });
 
         return replay.ok
-          ? { ok: true, value: { replayStatus: replay.value.replayStatus } }
+          ? {
+              ok: true,
+              value: {
+                promotion: replay.value.promotedFinding ?? replay.value.promotion,
+                replayStatus: replay.value.replayStatus,
+              },
+            }
           : replay;
       },
       promoteCandidateByVerdict: async ({ reason, refId, verdictId }) => {

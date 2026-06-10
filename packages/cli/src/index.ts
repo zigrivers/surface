@@ -2554,6 +2554,25 @@ function parseOptionalInteger(value: string): number | undefined {
 }
 
 function targetFromOptions(options: TargetCommandOptions): Result<Target> {
+  const targetFlags = [
+    { flag: "--url", value: options.url },
+    { flag: "--localhost", value: options.localhost },
+    { flag: "--route", value: options.route },
+    { flag: "--screenshot", value: options.screenshot },
+    { flag: "--component", value: options.component },
+    { flag: "--dom", value: options.dom },
+  ]
+    .filter((entry) => entry.value !== undefined)
+    .map((entry) => entry.flag);
+
+  if (targetFlags.length > 1) {
+    return resultErr(
+      createSurfaceError("no_target", "Target flags are mutually exclusive.", {
+        details: { targets: targetFlags },
+      }),
+    );
+  }
+
   if (options.url !== undefined) {
     return resultOk({ kind: "url", ref: options.url });
   }

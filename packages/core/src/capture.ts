@@ -271,6 +271,10 @@ export function createCaptureService(options: CaptureServiceOptions): CaptureSer
           return ok(annotateFallbackCapture(fallbackResult.value, backend.id, result.error));
         }
 
+        if (shouldPreferStaticFallbackError(target, fallbackResult.error)) {
+          return fallbackResult;
+        }
+
         return result;
       }
 
@@ -956,6 +960,7 @@ export function createStaticCaptureBackend(
                   backendId: "static",
                   captureId,
                   reason: "screenshot-source-unavailable",
+                  sourcePath,
                   targetKind: target.kind,
                 },
               },
@@ -1317,6 +1322,7 @@ async function validateStaticSourceRoot(
             backendId: "static",
             captureId,
             reason: "screenshot-source-unavailable",
+            sourcePath,
             targetKind: target.kind,
           },
         },
@@ -3078,6 +3084,10 @@ function shouldUseStaticFallback(result: Result<Capture, SurfaceError>): result 
   }
 
   return error?.code === "capture_failed" || error?.code === "capture_unreachable";
+}
+
+function shouldPreferStaticFallbackError(target: Target, error: SurfaceError): boolean {
+  return isStaticFileTarget(target) && error.details?.["backendId"] === "static";
 }
 
 function isValidationError(error: SurfaceError | null | undefined): boolean {

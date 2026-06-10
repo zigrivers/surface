@@ -949,6 +949,73 @@ describe("@zigrivers/surface core verbs", () => {
     });
   });
 
+  it("rejects capture with multiple target flags as a usage error", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "capture",
+        "--dom",
+        "<main>Checkout</main>",
+        "--screenshot",
+        "fixture.png",
+      ],
+      composition: createSurfaceComposition({
+        captureBackends: [createTestCaptureBackend()],
+        stateStore: new TestMemoryStateStore(),
+      }),
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "capture",
+      error: {
+        code: "no_target",
+        details: { targets: ["--screenshot", "--dom"] },
+        exitCode: 2,
+        message: "Target flags are mutually exclusive.",
+      },
+      ok: false,
+    });
+  });
+
+  it("rejects audit with multiple target flags as a usage error", async () => {
+    const stdout: string[] = [];
+    const stderr: string[] = [];
+    const exitCode = await runSurfaceCli({
+      argv: [
+        "node",
+        "surface",
+        "--json",
+        "audit",
+        "--dom",
+        "<main>Checkout</main>",
+        "--screenshot",
+        "fixture.png",
+      ],
+      composition: compositionWithAuditSpy([]),
+      io: { stderr: (chunk) => stderr.push(chunk), stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(2);
+    expect(stderr.join("")).toBe("");
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "audit",
+      error: {
+        code: "no_target",
+        details: { targets: ["--screenshot", "--dom"] },
+        exitCode: 2,
+        message: "Target flags are mutually exclusive.",
+      },
+      ok: false,
+    });
+  });
+
   it("reports unresolved public capture hosts as unreachable URL targets", async () => {
     const stdout: string[] = [];
     const exitCode = await runSurfaceCli({
