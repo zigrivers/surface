@@ -24,7 +24,8 @@
     "clean": "turbo run clean && rm -rf node_modules/.cache .turbo",
     "test:release": "vitest run tests/release",
     "release:pack": "node scripts/validate-release-artifacts.mjs --pack-only",
-    "release:verify": "node scripts/validate-release-artifacts.mjs"
+    "release:verify": "node scripts/validate-release-artifacts.mjs && node scripts/verify-homebrew-formula.mjs --allow-unpublished",
+    "release:verify:homebrew": "node scripts/verify-homebrew-formula.mjs"
   },
   "devDependencies": {
     "@eslint/js": "catalog:",

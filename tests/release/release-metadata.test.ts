@@ -1,9 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-const ROOT = new URL("../..", import.meta.url).pathname;
+import { formulaString } from "../../scripts/homebrew-formula-utils.mjs";
+
+const ROOT = fileURLToPath(new URL("../..", import.meta.url));
 
 const RELEASE_PACKAGES = [
   {
@@ -43,8 +46,6 @@ const RELEASE_PACKAGES = [
     dependencies: ["@zigrivers/surface-core"],
   },
 ] as const;
-const RELEASE_VERSION = "0.2.2";
-
 type PackageJson = {
   name: string;
   version: string;
@@ -60,6 +61,10 @@ type PackageJson = {
   bin?: Record<string, string>;
 };
 
+type RootPackageJson = {
+  scripts?: Record<string, string>;
+};
+
 const readPackageJson = async (dir: string): Promise<PackageJson> => {
   const raw = await readFile(join(ROOT, dir, "package.json"), "utf8");
   return JSON.parse(raw) as PackageJson;
@@ -67,10 +72,11 @@ const readPackageJson = async (dir: string): Promise<PackageJson> => {
 
 describe("release package metadata", () => {
   it.each(RELEASE_PACKAGES)("$name is publishable with public npm metadata", async (pkg) => {
+    const cliManifest = await readPackageJson("packages/cli");
     const manifest = await readPackageJson(pkg.dir);
 
     expect(manifest.name).toBe(pkg.name);
-    expect(manifest.version).toBe(RELEASE_VERSION);
+    expect(manifest.version).toBe(cliManifest.version);
     expect(manifest.private).not.toBe(true);
     expect(manifest.license).toBe("MIT");
     expect(manifest.description).toBeTruthy();
@@ -93,6 +99,34 @@ describe("release package metadata", () => {
     const manifest = await readPackageJson("packages/cli");
 
     expect(manifest.bin).toEqual({ surface: "./dist/index.js" });
+  });
+
+  it("pins the Homebrew formula to the published surface CLI tarball", async () => {
+    const cliManifest = await readPackageJson("packages/cli");
+    const formula = await readFile(join(ROOT, "packaging/homebrew/surface.rb"), "utf8");
+    const tarballUrl = `https://registry.npmjs.org/@zigrivers/surface/-/surface-${cliManifest.version}.tgz`;
+
+    expect(formulaString(formula, "url")).toBe(tarballUrl);
+    expect(formulaString(formula, "sha256")).toMatch(/^[a-f0-9]{64}$/iu);
+    expect(formula).not.toContain("surface-VERSION.tgz");
+    expect(formula).not.toContain('sha256 "SHA256"');
+  });
+
+  it("exposes a Homebrew formula checksum verifier", async () => {
+    const manifest = JSON.parse(
+      await readFile(join(ROOT, "package.json"), "utf8"),
+    ) as RootPackageJson;
+    const verifier = await readFile(join(ROOT, "scripts/verify-homebrew-formula.mjs"), "utf8");
+
+    expect(manifest.scripts?.["release:verify:homebrew"]).toBe(
+      "node scripts/verify-homebrew-formula.mjs",
+    );
+    expect(manifest.scripts?.["release:verify"]).toContain(
+      "node scripts/verify-homebrew-formula.mjs --allow-unpublished",
+    );
+    expect(verifier).toContain('createHash("sha256")');
+    expect(verifier).toContain("packaging/homebrew/surface.rb");
+    expect(verifier).toContain("SURFACE_SKIP_HOMEBREW_NETWORK_VERIFY");
   });
 
   it("packs release tarballs into the root publish directory", async () => {

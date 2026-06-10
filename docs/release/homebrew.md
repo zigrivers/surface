@@ -11,8 +11,8 @@ brew tap zigrivers/surface
 brew install surface
 ```
 
-Formula source template: `packaging/homebrew/surface.rb`. The template uses `VERSION` and `SHA256`
-placeholders so it cannot be copied with stale release metadata.
+Formula source: `packaging/homebrew/surface.rb`. Keep its tarball URL and `sha256` pinned to the
+current published `@zigrivers/surface` npm tarball before copying it to the tap.
 
 ## Release Flow
 
@@ -26,8 +26,20 @@ placeholders so it cannot be copied with stale release metadata.
    shasum -a 256 /tmp/surface-0.2.2.tgz
    ```
 
-4. Update the tap formula URL and checksum.
-5. Validate the formula after it is in the tap:
+4. In the Surface repository, update `packaging/homebrew/surface.rb` with the tarball URL and
+   checksum.
+5. From the Surface repository, verify the checked-in formula checksum against the published tarball:
+
+   ```bash
+   pnpm run release:verify:homebrew
+   ```
+
+   `pnpm run release:verify` also runs this check with `--allow-unpublished` so pre-publish release
+   validation can pass before the new tarball exists. In network-restricted environments, set
+   `SURFACE_SKIP_HOMEBREW_NETWORK_VERIFY=1` and run the strict command above before copying the
+   formula to the tap.
+
+6. Copy the updated formula to the tap, then validate it after it is in the tap:
 
    ```bash
    ruby -c Formula/surface.rb
