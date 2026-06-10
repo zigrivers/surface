@@ -13,6 +13,9 @@ const cliPath = fileURLToPath(new URL("../../packages/cli/dist/index.js", import
 const checkoutFlowPath = fileURLToPath(
   new URL("../../fixtures/browser-qa/flows/checkout.yml", import.meta.url),
 );
+const settingsFlowPath = fileURLToPath(
+  new URL("../../fixtures/browser-qa/flows/settings-profile.yml", import.meta.url),
+);
 const actionPolicyPath = fileURLToPath(
   new URL("../../fixtures/browser-qa/action-policy.json", import.meta.url),
 );
@@ -187,6 +190,61 @@ describe("browser QA CLI e2e", () => {
         text: expect.stringContaining("Seeded checkout snapshot"),
       },
     });
+  });
+
+  it("runs the bundled mutating settings flow through CI isolation preflight", async () => {
+    const project = await tempProjectRootWithFakeAgentBrowser();
+    const flow = await runSurface(
+      [
+        "--json",
+        "flow",
+        "run",
+        settingsFlowPath,
+        "--target",
+        `${seededApp.url}/settings/profile`,
+        "--ci",
+      ],
+      project.cwd,
+      project.env,
+    );
+
+    expect(flow.exitCode, flow.stderr).toBe(0);
+    const flowEnvelope = JSON.parse(flow.stdout) as {
+      readonly data: { readonly flowRunId: string };
+    };
+
+    expect(flowEnvelope).toMatchObject({
+      command: "flow run",
+      data: {
+        flowRunId: expect.stringMatching(/^flowrun_settings-profile_/),
+        target: {
+          kind: "url",
+          ref: `${seededApp.url}/settings/profile`,
+        },
+      },
+      ok: true,
+    });
+
+    const flowRun = JSON.parse(
+      await readFile(
+        path.join(
+          project.cwd,
+          ".surface",
+          "qa",
+          "flow-runs",
+          `${flowEnvelope.data.flowRunId}.json`,
+        ),
+        "utf8",
+      ),
+    ) as {
+      readonly steps: readonly { readonly id: string; readonly status: string }[];
+    };
+
+    expect(flowRun.steps.slice(0, 3)).toMatchObject([
+      { id: "open-settings-profile", status: "passed" },
+      { id: "fill-profile-name", status: "passed" },
+      { id: "save-profile", status: "passed" },
+    ]);
   });
 });
 

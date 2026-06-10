@@ -12,14 +12,16 @@ isolation:
   mutatesState: true
   resetRequired: true
   resetEndpointId: seeded-profile-reset
+  fixtureAccountId: seed-user
 steps:
   - id: open-settings-profile
     action: open
     url: /settings/profile
-  - id: focus-profile-name
-    action: focus
+  - id: fill-profile-name
+    action: fill
     locator:
       label: Profile name
+    value: Seed User
   - id: save-profile
     action: click
     locator:

@@ -5,7 +5,7 @@ import path from "node:path";
 import { isMap, isSeq, parseDocument, stringify as stringifyYaml } from "yaml";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "../errors.js";
-import { isSameOrChildPath } from "../path-safety.js";
+import { isNodeErrorWithCode, isSameOrChildPath } from "../path-safety.js";
 import {
   classifyBrowserAction,
   createBuiltInSafeActionPolicy,
@@ -886,6 +886,24 @@ class FileBackedBrowserQaFlowService implements BrowserQaFlowService {
   > {
     const candidate = await this.#qaStore.readCandidateFlow(input.candidateFlowId);
     if (!isOk(candidate)) {
+      if (
+        candidate.error.code === "state_read_failed" &&
+        isNodeErrorWithCode(candidate.error.cause, "ENOENT")
+      ) {
+        return err(
+          createSurfaceError(
+            "flow_invalid",
+            `Candidate browser QA flow "${input.candidateFlowId}" was not found.`,
+            {
+              details: {
+                candidateFlowId: input.candidateFlowId,
+                nextCommand: "surface flow list --candidates --json",
+              },
+            },
+          ),
+        );
+      }
+
       return candidate;
     }
 

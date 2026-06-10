@@ -4,7 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it, vi } from "vitest";
 
-import { createSurfaceError, ok } from "../errors.js";
+import { createSurfaceError, err, ok } from "../errors.js";
 import { createBuiltInSafeActionPolicy } from "./action-policy.js";
 import {
   createBrowserQaFlowService,
@@ -233,6 +233,46 @@ steps:
     });
 
     expect(result).toMatchObject({ ok: false, error: { code: "flow_invalid" } });
+  });
+
+  it("reports a missing candidate flow with an actionable promotion error", async () => {
+    const missingSidecar = Object.assign(new Error("missing candidate sidecar"), {
+      code: "ENOENT",
+    });
+    const service = createBrowserQaFlowService({
+      flowRunner: { runFlow: vi.fn() },
+      qaStore: {
+        listFlowRuns: vi.fn(),
+        readCandidateFlow: vi.fn(() =>
+          Promise.resolve(
+            err(
+              createSurfaceError("state_read_failed", "Failed to read QA sidecar.", {
+                cause: missingSidecar,
+              }),
+            ),
+          ),
+        ),
+        readFlowRun: vi.fn(),
+        writeRun: vi.fn(),
+      },
+    });
+
+    const result = await service.promoteFlow({
+      candidateFlowId: "qflow_missing",
+      outPath: "surface-flows/promoted.yml",
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "flow_invalid",
+        details: {
+          candidateFlowId: "qflow_missing",
+          nextCommand: "surface flow list --candidates --json",
+        },
+        message: 'Candidate browser QA flow "qflow_missing" was not found.',
+      },
+    });
   });
 });
 
