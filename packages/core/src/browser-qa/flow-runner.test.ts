@@ -11,7 +11,13 @@ import {
   createFlowRunner,
   type FlowRunnerDriver,
 } from "./flow-runner.js";
-import type { ActionPolicy, BrowserQaFlow, EvidenceBundle, FlowRun } from "./schemas.js";
+import type {
+  ActionPolicy,
+  BrowserQaFlow,
+  CandidateFlow,
+  EvidenceBundle,
+  FlowRun,
+} from "./schemas.js";
 
 describe("FlowRunner", () => {
   it("executes steps in order and captures failed assertion evidence", async () => {
@@ -153,6 +159,60 @@ describe("FlowRunner", () => {
 });
 
 describe("BrowserQaFlowService", () => {
+  it("lists candidate flows separately from flow run history", async () => {
+    const listCandidateFlows = vi.fn(() =>
+      Promise.resolve(
+        ok([
+          {
+            id: "qflow_checkout",
+            qaRunId: "qa_seed",
+            sourceRunManifestDigest: "sha256:abc123",
+            steps: [],
+            title: "Checkout candidate",
+          } satisfies CandidateFlow,
+        ]),
+      ),
+    );
+    const listFlowRuns = vi.fn(() =>
+      Promise.resolve(
+        ok([
+          {
+            evidenceBundles: [],
+            findingIds: [],
+            flowId: "checkout",
+            gateEligible: false,
+            id: "flowrun_checkout",
+            isolation: { mode: "isolated", mutatesState: false, resetSatisfied: true },
+            severity: "medium",
+            source: { kind: "file", ref: "surface-flows/checkout.yml" },
+            status: "passed",
+            steps: [],
+            target: { kind: "url", ref: "http://localhost:3000" },
+          } satisfies FlowRun,
+        ]),
+      ),
+    );
+    const service = createBrowserQaFlowService({
+      flowRunner: { runFlow: vi.fn() },
+      qaStore: {
+        listCandidateFlows,
+        listFlowRuns,
+        readCandidateFlow: vi.fn(),
+        readFlowRun: vi.fn(),
+        writeRun: vi.fn(),
+      },
+    });
+
+    const result = await service.listFlows({ candidates: true });
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: { flows: [{ id: "qflow_checkout" }] },
+    });
+    expect(listCandidateFlows).toHaveBeenCalledTimes(1);
+    expect(listFlowRuns).not.toHaveBeenCalled();
+  });
+
   it("persists volatile ref hint updates in reviewed flow YAML", async () => {
     const root = await mkdtemp(path.join(os.tmpdir(), "surface-flow-refs-"));
     const flowDir = path.join(root, "surface-flows");
@@ -190,6 +250,7 @@ steps:
       flowRunner: { runFlow: vi.fn() },
       projectRoot: root,
       qaStore: {
+        listCandidateFlows: vi.fn(),
         listFlowRuns: vi.fn(),
         readCandidateFlow: vi.fn(),
         readFlowRun: vi.fn(),
@@ -210,6 +271,7 @@ steps:
     const service = createBrowserQaFlowService({
       flowRunner: { runFlow: vi.fn() },
       qaStore: {
+        listCandidateFlows: vi.fn(),
         listFlowRuns: vi.fn(),
         readCandidateFlow: vi.fn(() =>
           Promise.resolve(
@@ -235,6 +297,44 @@ steps:
     expect(result).toMatchObject({ ok: false, error: { code: "flow_invalid" } });
   });
 
+  it("writes an inferred URL target when promoting candidate flows with absolute open steps", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "surface-flow-promote-"));
+    const flowDir = path.join(root, "surface-flows");
+    await mkdir(flowDir, { recursive: true });
+    const service = createBrowserQaFlowService({
+      flowRunner: { runFlow: vi.fn() },
+      projectRoot: root,
+      qaStore: {
+        listCandidateFlows: vi.fn(),
+        listFlowRuns: vi.fn(),
+        readCandidateFlow: vi.fn(() =>
+          Promise.resolve(
+            ok({
+              id: "qflow_home",
+              qaRunId: "qa_seed",
+              sourceRunManifestDigest: "sha256:abc123",
+              steps: [{ action: "open", url: "http://localhost:3000/" }],
+              title: "Home",
+            } satisfies CandidateFlow),
+          ),
+        ),
+        readFlowRun: vi.fn(),
+        writeRun: vi.fn(),
+      },
+    });
+
+    const result = await service.promoteFlow({
+      candidateFlowId: "qflow_home",
+      outPath: "surface-flows/home.yml",
+    });
+
+    expect(result).toMatchObject({ ok: true });
+    const promoted = await readFile(path.join(flowDir, "home.yml"), "utf8");
+    expect(promoted).toContain(`target:
+  kind: url
+  ref: http://localhost:3000/`);
+  });
+
   it("reports a missing candidate flow with an actionable promotion error", async () => {
     const missingSidecar = Object.assign(new Error("missing candidate sidecar"), {
       code: "ENOENT",
@@ -242,6 +342,7 @@ steps:
     const service = createBrowserQaFlowService({
       flowRunner: { runFlow: vi.fn() },
       qaStore: {
+        listCandidateFlows: vi.fn(),
         listFlowRuns: vi.fn(),
         readCandidateFlow: vi.fn(() =>
           Promise.resolve(
@@ -426,6 +527,7 @@ function makeFakeEvidenceStore() {
 
 function makeFakeQaStore() {
   return {
+    listCandidateFlows: vi.fn(),
     readCandidate: vi.fn(),
     readCandidateFlow: vi.fn(),
     readEvidenceBundle: vi.fn(),

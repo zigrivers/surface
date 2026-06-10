@@ -571,7 +571,7 @@ function loadedStateForSnapshot(input: {
 }
 
 function actionsForSnapshot(snapshot: unknown): BrowserAction[] {
-  const text = typeof snapshot === "string" ? snapshot : JSON.stringify(snapshot);
+  const text = snapshotTextForActions(snapshot);
   const actions: BrowserAction[] = [];
   const seenRefs = new Set<string>();
 
@@ -584,6 +584,7 @@ function actionsForSnapshot(snapshot: unknown): BrowserAction[] {
     seenRefs.add(ref);
     const label = line
       .replace(ref, "")
+      .replace(/\[ref=e[0-9]+\]/giu, "")
       .replace(/[-*#[\]"{}]/gu, " ")
       .replace(/\s+/gu, " ")
       .trim()
@@ -600,6 +601,29 @@ function actionsForSnapshot(snapshot: unknown): BrowserAction[] {
   return actions;
 }
 
+function snapshotTextForActions(snapshot: unknown): string {
+  if (typeof snapshot === "string") {
+    return snapshot;
+  }
+
+  if (isRecord(snapshot)) {
+    const direct = stringField(snapshot, "snapshot");
+    if (direct !== undefined) {
+      return direct;
+    }
+
+    const data = snapshot.data;
+    if (isRecord(data)) {
+      const nested = stringField(data, "snapshot");
+      if (nested !== undefined) {
+        return nested;
+      }
+    }
+  }
+
+  return JSON.stringify(snapshot);
+}
+
 const SNAPSHOT_ROLE_PREFIX =
   /^(?:[-*]\s*)?(?:button|link|textbox|input|checkbox|radio|combobox|option|menuitem|tab|dialog|heading|img|image|text)\b/iu;
 
@@ -614,7 +638,13 @@ function structuralRefForSnapshotLine(line: string): string | undefined {
     return undefined;
   }
 
-  return trimmed.match(/\b@e[0-9]+\b/u)?.[0];
+  const atRef = trimmed.match(/\b@e[0-9]+\b/u)?.[0];
+  if (atRef !== undefined) {
+    return atRef;
+  }
+
+  const bracketRef = trimmed.match(/\[ref=(e[0-9]+)\]/iu)?.[1];
+  return bracketRef === undefined ? undefined : `@${bracketRef}`;
 }
 
 async function replayCandidateWithFlow(input: {
@@ -846,6 +876,10 @@ function evidenceUnavailable(
 function stringField(record: Record<string, unknown>, key: string): string | undefined {
   const value = record[key];
   return typeof value === "string" ? value : undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
 function safeCompositionId(value: string): string {

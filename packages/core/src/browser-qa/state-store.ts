@@ -42,6 +42,7 @@ export type QaRunStore = {
   readCandidate(id: string): Promise<Result<CandidateFinding, SurfaceError>>;
   writeCandidateFlow(flow: CandidateFlow): Promise<Result<CandidateFlow, SurfaceError>>;
   readCandidateFlow(id: string): Promise<Result<CandidateFlow, SurfaceError>>;
+  listCandidateFlows(): Promise<Result<readonly CandidateFlow[], SurfaceError>>;
   writeFlowRun(flowRun: FlowRun): Promise<Result<FlowRun, SurfaceError>>;
   readFlowRun(id: string): Promise<Result<FlowRun, SurfaceError>>;
   listFlowRuns(): Promise<Result<readonly FlowRun[], SurfaceError>>;
@@ -230,6 +231,38 @@ class FileQaRunStore implements QaRunStore {
       relativePath: path.join("flows", `${parsed.data}.json`),
       schema: CandidateFlowSchema,
     });
+  }
+
+  async listCandidateFlows(): Promise<Result<readonly CandidateFlow[], SurfaceError>> {
+    const flowsDir = path.join(this.#qaDir, "flows");
+
+    try {
+      await this.#assertRealPathInsideQaDir(flowsDir);
+    } catch {
+      return ok([]);
+    }
+
+    try {
+      const entries = await readdir(flowsDir);
+      const flows: CandidateFlow[] = [];
+
+      for (const entry of entries.toSorted()) {
+        if (!entry.endsWith(".json")) {
+          continue;
+        }
+
+        const id = entry.slice(0, -".json".length);
+        const flow = await this.readCandidateFlow(id);
+
+        if (flow.ok) {
+          flows.push(flow.value);
+        }
+      }
+
+      return ok(flows);
+    } catch (error) {
+      return err(createStateReadError("Failed to list QA candidate flows.", error));
+    }
   }
 
   async writeFlowRun(flowRun: FlowRun): Promise<Result<FlowRun, SurfaceError>> {

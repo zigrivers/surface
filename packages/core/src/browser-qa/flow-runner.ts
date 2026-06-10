@@ -32,6 +32,7 @@ import type {
   BrowserLocator,
   BrowserQaFlow,
   BrowserQaFlowStep,
+  CandidateFlow,
   EvidenceBundle,
   FlowRun,
   FlowRunSummary,
@@ -115,7 +116,7 @@ export type BrowserQaFlowServiceOptions = {
   readonly projectRoot?: string;
   readonly qaStore: Pick<
     QaRunStore,
-    "listFlowRuns" | "readCandidateFlow" | "readFlowRun" | "writeRun"
+    "listCandidateFlows" | "listFlowRuns" | "readCandidateFlow" | "readFlowRun" | "writeRun"
   >;
   readonly stateDir?: string;
 };
@@ -742,7 +743,7 @@ class FileBackedBrowserQaFlowService implements BrowserQaFlowService {
   readonly #projectRoot: string;
   readonly #qaStore: Pick<
     QaRunStore,
-    "listFlowRuns" | "readCandidateFlow" | "readFlowRun" | "writeRun"
+    "listCandidateFlows" | "listFlowRuns" | "readCandidateFlow" | "readFlowRun" | "writeRun"
   >;
 
   constructor(options: BrowserQaFlowServiceOptions) {
@@ -839,7 +840,21 @@ class FileBackedBrowserQaFlowService implements BrowserQaFlowService {
     return ok({ flowRun: flowRun.value, qaRunId });
   }
 
-  async listFlows(): Promise<Result<{ readonly flows: readonly FlowRunSummary[] }, SurfaceError>> {
+  async listFlows(input?: {
+    readonly candidates?: boolean;
+  }): Promise<
+    Result<{ readonly flows: readonly (CandidateFlow | FlowRunSummary)[] }, SurfaceError>
+  > {
+    if (input?.candidates === true) {
+      const flows = await this.#qaStore.listCandidateFlows();
+
+      if (!isOk(flows)) {
+        return flows;
+      }
+
+      return ok({ flows: flows.value });
+    }
+
     const runs = await this.#qaStore.listFlowRuns();
 
     if (!isOk(runs)) {
@@ -916,6 +931,7 @@ class FileBackedBrowserQaFlowService implements BrowserQaFlowService {
       schemaVersion: "1.0",
       id: safeId(candidate.value.title),
       title: candidate.value.title,
+      ...targetForPromotedCandidateFlow(candidate.value.steps),
       steps: candidate.value.steps.map((step, index) => ({
         id: `step-${index + 1}`,
         ...step,
@@ -984,6 +1000,27 @@ class FileBackedBrowserQaFlowService implements BrowserQaFlowService {
       flowId: parsed.value.id,
       updatedRefs: updated.updatedRefs,
     });
+  }
+}
+
+function targetForPromotedCandidateFlow(
+  steps: readonly BrowserAction[],
+): { readonly target: QaTarget } | Record<string, never> {
+  const firstStep = steps[0];
+
+  if (firstStep?.action !== "open" || firstStep.url === undefined) {
+    return {};
+  }
+
+  try {
+    const url = new URL(firstStep.url);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+      return {};
+    }
+
+    return { target: { kind: "url", ref: url.toString() } };
+  } catch {
+    return {};
   }
 }
 
