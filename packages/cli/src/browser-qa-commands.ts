@@ -177,6 +177,8 @@ export type BrowserQaCliOptions = {
     readonly command: string;
     readonly result: Result<T, SurfaceError>;
   }) => void;
+  readonly jsonRequested: () => boolean;
+  readonly stdout: (chunk: string) => void;
 };
 
 type FlowRunCommandOptions = {
@@ -378,12 +380,24 @@ export function registerBrowserQaCommands(program: Command, options: BrowserQaCl
         return;
       }
 
+      const result = await orchestrator.reportQa({
+        format: format.value,
+        runId: commandOptions.run,
+      });
+
+      if (
+        result.ok &&
+        format.value === "md" &&
+        !options.jsonRequested() &&
+        typeof result.value.report === "string"
+      ) {
+        options.stdout(result.value.report);
+        return;
+      }
+
       options.emitResult({
         command: "report qa",
-        result: await orchestrator.reportQa({
-          format: format.value,
-          runId: commandOptions.run,
-        }),
+        result,
       });
     });
 

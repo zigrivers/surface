@@ -193,6 +193,29 @@ describe("surface qa CLI", () => {
       runId: "qa_cli",
     });
   });
+
+  it("prints Markdown QA reports directly for human output", async () => {
+    const stdout: string[] = [];
+    const orchestrator = {
+      ...makeOrchestrator(),
+      reportQa: vi.fn(() =>
+        Promise.resolve(
+          ok({
+            format: "md" as const,
+            report: "# Browser QA Report qa_cli\n\n- Status: completed\n",
+          }),
+        ),
+      ),
+    };
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "report", "qa", "--run", "qa_cli", "--format", "md"],
+      composition: createCompositionWithBrowserQa({ orchestrator }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(stdout.join("")).toBe("# Browser QA Report qa_cli\n\n- Status: completed\n");
+  });
 });
 
 async function expectJsonCommand(

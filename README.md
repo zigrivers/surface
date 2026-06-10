@@ -38,6 +38,14 @@ pnpm --filter @zigrivers/surface exec npm link
 surface --help
 ```
 
+If `npm link` reports that `surface` already exists because Homebrew or another global install owns
+the binary, avoid overwriting that package-manager-owned file unless you intend to replace it. For a
+one-off local smoke test, run the built CLI directly:
+
+```bash
+node packages/cli/dist/index.js --help
+```
+
 ## Browser QA
 
 Surface includes agent-led browser QA powered by `agent-browser`. Use it when you want an agent to

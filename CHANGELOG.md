@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- Allows explicitly allowlisted canonical localhost targets through `--url` while continuing to
+  block unsafe alternate loopback and private-network URL hosts.
+- Returns structured browser QA JSON reports in `--json` envelopes and renders Markdown QA reports
+  directly for human output.
+- Documents a safe direct CLI smoke-test fallback for local development when `npm link` conflicts
+  with an existing global `surface` binary.
+- Adds a dated 0.2.3 post-release dogfood report covering live capture/audit, pipeline projections,
+  browser QA flows, gates, and MCP smoke coverage.
+
 ## 0.2.3 - Pipeline History and Runtime Updates
 
 - Fixes live localhost audits by writing `agent-browser` computed-style artifacts in the shape

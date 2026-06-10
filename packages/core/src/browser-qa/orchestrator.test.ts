@@ -72,7 +72,7 @@ describe("BrowserQaOrchestrator", () => {
     });
   });
 
-  it("renders JSON reports as serialized report text", async () => {
+  it("renders JSON reports as structured manifests", async () => {
     const orchestrator = createBrowserQaOrchestrator(makeOrchestratorHarness());
     const result = await orchestrator.reportQa({ format: "json", runId: "qa_report" });
 
@@ -82,8 +82,7 @@ describe("BrowserQaOrchestrator", () => {
     }
 
     expect(result.value.format).toBe("json");
-    expect(typeof result.value.report).toBe("string");
-    expect(JSON.parse(result.value.report as string)).toMatchObject({ qaRunId: "qa_report" });
+    expect(result.value.report).toMatchObject({ qaRunId: "qa_report" });
   });
 });
 

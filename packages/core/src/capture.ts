@@ -2289,7 +2289,30 @@ async function authorizeCaptureTarget(
     );
   }
 
-  if (isUnsafeHost(url.hostname, target.kind)) {
+  const allowlist = config?.allowlist ?? [];
+  const allowlisted = isAllowlisted(url, target, allowlist);
+  const allowlistedLocalhostUrl =
+    target.kind === "url" &&
+    isCanonicalLocalhostHost(url.hostname) &&
+    isExplicitlyAllowlisted(url, target, allowlist);
+
+  if (!allowlisted) {
+    return err(
+      createSurfaceError(
+        "target_not_allowed",
+        "Capture target is outside the configured allowlist.",
+        {
+          details: {
+            reason: "allowlist-mismatch",
+            targetKind: target.kind,
+            targetOrigin: url.origin,
+          },
+        },
+      ),
+    );
+  }
+
+  if (isUnsafeHost(url.hostname, target.kind) && !allowlistedLocalhostUrl) {
     return err(
       createSurfaceError("target_not_allowed", "Capture target host is not allowed.", {
         details: { host: url.hostname, reason: "unsafe-host", targetKind: target.kind },
@@ -2307,29 +2330,14 @@ async function authorizeCaptureTarget(
     );
   }
 
-  if (resolvedAddresses.some((address) => isUnsafeHost(address, target.kind))) {
+  if (
+    resolvedAddresses.some((address) => isUnsafeHost(address, target.kind)) &&
+    !allowlistedLocalhostUrl
+  ) {
     return err(
       createSurfaceError("target_not_allowed", "Capture target host is not allowed.", {
         details: { host: url.hostname, reason: "unsafe-host", targetKind: target.kind },
       }),
-    );
-  }
-
-  const allowlist = config?.allowlist ?? [];
-
-  if (!isAllowlisted(url, target, allowlist)) {
-    return err(
-      createSurfaceError(
-        "target_not_allowed",
-        "Capture target is outside the configured allowlist.",
-        {
-          details: {
-            reason: "allowlist-mismatch",
-            targetKind: target.kind,
-            targetOrigin: url.origin,
-          },
-        },
-      ),
     );
   }
 
@@ -2406,6 +2414,16 @@ function isAllowlisted(url: URL, target: Target, allowlist: readonly string[]): 
 
     return false;
   });
+}
+
+function isExplicitlyAllowlisted(url: URL, target: Target, allowlist: readonly string[]): boolean {
+  return allowlist.some((entry) => entry.trim() !== "*" && isAllowlisted(url, target, [entry]));
+}
+
+function isCanonicalLocalhostHost(hostname: string): boolean {
+  const host = normalizeHostname(hostname);
+
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
 function urlMatchesAllowlistUrl(url: URL, allowlistUrl: URL): boolean {

@@ -665,6 +665,8 @@ export function createSurfaceCliProgram(input: {
         json: program.opts<{ json?: boolean }>().json === true,
         result,
       }),
+    jsonRequested: () => program.opts<{ json?: boolean }>().json === true,
+    stdout: io.stdout ?? ((chunk: string) => process.stdout.write(chunk)),
   });
 
   return program;
