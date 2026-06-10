@@ -4,7 +4,10 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import type { BrowserQaDriver } from "./browser-qa/agent-browser-driver.js";
+import type {
+  BrowserQaDriver,
+  BrowserQaDriverActionInput,
+} from "./browser-qa/agent-browser-driver.js";
 import { DEFAULT_SURFACE_CONFIG } from "./config.js";
 import { ok } from "./errors.js";
 import type {
@@ -105,6 +108,54 @@ describe("createSurfaceComposition", () => {
 
       expect(result.value.attemptedActions).toBeGreaterThan(0);
       expect(result.value.candidateFlows[0]?.id).toMatch(/^qflow_/);
+    } finally {
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("does not spend exploration actions on passive snapshot headings", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "surface-composition-qa-"));
+    const actionCalls: BrowserQaDriverActionInput[] = [];
+    const driver = makeSnapshotDriver(
+      {
+        data: {
+          origin: "http://localhost:3000/",
+          refs: {
+            e1: { name: "Surface Sixth Dogfood", role: "heading" },
+            e2: { name: "Overview", role: "heading" },
+            e3: { name: "Docs", role: "link" },
+            e4: { name: "Open help", role: "button" },
+          },
+          snapshot: `- main
+  - heading "Surface Sixth Dogfood" [level=1, ref=e1]
+  - heading "Overview" [level=2, ref=e2]
+  - navigation
+    - link "Docs" [ref=e3]
+  - button "Open help" [ref=e4]`,
+        },
+        error: null,
+        success: true,
+      },
+      actionCalls,
+    );
+
+    try {
+      const composition = createSurfaceComposition({
+        browserQa: { driver },
+        projectRoot: root,
+        stateStore: new MemoryStateStore(),
+      });
+
+      const result = await composition.browserQa.orchestrator.runExplore({
+        maxActions: 2,
+        maxDepth: 1,
+        maxStates: 2,
+        qaRunId: "qa_interactive_refs",
+        target: { kind: "url", ref: "http://localhost:3000" },
+      });
+
+      expect(result.ok).toBe(true);
+      expect(actionCalls.map((call) => call.locator?.refHint)).toEqual(["@e3", "@e3"]);
     } finally {
       rmSync(root, { force: true, recursive: true });
     }
@@ -309,9 +360,15 @@ describe("createSurfaceComposition", () => {
   });
 });
 
-function makeSnapshotDriver(snapshot: unknown): BrowserQaDriver {
+function makeSnapshotDriver(
+  snapshot: unknown,
+  actionCalls: BrowserQaDriverActionInput[] = [],
+): BrowserQaDriver {
   const commandResult = { exitCode: 0, stderr: "", stdout: "" };
-  const runAction = () => Promise.resolve(ok(commandResult));
+  const runAction = (input: BrowserQaDriverActionInput) => {
+    actionCalls.push(input);
+    return Promise.resolve(ok(commandResult));
+  };
 
   return {
     assertElementState: runAction,
