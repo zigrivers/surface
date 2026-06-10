@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -7,6 +7,11 @@ import { describe, expect, it } from "vitest";
 import { formulaString } from "../../scripts/homebrew-formula-utils.mjs";
 
 const ROOT = fileURLToPath(new URL("../..", import.meta.url));
+const EXPECTED_GITHUB_ACTION_MAJOR_VERSION = {
+  checkout: "v6",
+  "setup-node": "v6",
+} as const;
+const EXPECTED_WORKFLOW_NODE_VERSION = "22.14.0";
 
 const RELEASE_PACKAGES = [
   {
@@ -70,6 +75,14 @@ const readPackageJson = async (dir: string): Promise<PackageJson> => {
   return JSON.parse(raw) as PackageJson;
 };
 
+const githubWorkflowPaths = async (): Promise<readonly string[]> => {
+  const workflowDir = join(ROOT, ".github/workflows");
+
+  return (await readdir(workflowDir))
+    .filter((entry) => /\.ya?ml$/u.test(entry))
+    .map((entry) => join(".github/workflows", entry));
+};
+
 describe("release package metadata", () => {
   it.each(RELEASE_PACKAGES)("$name is publishable with public npm metadata", async (pkg) => {
     const cliManifest = await readPackageJson("packages/cli");
@@ -127,6 +140,68 @@ describe("release package metadata", () => {
     expect(verifier).toContain('createHash("sha256")');
     expect(verifier).toContain("packaging/homebrew/surface.rb");
     expect(verifier).toContain("SURFACE_SKIP_HOMEBREW_NETWORK_VERIFY");
+  });
+
+  it("uses current checkout and setup-node major versions with supported runtimes", async () => {
+    const actionUses: {
+      readonly action: keyof typeof EXPECTED_GITHUB_ACTION_MAJOR_VERSION;
+      readonly version: string;
+      readonly workflowPath: string;
+    }[] = [];
+
+    for (const workflowPath of await githubWorkflowPaths()) {
+      const workflow = await readFile(join(ROOT, workflowPath), "utf8");
+
+      for (const line of workflow.split(/\r?\n/u)) {
+        if (/^\s*#/u.test(line)) {
+          continue;
+        }
+
+        const match = line.match(
+          /^\s*-?\s*uses:\s*['"]?actions\/(checkout|setup-node)@([^'"\s#]+)['"]?/u,
+        );
+
+        if (match?.[1] !== undefined && match[2] !== undefined) {
+          const action = match[1] as keyof typeof EXPECTED_GITHUB_ACTION_MAJOR_VERSION;
+
+          actionUses.push({ action, version: match[2], workflowPath });
+        }
+      }
+    }
+
+    expect(actionUses.map((use) => use.action)).toEqual(
+      expect.arrayContaining(["checkout", "setup-node"]),
+    );
+
+    for (const use of actionUses) {
+      const expectedVersion = EXPECTED_GITHUB_ACTION_MAJOR_VERSION[use.action];
+
+      expect(use.version, `${use.workflowPath}: actions/${use.action}@${use.version}`).toMatch(
+        new RegExp(`^${expectedVersion}(?:\\..*)?$`, "u"),
+      );
+    }
+  });
+
+  it("uses one Node.js version across CI and release workflows", async () => {
+    const nodeVersionRefs: { readonly version: string; readonly workflowPath: string }[] = [];
+
+    for (const workflowPath of await githubWorkflowPaths()) {
+      const workflow = await readFile(join(ROOT, workflowPath), "utf8");
+
+      for (const match of workflow.matchAll(/^\s*node-version:\s*['"]?([^'"\s#]+)['"]?/gmu)) {
+        if (match[1] !== undefined) {
+          nodeVersionRefs.push({ version: match[1], workflowPath });
+        }
+      }
+    }
+
+    expect(nodeVersionRefs.length).toBeGreaterThan(0);
+
+    for (const ref of nodeVersionRefs) {
+      expect(ref.version, `${ref.workflowPath}: node-version ${ref.version}`).toBe(
+        EXPECTED_WORKFLOW_NODE_VERSION,
+      );
+    }
   });
 
   it("packs release tarballs into the root publish directory", async () => {
