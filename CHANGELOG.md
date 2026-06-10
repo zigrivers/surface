@@ -6,6 +6,7 @@
   block unsafe alternate loopback and private-network URL hosts.
 - Returns structured browser QA JSON reports in `--json` envelopes and renders Markdown QA reports
   directly for human output.
+- Records real completion timestamps for failed browser QA flow steps instead of the Unix epoch.
 - Documents a safe direct CLI smoke-test fallback for local development when `npm link` conflicts
   with an existing global `surface` binary.
 - Adds a dated 0.2.3 post-release dogfood report covering live capture/audit, pipeline projections,

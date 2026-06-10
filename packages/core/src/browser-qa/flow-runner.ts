@@ -357,6 +357,7 @@ class DeterministicFlowRunner implements FlowRunner {
     if (!policyDecision.allowed) {
       const result = failedStepResult({
         action,
+        completedAt: this.#now(),
         error: policyDecision.reason,
         id: input.step.id,
         severity,
@@ -408,6 +409,7 @@ class DeterministicFlowRunner implements FlowRunner {
         result: {
           ...failedStepResult({
             action,
+            completedAt: this.#now(),
             error: asserted.error.message,
             id: input.step.id,
             severity,
@@ -991,6 +993,7 @@ function driverInputForStep(
 
 function failedStepResult(input: {
   readonly action: BrowserAction;
+  readonly completedAt: string;
   readonly error: string;
   readonly id: string;
   readonly severity: QaSeverity;
@@ -998,7 +1001,7 @@ function failedStepResult(input: {
 }): FlowStepResult {
   return {
     action: input.action,
-    completedAt: new Date(0).toISOString(),
+    completedAt: input.completedAt,
     error: input.error,
     evidenceBundleIds: [],
     id: input.id,

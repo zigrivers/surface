@@ -22,6 +22,7 @@ describe("FlowRunner", () => {
       actionPolicy: allowAllActionPolicy(),
       driver,
       evidenceStore,
+      now: () => "2026-06-08T12:34:56.000Z",
       qaStore: makeFakeQaStore(),
     });
 
@@ -39,6 +40,7 @@ describe("FlowRunner", () => {
     expect(result.value.status).toBe("failed");
     expect(result.value.highestFailedSeverity).toBe("high");
     expect(result.value.steps.find((step) => step.id === "submit-empty-payment")).toMatchObject({
+      completedAt: "2026-06-08T12:34:56.000Z",
       status: "failed",
     });
     expect(driver.calls.map((call) => call.action)).toEqual(["open", "click", "assert"]);
