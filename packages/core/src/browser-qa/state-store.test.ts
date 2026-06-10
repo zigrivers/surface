@@ -5,7 +5,7 @@ import path from "node:path";
 import { describe, expect, it, onTestFinished } from "vitest";
 
 import { createFileStateStore } from "../state-store.js";
-import type { QaRun } from "./schemas.js";
+import type { CandidateFlow, QaRun } from "./schemas.js";
 import { createFileQaRunStore } from "./state-store.js";
 
 describe("QaRunStore", () => {
@@ -67,6 +67,28 @@ describe("QaRunStore", () => {
 
     expect(result).toMatchObject({ ok: false, error: { code: "state_read_failed" } });
   });
+
+  it("lists candidate flows without mixing in flow run history", async () => {
+    const projectRoot = await makeTempRoot();
+    const qaStore = createFileQaRunStore({
+      projectRoot,
+      stateStore: createFileStateStore({ projectRoot }),
+    });
+
+    await expect(
+      qaStore.writeCandidateFlow(makeCandidateFlow({ id: "qflow_checkout" })),
+    ).resolves.toMatchObject({ ok: true });
+    await expect(
+      qaStore.writeCandidateFlow(makeCandidateFlow({ id: "qflow_settings" })),
+    ).resolves.toMatchObject({ ok: true });
+
+    const result = await qaStore.listCandidateFlows();
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: [{ id: "qflow_checkout" }, { id: "qflow_settings" }],
+    });
+  });
 });
 
 async function makeTempRoot(): Promise<string> {
@@ -98,6 +120,17 @@ function makeQaRun(overrides: Partial<QaRun> = {}): QaRun {
     startedAt: "2026-06-08T11:00:00.000Z",
     status: "degraded",
     target: { kind: "url", ref: "http://localhost:3000" },
+    ...overrides,
+  };
+}
+
+function makeCandidateFlow(overrides: Partial<CandidateFlow> = {}): CandidateFlow {
+  return {
+    id: "qflow_state",
+    qaRunId: "qa_state",
+    sourceRunManifestDigest: "sha256:abc123",
+    steps: [],
+    title: "State candidate flow",
     ...overrides,
   };
 }

@@ -19,10 +19,18 @@
   ancestor `.surface` state directory.
 - Reports missing browser-QA candidate flow promotion attempts with the candidate id and
   `surface flow list --candidates --json` recovery command.
+- Makes `surface flow list --candidates` and the MCP flow-list tool return candidate flow sidecars
+  instead of reviewed flow run history.
+- Restores browser-QA exploration candidate generation with current `agent-browser --json snapshot`
+  output, including bracket refs such as `[ref=e2]`.
+- Writes an inferred URL target when promoting candidate browser-QA flows that start from an
+  absolute `open` step, so promoted flows can run without repeating the target flag.
 - Documents a safe direct CLI smoke-test fallback for local development when `npm link` conflicts
   with an existing global `surface` binary.
 - Adds a dated 0.2.3 post-release dogfood report covering live capture/audit, pipeline projections,
   browser QA flows, gates, and MCP smoke coverage.
+- Adds a second post-PR deep dogfood report covering candidate discovery, promotion, replay,
+  localhost capture/audit, MCP candidate listing, and pipeline JSON projections.
 
 ## 0.2.3 - Pipeline History and Runtime Updates
 

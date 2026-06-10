@@ -90,6 +90,10 @@ describe("surface flow CLI", () => {
       command: "flow list",
       data: { flows: [expect.objectContaining({ id: "flowrun_checkout" })] },
     });
+    await expectJsonCommand(["flow", "list", "--candidates"], composition, {
+      command: "flow list",
+      data: { flows: [expect.objectContaining({ id: "qflow_checkout" })] },
+    });
     await expectJsonCommand(["flow", "show", "checkout"], composition, {
       command: "flow show",
       data: { flow: { id: "checkout" } },
@@ -260,10 +264,21 @@ steps:
 
 function makeFlowService() {
   return {
-    listFlows: vi.fn(() =>
+    listFlows: vi.fn((input?: { readonly candidates?: boolean }) =>
       Promise.resolve(
         ok({
-          flows: [{ flowId: "checkout", id: "flowrun_checkout", status: "passed" }],
+          flows:
+            input?.candidates === true
+              ? [
+                  {
+                    id: "qflow_checkout",
+                    qaRunId: "qa_flow",
+                    sourceRunManifestDigest: "sha256:abc123",
+                    steps: [],
+                    title: "Checkout candidate",
+                  },
+                ]
+              : [{ flowId: "checkout", id: "flowrun_checkout", status: "passed" }],
         }),
       ),
     ),

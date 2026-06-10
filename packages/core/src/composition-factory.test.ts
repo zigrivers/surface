@@ -4,6 +4,7 @@ import path from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import type { BrowserQaDriver } from "./browser-qa/agent-browser-driver.js";
 import { DEFAULT_SURFACE_CONFIG } from "./config.js";
 import { ok } from "./errors.js";
 import type {
@@ -58,6 +59,53 @@ describe("createSurfaceComposition", () => {
       expect(composition.lensFactoryOptions.projectRoot).toBe(realpathSync(root));
     } finally {
       process.chdir(originalCwd);
+      rmSync(root, { force: true, recursive: true });
+    }
+  });
+
+  it("extracts agent-browser bracket refs for browser QA exploration actions", async () => {
+    const root = mkdtempSync(path.join(tmpdir(), "surface-composition-qa-"));
+    const driver = makeSnapshotDriver({
+      data: {
+        origin: "http://localhost:3000/",
+        refs: {
+          e1: { name: "Browser QA Fixture", role: "heading" },
+          e2: { name: "Open modal route", role: "button" },
+          e3: { name: "Cart", role: "link" },
+        },
+        snapshot: `- main
+  - heading "Browser QA Fixture" [level=1, ref=e1]
+  - navigation
+    - link "Cart" [ref=e3]
+  - button "Open modal route" [ref=e2]`,
+      },
+      error: null,
+      success: true,
+    });
+
+    try {
+      const composition = createSurfaceComposition({
+        browserQa: { driver },
+        projectRoot: root,
+        stateStore: new MemoryStateStore(),
+      });
+
+      const result = await composition.browserQa.orchestrator.runExplore({
+        maxActions: 2,
+        maxDepth: 1,
+        maxStates: 2,
+        qaRunId: "qa_bracket_refs",
+        target: { kind: "url", ref: "http://localhost:3000" },
+      });
+
+      expect(result.ok).toBe(true);
+      if (!result.ok) {
+        throw new Error(result.error.message);
+      }
+
+      expect(result.value.attemptedActions).toBeGreaterThan(0);
+      expect(result.value.candidateFlows[0]?.id).toMatch(/^qflow_/);
+    } finally {
       rmSync(root, { force: true, recursive: true });
     }
   });
@@ -260,3 +308,61 @@ describe("createSurfaceComposition", () => {
     });
   });
 });
+
+function makeSnapshotDriver(snapshot: unknown): BrowserQaDriver {
+  const commandResult = { exitCode: 0, stderr: "", stdout: "" };
+  const runAction = () => Promise.resolve(ok(commandResult));
+
+  return {
+    assertElementState: runAction,
+    assertText: runAction,
+    captureState: () =>
+      Promise.resolve(
+        ok({
+          rawSnapshot: snapshot,
+          title: "Browser QA Fixture",
+          url: "http://localhost:3000",
+        }),
+      ),
+    check: runAction,
+    cleanupStaleSessions: () => Promise.resolve(ok({ cleaned: [], skipped: [] })),
+    click: runAction,
+    dblclick: runAction,
+    fill: runAction,
+    focus: runAction,
+    getConsoleSummary: () => Promise.resolve(ok({ entries: [] })),
+    getNetworkSummary: () => Promise.resolve(ok({ requests: [] })),
+    getReactDiagnostics: () => Promise.resolve(ok({ available: false })),
+    getVitals: () => Promise.resolve(ok({})),
+    hover: runAction,
+    navigate: runAction,
+    press: runAction,
+    pushState: runAction,
+    scroll: runAction,
+    select: runAction,
+    setTheme: runAction,
+    setViewport: runAction,
+    startSession: (input) =>
+      Promise.resolve(
+        ok({
+          createdAt: "2026-06-10T00:00:00.000Z",
+          executableSignature: "test",
+          id: "ab_test",
+          lockfilePath: ".surface/tmp/qa/qa_bracket_refs/sessions/ab_test/session.lock",
+          manifestPath: ".surface/tmp/qa/qa_bracket_refs/sessions/ab_test/session.json",
+          owner: "surface" as const,
+          ownerToken: "token",
+          processGroup: "test",
+          profileDir: ".surface/tmp/qa/qa_bracket_refs/sessions/ab_test/profile",
+          qaRunId: input.qaRunId,
+          startedAt: "2026-06-10T00:00:00.000Z",
+          target: input.target,
+        }),
+      ),
+    stopSession: () => Promise.resolve(ok({ stopped: true })),
+    type: runAction,
+    uncheck: runAction,
+    upload: runAction,
+    wait: runAction,
+  };
+}
