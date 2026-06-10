@@ -1,3 +1,7 @@
+import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it, vi } from "vitest";
 
 import { createSurfaceError, ok } from "../errors.js";
@@ -149,6 +153,59 @@ describe("FlowRunner", () => {
 });
 
 describe("BrowserQaFlowService", () => {
+  it("persists volatile ref hint updates in reviewed flow YAML", async () => {
+    const root = await mkdtemp(path.join(os.tmpdir(), "surface-flow-refs-"));
+    const flowDir = path.join(root, "surface-flows");
+    await mkdir(flowDir, { recursive: true });
+    const flowPath = path.join(flowDir, "settings.yml");
+    await writeFile(
+      flowPath,
+      `schemaVersion: "1.0"
+id: settings
+title: Settings save
+severity: medium
+target:
+  kind: url
+  ref: http://localhost:3000/settings
+steps:
+  - id: open-settings
+    action: open
+    url: /settings
+  - id: fill-name
+    action: fill
+    locator:
+      label: Display name
+      refHint: "@e999"
+    value: Updated User
+  - id: save-settings
+    action: click
+    locator:
+      role: button
+      name: Save settings
+      refHint: "@e998"
+`,
+      "utf8",
+    );
+    const service = createBrowserQaFlowService({
+      flowRunner: { runFlow: vi.fn() },
+      projectRoot: root,
+      qaStore: {
+        listFlowRuns: vi.fn(),
+        readCandidateFlow: vi.fn(),
+        readFlowRun: vi.fn(),
+        writeRun: vi.fn(),
+      },
+    });
+
+    const result = await service.updateFlowRefs({ flowPath: "surface-flows/settings.yml" });
+
+    expect(result).toMatchObject({ ok: true, value: { flowId: "settings", updatedRefs: 2 } });
+    const updated = await readFile(flowPath, "utf8");
+    expect(updated).not.toContain("refHint");
+    expect(updated).toContain("label: Display name");
+    expect(updated).toContain("role: button");
+  });
+
   it("rejects promoted flow output outside surface-flows", async () => {
     const service = createBrowserQaFlowService({
       flowRunner: { runFlow: vi.fn() },

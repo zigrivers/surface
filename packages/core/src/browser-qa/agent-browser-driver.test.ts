@@ -227,6 +227,51 @@ describe("agent-browser driver", () => {
     ]);
   });
 
+  it("parses agent-browser title and URL JSON envelopes into scalar capture state", async () => {
+    const run: BrowserQaAgentBrowserCommandRunner = (input) => {
+      if (input.args[0] === "snapshot") {
+        return Promise.resolve(
+          makeCommandResult({
+            stdout: JSON.stringify({ data: { snapshot: "- main" }, error: null, success: true }),
+          }),
+        );
+      }
+
+      if (input.args[0] === "get" && input.args[1] === "title") {
+        return Promise.resolve(
+          makeCommandResult({
+            stdout: JSON.stringify({ data: { title: "Checkout" }, error: null, success: true }),
+          }),
+        );
+      }
+
+      if (input.args[0] === "get" && input.args[1] === "url") {
+        return Promise.resolve(
+          makeCommandResult({
+            stdout: JSON.stringify({
+              data: { url: "http://localhost:3000/checkout" },
+              error: null,
+              success: true,
+            }),
+          }),
+        );
+      }
+
+      return Promise.resolve(makeCommandResult());
+    };
+    const driver = createAgentBrowserCliDriver({ runCommand: run });
+
+    const result = await driver.captureState();
+
+    expect(result).toMatchObject({
+      ok: true,
+      value: {
+        title: "Checkout",
+        url: "http://localhost:3000/checkout",
+      },
+    });
+  });
+
   it("passes locatorless text assertions when agent-browser eval returns true JSON", async () => {
     const invocations: BrowserQaAgentBrowserCommandInput[] = [];
     const run: BrowserQaAgentBrowserCommandRunner = (input) => {

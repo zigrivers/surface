@@ -1029,6 +1029,22 @@ function parseScalarCommandOutput(value: string): string {
     return parsed.value;
   }
 
+  if (isRecord(parsed) && isRecord(parsed.data)) {
+    for (const key of ["value", "title", "url", "text"]) {
+      const valueForKey = parsed.data[key];
+      if (typeof valueForKey === "string") {
+        return valueForKey;
+      }
+    }
+
+    const stringValues = Object.values(parsed.data).filter(
+      (value): value is string => typeof value === "string",
+    );
+    if (stringValues.length === 1) {
+      return stringValues[0] ?? "";
+    }
+  }
+
   return JSON.stringify(parsed);
 }
 

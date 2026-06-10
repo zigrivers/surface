@@ -2,7 +2,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { stringify as stringifyYaml } from "yaml";
+import { isMap, isSeq, parseDocument, stringify as stringifyYaml } from "yaml";
 
 import { createSurfaceError, err, ok, type Result, type SurfaceError } from "../errors.js";
 import { isSameOrChildPath } from "../path-safety.js";
@@ -947,9 +947,24 @@ class FileBackedBrowserQaFlowService implements BrowserQaFlowService {
       return parsed;
     }
 
+    const updated = removeVolatileRefHints(contents);
+
+    if (updated.updatedRefs > 0) {
+      try {
+        await writeAtomicTextFile(flowPath, updated.contents);
+      } catch (cause) {
+        return err(
+          createSurfaceError("state_write_failed", "Browser QA flow refs could not be updated.", {
+            cause,
+            details: { flowPath: input.flowPath },
+          }),
+        );
+      }
+    }
+
     return ok({
       flowId: parsed.value.id,
-      updatedRefs: countRefHints(parsed.value),
+      updatedRefs: updated.updatedRefs,
     });
   }
 }
@@ -1305,10 +1320,41 @@ function qaRunForFlowRun(flowRun: FlowRunnerResult, qaRunId: string): QaRun {
   };
 }
 
-function countRefHints(flow: BrowserQaFlow): number {
-  return [...flow.steps, ...(flow.teardown?.always ?? [])].filter(
-    (step) => step.locator?.refHint !== undefined,
-  ).length;
+function removeVolatileRefHints(contents: string): {
+  readonly contents: string;
+  readonly updatedRefs: number;
+} {
+  const document = parseDocument(contents);
+  let updatedRefs = 0;
+
+  const stripSteps = (steps: unknown): void => {
+    if (!isSeq(steps)) {
+      return;
+    }
+
+    for (const step of steps.items) {
+      if (!isMap(step)) {
+        continue;
+      }
+
+      const locator = step.get("locator", true);
+      if (isMap(locator) && locator.delete("refHint")) {
+        updatedRefs += 1;
+      }
+    }
+  };
+
+  stripSteps(document.get("steps", true));
+
+  const teardown = document.get("teardown", true);
+  if (isMap(teardown)) {
+    stripSteps(teardown.get("always", true));
+  }
+
+  return {
+    contents: String(document),
+    updatedRefs,
+  };
 }
 
 function projectRelativePath(projectRoot: string, value: string): string {

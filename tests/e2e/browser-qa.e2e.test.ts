@@ -167,12 +167,12 @@ describe("browser QA CLI e2e", () => {
       command: "gate",
       data: {
         gateResult: {
+          failingFlowRunIds: [expect.stringMatching(/^flowrun_checkout_/)],
           passed: false,
         },
       },
       ok: true,
     });
-    expect(gateEnvelope.data.gateResult.failingFlowRunIds).toContain(flowEnvelope.data.flowRunId);
 
     const mcpServer = createSurfaceMcpServer({ projectRoot: project.cwd });
     await expect(

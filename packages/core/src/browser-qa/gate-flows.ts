@@ -11,7 +11,15 @@ export type BrowserQaFlowRunForGate = {
   readonly source?: {
     readonly ref?: string;
   };
+  readonly steps?: readonly {
+    readonly completedAt?: string;
+    readonly startedAt?: string;
+  }[];
   readonly status: "passed" | "failed" | "degraded";
+  readonly target?: {
+    readonly kind?: string;
+    readonly ref?: string;
+  };
 };
 
 export type BrowserQaGateTargetCliOptions = {
@@ -64,9 +72,10 @@ export async function browserQaFlowRunsForGate(
     glob === undefined
       ? flowRuns.value
       : flowRuns.value.filter((flowRun) => browserQaFlowRunMatchesGlob(flowRun, glob));
+  const latestMatched = latestFlowRunsBySelectionKey(matched);
 
-  if (matched.length > 0) {
-    return ok(matched);
+  if (latestMatched.length > 0) {
+    return ok(latestMatched);
   }
 
   const runFlows = await runDiscoveredBrowserQaFlowsForGate(composition, input);
@@ -82,7 +91,7 @@ export async function browserQaFlowRunsForGate(
     );
   }
 
-  return ok(matched);
+  return ok(latestMatched);
 }
 
 export function browserQaGateTargetCli(
@@ -219,6 +228,56 @@ function browserQaFlowRunMatchesGlob(flowRun: BrowserQaFlowRunForGate, glob: str
   return [flowRun.id, flowRun.flowId, flowRun.source?.ref]
     .filter((value): value is string => value !== undefined)
     .some((value) => wildcardMatches(glob, value));
+}
+
+function latestFlowRunsBySelectionKey(
+  flowRuns: readonly BrowserQaFlowRunForGate[],
+): readonly BrowserQaFlowRunForGate[] {
+  const selected = new Map<
+    string,
+    {
+      readonly flowRun: BrowserQaFlowRunForGate;
+      readonly index: number;
+      readonly timestamp: number;
+    }
+  >();
+
+  flowRuns.forEach((flowRun, index) => {
+    const key = flowRunSelectionKey(flowRun);
+    const timestamp = latestFlowRunTimestamp(flowRun);
+    const existing = selected.get(key);
+
+    if (
+      existing === undefined ||
+      timestamp > existing.timestamp ||
+      (timestamp === existing.timestamp && index > existing.index)
+    ) {
+      selected.set(key, { flowRun, index, timestamp });
+    }
+  });
+
+  return [...selected.values()]
+    .toSorted((left, right) => left.index - right.index)
+    .map((entry) => entry.flowRun);
+}
+
+function flowRunSelectionKey(flowRun: BrowserQaFlowRunForGate): string {
+  return [
+    flowRun.source?.ref ?? flowRun.flowId ?? flowRun.id,
+    flowRun.target?.kind ?? "",
+    flowRun.target?.ref ?? "",
+  ].join("\u0000");
+}
+
+function latestFlowRunTimestamp(flowRun: BrowserQaFlowRunForGate): number {
+  const timestamps =
+    flowRun.steps
+      ?.flatMap((step) => [step.completedAt, step.startedAt])
+      .filter((value): value is string => value !== undefined)
+      .map((value) => Date.parse(value))
+      .filter((value) => Number.isFinite(value)) ?? [];
+
+  return timestamps.length === 0 ? Number.NEGATIVE_INFINITY : Math.max(...timestamps);
 }
 
 async function expandBrowserQaGateFlowPatterns(

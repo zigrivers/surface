@@ -7,6 +7,12 @@
 - Returns structured browser QA JSON reports in `--json` envelopes and renders Markdown QA reports
   directly for human output.
 - Records real completion timestamps for failed browser QA flow steps instead of the Unix epoch.
+- Makes `surface flow update-refs` persist removal of stale volatile `refHint` values from reviewed
+  flow YAML while preserving semantic locators.
+- Makes flow-aware gates evaluate the latest matching reviewed flow run instead of stale historical
+  failures after a newer pass.
+- Stores plain title and URL strings in browser QA evidence snapshots when parsing current
+  `agent-browser` scalar JSON envelopes.
 - Documents a safe direct CLI smoke-test fallback for local development when `npm link` conflicts
   with an existing global `surface` binary.
 - Adds a dated 0.2.3 post-release dogfood report covering live capture/audit, pipeline projections,
