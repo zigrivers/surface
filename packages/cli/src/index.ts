@@ -67,6 +67,7 @@ import {
   type SurfaceError,
   type TrackedFinding,
   type TrackedFindingsDiffEntry,
+  type Verdict,
 } from "@zigrivers/surface-core";
 import type {
   Capture,
@@ -261,7 +262,14 @@ type AlternativesOutput = {
   };
 };
 type TraceOutput = {
+  readonly baseline?: {
+    readonly accepted: boolean;
+    readonly baselineId: string;
+    readonly reason?: string;
+    readonly waiverCount: number;
+  };
   readonly trackedFinding: TrackedFinding;
+  readonly verdict?: Verdict;
 };
 type ConfigCommandOptions = {
   readonly preset?: string;
@@ -1769,7 +1777,54 @@ async function traceFinding(
     );
   }
 
-  return resultOk({ trackedFinding });
+  return resultOk({
+    ...traceBaselineContext(state.value, trackedFinding),
+    trackedFinding,
+    ...traceVerdictContext(state.value, trackedFinding),
+  });
+}
+
+function traceVerdictContext(
+  state: CliProjectStateSnapshot,
+  trackedFinding: TrackedFinding,
+): Pick<TraceOutput, "verdict"> {
+  const identityKey = trackedIdentityKey(trackedFinding);
+  const verdict = [...(state.verdicts ?? [])]
+    .reverse()
+    .find(
+      (entry) =>
+        entry.findingId === trackedFinding.currentFindingId ||
+        (identityKey !== undefined && entry.findingIdentityKey === identityKey),
+    );
+
+  return verdict === undefined ? {} : { verdict };
+}
+
+function traceBaselineContext(
+  state: CliProjectStateSnapshot,
+  trackedFinding: TrackedFinding,
+): Pick<TraceOutput, "baseline"> {
+  const baseline = state.baselines?.at(-1);
+
+  if (baseline === undefined) {
+    return {};
+  }
+
+  const identityKey = trackedIdentityKey(trackedFinding);
+  const accepted = identityKey === undefined ? false : baseline.identityKeys.includes(identityKey);
+
+  return {
+    baseline: {
+      accepted,
+      baselineId: baseline.baselineId,
+      ...(baseline.reason === undefined ? {} : { reason: baseline.reason }),
+      waiverCount: baseline.waivers.length,
+    },
+  };
+}
+
+function trackedIdentityKey(trackedFinding: TrackedFinding): string | undefined {
+  return trackedFinding.identityKey ?? trackedFinding.identity.identityKey;
 }
 
 function emitResult<T>(input: {
@@ -1906,6 +1961,10 @@ function humanizeSuccess<T>(command: string, data: T, options: { readonly all: b
 
   if (command === "explain") {
     return humanizeExplain(data);
+  }
+
+  if (command === "trace") {
+    return humanizeTrace(data);
   }
 
   return `surface ${command}: ${JSON.stringify(data)}\n`;
@@ -2065,6 +2124,55 @@ function humanizeExplain(data: unknown): string {
   return `${lines.join("\n")}\n`;
 }
 
+function humanizeTrace(data: unknown): string {
+  if (!isRecord(data) || !isRecord(data.trackedFinding)) {
+    return `surface trace: ${JSON.stringify(data)}\n`;
+  }
+
+  const trackedFinding = data.trackedFinding;
+  const identity = isRecord(trackedFinding.identity) ? trackedFinding.identity : {};
+  const validation = isRecord(trackedFinding.validation) ? trackedFinding.validation : {};
+  const history = arrayValue(trackedFinding.history);
+  const currentFindingId = stringValue(trackedFinding.currentFindingId);
+  const identityKey = stringValue(trackedFinding.identityKey) ?? stringValue(identity.identityKey);
+  const validationExpectation = stringValue(validation.expectation);
+  const validationKind = stringValue(validation.kind);
+  const lines = [
+    `surface trace: ${currentFindingId ?? identityKey ?? "tracked finding"}`,
+    `Status: ${stringValue(trackedFinding.status) ?? "unknown"}`,
+    `Gate disposition: ${stringValue(trackedFinding.gateDisposition) ?? "unknown"}`,
+    `Identity: ${identityKey ?? "unknown"}`,
+    `Lens: ${stringValue(identity.lens) ?? "unknown"} / ${stringValue(identity.issueType) ?? "unknown"}`,
+    `Anchor: ${stringValue(identity.anchorKind) ?? "unknown"} ${
+      stringValue(identity.locationAnchor) ?? "unknown"
+    }`,
+    `First seen: ${stringValue(trackedFinding.firstSeenRunId) ?? "unknown"}`,
+    `Last seen: ${stringValue(trackedFinding.lastSeenRunId) ?? "unknown"}`,
+    `Validation: ${validationExpectation ?? "none"}${
+      validationKind === undefined ? "" : ` (${validationKind})`
+    }`,
+  ];
+  const verdict = isRecord(data.verdict) ? data.verdict : undefined;
+  const baseline = isRecord(data.baseline) ? data.baseline : undefined;
+
+  if (verdict !== undefined) {
+    lines.splice(4, 0, formatTraceVerdictLine(verdict));
+  }
+
+  if (baseline !== undefined) {
+    lines.splice(verdict === undefined ? 4 : 5, 0, formatTraceBaselineLine(baseline));
+  }
+
+  if (history.length > 0) {
+    lines.push("History:");
+    for (const entry of history) {
+      lines.push(formatTraceHistoryLine(entry));
+    }
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
 function formatFindingLine(value: unknown): string {
   if (!isRecord(value)) {
     return `- ${JSON.stringify(value)}`;
@@ -2091,6 +2199,29 @@ function formatBacklogLine(value: unknown): string {
   const prefix = rank === undefined ? "-" : `${rank}.`;
 
   return `${prefix} [${severity}] ${title}${findingId === undefined ? "" : ` (${findingId})`}`;
+}
+
+function formatTraceHistoryLine(value: unknown): string {
+  if (!isRecord(value)) {
+    return `- ${JSON.stringify(value)}`;
+  }
+
+  return `- ${stringValue(value.runId) ?? "unknown"}: ${stringValue(value.status) ?? "unknown"}`;
+}
+
+function formatTraceVerdictLine(value: Record<string, unknown>): string {
+  const decision = stringValue(value.decision) ?? "unknown";
+  const rationale = stringValue(value.rationale);
+
+  return `Verdict: ${decision}${rationale === undefined ? "" : ` - ${rationale}`}`;
+}
+
+function formatTraceBaselineLine(value: Record<string, unknown>): string {
+  const baselineId = stringValue(value.baselineId) ?? "unknown";
+  const accepted = value.accepted === true ? "accepted" : "not accepted";
+  const reason = stringValue(value.reason);
+
+  return `Baseline: ${baselineId} (${accepted})${reason === undefined ? "" : ` - ${reason}`}`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

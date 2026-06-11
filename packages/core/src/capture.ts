@@ -66,6 +66,7 @@ const MAX_AGENT_BROWSER_FAILURE_TEXT_PART_CHARS = 10_000;
 const STATIC_SCREENSHOT_SKIPPED_REASON = "static screenshot input; live DOM artifacts unavailable";
 const STATIC_TEXT_SKIPPED_REASON =
   "static context input; screenshot and live browser artifacts unavailable";
+const DEFAULT_ROUTE_TARGET_ORIGIN = "http://localhost:3000";
 const WINDOWS_RESERVED_CAPTURE_IDS = new Set([
   "AUX",
   "CON",
@@ -1485,6 +1486,10 @@ function targetUrlForBrowser(target: Target): string | undefined {
 
   if (target.kind === "localhost") {
     return parseTargetUrl(target.ref, target.kind)?.toString();
+  }
+
+  if (target.kind === "route") {
+    return new URL(target.ref, DEFAULT_ROUTE_TARGET_ORIGIN).toString();
   }
 
   return undefined;

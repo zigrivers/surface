@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## 0.2.4 - Route Capture and Trace Context
+
+- Resolves safe `--route` capture targets to the default localhost browser URL instead of falling
+  through to backend-specific unsupported-target errors.
+- Renders `surface trace` human output as readable closed-loop status, identity, validation, and
+  history lines instead of a raw JSON blob.
+- Includes matching verdict and active baseline context in CLI `surface trace` and MCP
+  `surface_trace` output.
 - Allows explicitly allowlisted canonical localhost targets through `--url` while continuing to
   block unsafe alternate loopback and private-network URL hosts.
 - Returns structured browser QA JSON reports in `--json` envelopes and renders Markdown QA reports
@@ -43,6 +51,9 @@
 - Adds a seventh deep dogfood report covering static targets, auth-state errors, model fallback
   disclosure, browser-QA cleanup/flow/evidence/replay paths, MCP artifact reads, and structured
   invalid-path errors.
+- Adds an eighth deep dogfood report covering route targets, closed-loop trace UX, cleanup,
+  baseline/verdict/diff workflows, browser QA evidence/replay/report paths, flow-aware gates, and
+  MCP trace/status/gate/evidence/report calls.
 
 ## 0.2.3 - Pipeline History and Runtime Updates
 

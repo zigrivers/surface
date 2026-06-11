@@ -853,7 +853,19 @@ describe("@zigrivers/surface-mcp bootstrap", () => {
         server.callTool("surface_trace", { findingId: findingDrafts[0]?.draftId }),
       ).resolves.toMatchObject({
         ok: true,
-        value: { trackedFinding: { currentFindingId: findingDrafts[0]?.draftId, status: "new" } },
+        value: {
+          baseline: {
+            accepted: true,
+            baselineId: "baseline_mcp_0001",
+            reason: "accepted current debt",
+          },
+          trackedFinding: { currentFindingId: findingDrafts[0]?.draftId, status: "new" },
+          verdict: {
+            decision: "accept",
+            findingId: findingDrafts[0]?.draftId,
+            rationale: "matches measured evidence",
+          },
+        },
       });
 
       findingDrafts = [

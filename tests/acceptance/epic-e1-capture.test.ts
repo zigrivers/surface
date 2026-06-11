@@ -601,6 +601,106 @@ describe("E1 Capture & Inputs", () => {
       ).resolves.toContain("ref=@e1");
     });
 
+    it("[US-001][AC1] agent-browser backend resolves safe route targets to localhost URLs (contract)", async () => {
+      const artifactRoot = await createTempArtifactRoot();
+      const commandCalls: string[][] = [];
+      const service = createCaptureService({
+        backends: [
+          createAgentBrowserCaptureBackend({
+            available: true,
+            clock: () => "2026-05-31T18:35:00.000Z",
+            idFactory: () => "cap-agent-browser-route",
+            runCommand: async (args) => {
+              commandCalls.push([...args]);
+
+              const commandIndex = args.findIndex((arg) =>
+                ["open", "wait", "screenshot", "snapshot", "get", "close"].includes(arg),
+              );
+              const command = commandIndex === -1 ? undefined : args[commandIndex];
+
+              if (command === "screenshot") {
+                const screenshotPath = args.at(-2);
+
+                if (screenshotPath === undefined) {
+                  throw new Error("expected screenshot path");
+                }
+
+                await writeFile(screenshotPath, VALID_PNG_BYTES);
+
+                return agentBrowserResult({ path: screenshotPath });
+              }
+
+              if (command === "snapshot") {
+                return agentBrowserResult({
+                  origin: "http://localhost:3000/dense",
+                  refs: {
+                    e1: {
+                      name: "Buy",
+                      role: "button",
+                    },
+                  },
+                  snapshot: '- button "Buy" [ref=e1]',
+                });
+              }
+
+              if (command === "get" && args[commandIndex + 1] === "html") {
+                return agentBrowserResult({ html: "<button>Buy</button>" });
+              }
+
+              if (command === "get" && args[commandIndex + 1] === "url") {
+                return agentBrowserResult({ url: "http://localhost:3000/dense" });
+              }
+
+              if (command === "wait") {
+                return agentBrowserResult({ state: "domcontentloaded" });
+              }
+
+              if (command === "open") {
+                return agentBrowserResult({
+                  title: "Dense",
+                  url: "http://localhost:3000/dense",
+                });
+              }
+
+              return agentBrowserResult({ closed: true });
+            },
+            sessionName: "surface-route",
+          }),
+        ],
+        staticFallback: staticFallbackBackend(artifactRoot),
+      });
+
+      const result = await service.capture(
+        { kind: "route", ref: "/dense" },
+        {
+          artifactRoot,
+          config: {
+            ...DEFAULT_SURFACE_CONFIG.capture,
+            allowlist: ["http://localhost:3000"],
+          },
+          navigationWaitUntil: "domcontentloaded",
+        },
+      );
+
+      expect(isOk(result)).toBe(true);
+      if (!result.ok) {
+        throw new Error("expected capture to succeed");
+      }
+
+      expect(result.value).toMatchObject({
+        backend: "agent-browser",
+        id: "cap-agent-browser-route",
+        status: "completed",
+      });
+      expect(commandCalls[0]).toEqual([
+        "--session",
+        "surface-route",
+        "open",
+        "http://localhost:3000/dense",
+        "--json",
+      ]);
+    });
+
     it("[US-001][AC1] Playwright backend allows allowlisted public subresources from localhost captures (unit)", async () => {
       const artifactRoot = await createTempArtifactRoot();
       let subresourceContinued = false;

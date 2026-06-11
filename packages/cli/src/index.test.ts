@@ -52,7 +52,7 @@ describe("@zigrivers/surface bootstrap", () => {
     });
 
     expect(exitCode).toBe(0);
-    expect(stdout.join("").trim()).toBe("0.2.3");
+    expect(stdout.join("").trim()).toBe("0.2.4");
   });
 
   it("emits a machine-readable success envelope for --json status", async () => {
@@ -3698,6 +3698,116 @@ describe("@zigrivers/surface findings and loop verbs", () => {
         trackedFinding: {
           currentFindingId: "finding_button_contrast",
           identityKey: buttonIdentityKey(),
+        },
+      },
+      ok: true,
+    });
+  });
+
+  it("summarizes trace human output without raw JSON", async () => {
+    const stdout: string[] = [];
+    const identityKey = buttonIdentityKey();
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "trace", "finding_button_contrast"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore({
+          baselines: [
+            {
+              baselineId: "baseline_eval",
+              identityKeys: [identityKey],
+              reason: "accepted current debt",
+              waivers: [],
+            },
+          ],
+          trackedFindings: [
+            testTrackedFinding({
+              history: [
+                { runId: "run_initial", status: "new" },
+                { runId: "run_eval", status: "still-failing" },
+              ],
+            }),
+          ],
+          verdicts: [
+            {
+              decision: "defer",
+              findingId: "finding_button_contrast",
+              findingIdentityKey: identityKey,
+              rationale: "needs design review",
+              recordedAt: "2026-06-10T12:00:00.000Z",
+              reusePolicy: "this-run",
+            },
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    const output = stdout.join("");
+
+    expect(exitCode).toBe(0);
+    expect(output).toContain("surface trace: finding_button_contrast");
+    expect(output).toContain("Status: still-failing");
+    expect(output).toContain("Gate disposition: active");
+    expect(output).toContain(`Identity: ${identityKey}`);
+    expect(output).toContain("Verdict: defer - needs design review");
+    expect(output).toContain("Baseline: baseline_eval (accepted) - accepted current debt");
+    expect(output).toContain("Validation: axe color-contrast passes (measured-rule)");
+    expect(output).toContain("History:");
+    expect(output).toContain("- run_initial: new");
+    expect(output).toContain("- run_eval: still-failing");
+    expect(output).not.toContain('{"trackedFinding"');
+  });
+
+  it("includes matching verdict and baseline context in trace JSON output", async () => {
+    const stdout: string[] = [];
+    const identityKey = buttonIdentityKey();
+    const exitCode = await runSurfaceCli({
+      argv: ["node", "surface", "--json", "trace", "finding_button_contrast"],
+      composition: createSurfaceComposition({
+        stateStore: new TestMemoryStateStore({
+          baselines: [
+            {
+              baselineId: "baseline_eval",
+              identityKeys: [identityKey],
+              reason: "accepted current debt",
+              waivers: [],
+            },
+          ],
+          trackedFindings: [testTrackedFinding()],
+          verdicts: [
+            {
+              decision: "defer",
+              findingId: "finding_button_contrast",
+              findingIdentityKey: identityKey,
+              rationale: "needs design review",
+              recordedAt: "2026-06-10T12:00:00.000Z",
+              reusePolicy: "this-run",
+            },
+          ],
+          version: "1.0",
+        }),
+      }),
+      io: { stdout: (chunk) => stdout.push(chunk) },
+    });
+
+    expect(exitCode).toBe(0);
+    expect(JSON.parse(stdout.join(""))).toMatchObject({
+      command: "trace",
+      data: {
+        baseline: {
+          accepted: true,
+          baselineId: "baseline_eval",
+          reason: "accepted current debt",
+        },
+        trackedFinding: {
+          currentFindingId: "finding_button_contrast",
+          identityKey,
+        },
+        verdict: {
+          decision: "defer",
+          findingId: "finding_button_contrast",
+          rationale: "needs design review",
         },
       },
       ok: true,
