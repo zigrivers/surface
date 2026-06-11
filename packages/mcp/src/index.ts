@@ -206,7 +206,14 @@ export type SurfaceMcpDiffEntry = {
 };
 
 export type SurfaceMcpTraceOutput = {
+  readonly baseline?: {
+    readonly accepted: boolean;
+    readonly baselineId: string;
+    readonly reason?: string;
+    readonly waiverCount: number;
+  };
   readonly trackedFinding: TrackedFinding;
+  readonly verdict?: Verdict;
 };
 
 export type SurfaceMcpAlternativesOutput = {
@@ -1328,7 +1335,46 @@ function callSurfaceTrace(
     );
   }
 
-  return ok({ trackedFinding });
+  return ok({
+    ...mcpTraceBaselineContext(session, trackedFinding),
+    trackedFinding,
+    ...mcpTraceVerdictContext(session, trackedFinding),
+  });
+}
+
+function mcpTraceVerdictContext(
+  session: SurfaceMcpSessionState,
+  trackedFinding: TrackedFinding,
+): Pick<SurfaceMcpTraceOutput, "verdict"> {
+  const verdict = [...session.verdicts.values()]
+    .reverse()
+    .find(
+      (entry) =>
+        entry.findingId === trackedFinding.currentFindingId ||
+        entry.findingIdentityKey === trackedFinding.identityKey,
+    );
+
+  return verdict === undefined ? {} : { verdict };
+}
+
+function mcpTraceBaselineContext(
+  session: SurfaceMcpSessionState,
+  trackedFinding: TrackedFinding,
+): Pick<SurfaceMcpTraceOutput, "baseline"> {
+  const baseline = latestBaseline(session);
+
+  if (baseline === undefined) {
+    return {};
+  }
+
+  return {
+    baseline: {
+      accepted: baseline.identityKeys.has(trackedFinding.identityKey),
+      baselineId: baseline.baselineId,
+      ...(baseline.reason === undefined ? {} : { reason: baseline.reason }),
+      waiverCount: 0,
+    },
+  };
 }
 
 async function callSurfaceRun(
